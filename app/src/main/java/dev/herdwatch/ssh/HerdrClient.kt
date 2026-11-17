@@ -1,0 +1,359 @@
+package dev.herdwatch.ssh
+
+import com.jcraft.jsch.ChannelExec
+import com.jcraft.jsch.HostKey
+import com.jcraft.jsch.HostKeyRepository
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
+import com.jcraft.jsch.UserInfo
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import dev.herdwatch.model.Agent
+import dev.herdwatch.model.AuthType
+import dev.herdwatch.model.HostConfig
+import dev.herdwatch.model.PaneText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+import java.util.Base64
+import java.util.concurrent.atomic.AtomicLong
+
+class HostKeyMismatchException(val expected: String, val actual: String) : Exception(
+    "主机密钥变了。\n期望 $expected\n实际 $actual\n可能是重装系统，也可能有人在中间。"
+)
+
+/** A request deadline, distinct from cancellation by the caller or lifecycle. */
+class HerdrRequestTimeoutException : Exception("Herdr 请求超时；若为写入请求，是否已接受仍需核对")
+
+/**
+ * One SSH connection to a Herdr host.
+ *
+ * `herdr remote-api-bridge` handles exactly one request per stdio connection, so every
+ * request opens its own exec channel on the kept-alive SSH session.
+ */
+class HerdrClient internal constructor(
+    initialConfig: HostConfig,
+    private val requestTimeoutMillis: Long,
+) : HostConnection {
+    constructor(initialConfig: HostConfig) : this(initialConfig, 20_000)
+    @Volatile
+    var config: HostConfig = initialConfig
+        private set
+
+    private val mutex = Mutex()
+    private val ids = AtomicLong(0)
+    private val sessionGate = Any()
+    @Volatile
+    private var session: Session? = null
+
+    @Volatile
+    private var closed = false
+
+    @Volatile
+    override var fingerprint: String? = null
+        private set
+
+    override fun updateConfig(updated: HostConfig) {
+        config = updated
+    }
+
+    override val isConnected: Boolean get() = !closed && session?.isConnected == true
+
+    override suspend fun connect() = mutex.withLock {
+        blockingIo {
+            check(!closed) { "SSH 客户端已关闭" }
+            if (session?.isConnected == true) return@blockingIo
+            val pinned = config.fingerprint?.takeIf { it.isNotBlank() }
+            // With a pin, strict checking runs *inside* the handshake: the password is never
+            // sent to a host whose key does not match. Without a pin we TOFU and store it.
+            lastSeenFingerprint = null
+            val jsch = JSch()
+            jsch.hostKeyRepository = object : HostKeyRepository {
+                override fun check(host: String, key: ByteArray): Int {
+                    val observed = fingerprintOf(key)
+                    lastSeenFingerprint = observed
+                    if (pinned == null) return HostKeyRepository.OK
+                    return if (observed == pinned) HostKeyRepository.OK else HostKeyRepository.NOT_INCLUDED
+                }
+                override fun add(hostkey: HostKey?, ui: UserInfo?) = Unit
+                override fun remove(host: String?, type: String?) = Unit
+                override fun remove(host: String?, type: String?, key: ByteArray?) = Unit
+                override fun getKnownHostsRepositoryID(): String = "herdwatch-pin"
+                override fun getHostKey(): Array<HostKey> = emptyArray()
+                override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
+            }
+            when (config.authType) {
+                AuthType.PASSWORD -> Unit
+                AuthType.KEY -> {
+                    val pass = config.passphrase.takeIf { it.isNotBlank() }?.toByteArray()
+                    jsch.addIdentity(
+                        "herdwatch-key",
+                        config.secret.replace("\r\n", "\n").toByteArray(),
+                        null,
+                        pass,
+                    )
+                }
+            }
+            val s = jsch.getSession(config.user, config.host, config.port)
+            // These are session settings, not JSch process-global settings. Multiple hosts may
+            // have different authentication policies and connect concurrently.
+            s.setConfig("PreferredAuthentications", if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey")
+            s.serverAliveInterval = 30_000
+            s.serverAliveCountMax = 3
+            s.setConfig("StrictHostKeyChecking", if (pinned == null) "no" else "yes")
+            if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
+            s.timeout = TIMEOUT_MS
+            // Publish the connecting session too, so backgrounding/cancellation can abort
+            // a handshake instead of waiting for the socket timeout.
+            synchronized(sessionGate) {
+                check(!closed) { "SSH 客户端已关闭" }
+                session = s
+            }
+            try {
+                s.connect(12_000)
+            } catch (e: Exception) {
+                s.disconnect()
+                // A mismatch is reported only when the host-key callback actually observed a
+                // different key. Auth, DNS, timeout and transport errors retain their type.
+                val observed = lastSeenFingerprint
+                if (pinned != null && observed != null && observed != pinned) {
+                    throw HostKeyMismatchException(pinned, observed)
+                }
+                throw e
+            }
+            if (closed) {
+                s.disconnect()
+                throw IllegalStateException("SSH 客户端已关闭")
+            }
+            val actual = fingerprintOf(s)
+            if (pinned != null && pinned != actual) {
+                s.disconnect()
+                throw HostKeyMismatchException(pinned, actual)
+            }
+            fingerprint = actual
+        }
+    }
+
+    override suspend fun ping(): Pair<String?, Int?> = withContext(Dispatchers.IO) {
+        val result = request("ping")
+        BridgeCodec.parsePing(result)
+    }
+
+    override suspend fun snapshot(): Snapshot {
+        val result = request("session.snapshot")
+        return BridgeCodec.parseSnapshot(result, config.id, config.label)
+    }
+
+    override suspend fun explain(target: String): JsonObject {
+        val body = request("agent.explain", buildJsonObject { put("target", target) })
+        return (body["explain"] as? JsonObject) ?: body
+    }
+
+    override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
+        val params = buildJsonObject {
+            put("pane_id", paneId)
+            put("source", source)
+            put("lines", lines)
+            put("format", "text")
+            put("strip_ansi", true)
+        }
+        return BridgeCodec.parsePaneRead(request("pane.read", params))
+    }
+
+    override suspend fun sendKeys(paneId: String, keys: List<String>) {
+        val params = buildJsonObject {
+            // agent.send_keys takes `target`; `pane_id` belongs to pane.send_keys.
+            put("target", paneId)
+            put("keys", buildJsonArray { keys.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+        }
+        request("agent.send_keys", params)
+    }
+
+    override suspend fun createWorkspace(label: String?, cwd: String?): String? {
+        val params = buildJsonObject {
+            if (!label.isNullOrBlank()) put("label", label)
+            if (!cwd.isNullOrBlank()) put("cwd", cwd)
+        }
+        val result = request("workspace.create", params)
+        return result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+    }
+
+    override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): String? {
+        val params = buildJsonObject {
+            put("workspace_id", workspaceId)
+            if (!label.isNullOrBlank()) put("label", label)
+            if (!cwd.isNullOrBlank()) put("cwd", cwd)
+        }
+        val result = request("tab.create", params)
+        return result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+    }
+
+    override suspend fun splitPane(paneId: String, direction: String) {
+        val params = buildJsonObject {
+            put("target_pane_id", paneId)
+            put("direction", direction)
+            put("focus", false)
+        }
+        request("pane.split", params)
+    }
+
+    override suspend fun closePane(paneId: String) = request("pane.close", buildJsonObject { put("pane_id", paneId) })
+    override suspend fun closeTab(tabId: String) = request("tab.close", buildJsonObject { put("tab_id", tabId) })
+    override suspend fun closeWorkspace(workspaceId: String) =
+        request("workspace.close", buildJsonObject { put("workspace_id", workspaceId) })
+
+    override suspend fun focusPane(paneId: String) = request("pane.focus", buildJsonObject { put("pane_id", paneId) })
+    override suspend fun focusTab(tabId: String) = request("tab.focus", buildJsonObject { put("tab_id", tabId) })
+    override suspend fun focusWorkspace(workspaceId: String) =
+        request("workspace.focus", buildJsonObject { put("workspace_id", workspaceId) })
+
+    override suspend fun renameAgent(paneId: String, name: String) =
+        request("agent.rename", buildJsonObject { put("target", paneId); put("name", name) })
+
+    override suspend fun renameWorkspace(workspaceId: String, label: String) =
+        request("workspace.rename", buildJsonObject { put("workspace_id", workspaceId); put("label", label) })
+
+    override suspend fun renameTab(tabId: String, label: String) =
+        request("tab.rename", buildJsonObject { put("tab_id", tabId); put("label", label) })
+
+    override suspend fun renamePane(paneId: String, label: String) =
+        request("pane.rename", buildJsonObject { put("pane_id", paneId); put("label", label) })
+
+    override suspend fun startAgent(paneId: String, kind: String, name: String, args: List<String>) {
+        val params = buildJsonObject {
+            put("pane_id", paneId)
+            put("kind", kind)
+            put("name", name)
+            put("args", buildJsonArray { args.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+        }
+        request("agent.start", params)
+    }
+
+    override suspend fun prompt(paneId: String, text: String) {
+        val params = buildJsonObject {
+            put("target", paneId)
+            put("text", text)
+        }
+        request("agent.prompt", params)
+    }
+
+    private suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject = try {
+        withTimeout(requestTimeoutMillis) {
+            mutex.withLock {
+                blockingIo {
+                val s = session?.takeIf { !closed && it.isConnected }
+                    ?: throw IllegalStateException("还没有连上 ${config.label}")
+                val id = ids.incrementAndGet().toString()
+                val payload = buildJsonObject {
+                    put("id", id)
+                    put("method", method)
+                    put("params", params)
+                }.toString() + "\n"
+
+                var channel: ChannelExec? = null
+                try {
+                    channel = s.openChannel("exec") as ChannelExec
+                    channel.setCommand(bridgeCommand())
+                    val stderr = ByteArrayOutputStream()
+                    channel.setErrStream(stderr)
+                    // Feed stdin before connect: with no input stream JSch sends EOF
+                    // immediately, which makes the bridge exit before it sees our request.
+                    channel.setInputStream(ByteArrayInputStream(payload.toByteArray(Charsets.UTF_8)))
+                    channel.connect(12_000)
+                    val reader = channel.inputStream.bufferedReader(Charsets.UTF_8)
+                    var attempts = 0
+                    while (attempts++ < 20) {
+                        val line = reader.readLine() ?: break
+                        if (!line.trimStart().startsWith("{")) continue
+                        val obj = runCatching { Json.parseToJsonElement(line).jsonObject }.getOrNull() ?: continue
+                        if (obj["id"]?.jsonPrimitive?.content != id) continue
+                        return@blockingIo BridgeCodec.resultOf(line, id)
+                    }
+                    throw HerdrRpcException(
+                        null,
+                        "bridge 没有返回（${config.label}）：${stderr.toString("UTF-8").trim().take(300)}",
+                    )
+                } finally {
+                    runCatching { channel?.disconnect() }
+                }
+                }
+            }
+        }
+    } catch (timeout: TimeoutCancellationException) {
+        // Only our own deadline is a request failure. Caller/lifecycle cancellation
+        // must keep propagating as cancellation so no follow-up work is initiated.
+        currentCoroutineContext().ensureActive()
+        throw HerdrRequestTimeoutException()
+    }
+
+    private fun bridgeCommand(): String {
+        val sessionArg = config.session.trim().takeIf { it.isNotEmpty() }
+            ?.let { " --session ${shellQuote(it)}" }
+            .orEmpty()
+        val binary = config.herdrCommand.trim()
+        val inner = "$binary$sessionArg remote-api-bridge"
+        // Non-interactive SSH often gets a minimal PATH (no ~/.local/bin).
+        // Fall back to a login shell for the default command so herdr is found.
+        return if (binary == "herdr") "bash -lc ${shellQuote(inner)}" else inner
+    }
+
+    override fun close() {
+        val old = synchronized(sessionGate) {
+            closed = true
+            session.also { session = null }
+        }
+        runCatching { old?.disconnect() }
+    }
+
+    /** Cancel blocking socket IO by disconnecting its session. No retry is performed. */
+    private suspend fun <T> blockingIo(block: () -> T): T = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { close() }
+        Dispatchers.IO.dispatch(EmptyCoroutineContext) {
+            if (continuation.isActive) {
+                try { continuation.resume(block()) }
+                catch (t: Throwable) { continuation.resumeWithException(t) }
+                finally { if (!continuation.isActive && closed) runCatching { session?.disconnect() } }
+            }
+        }
+    }
+
+    private fun fingerprintOf(s: Session): String {
+        val encoded = s.hostKey?.key ?: error("SSH 没有返回主机密钥")
+        return fingerprintOf(Base64.getDecoder().decode(encoded))
+    }
+
+    private fun fingerprintOf(key: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(key)
+        val b64 = Base64.getEncoder().withoutPadding().encodeToString(digest)
+        return "SHA256:$b64"
+    }
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+
+    @Volatile
+    private var lastSeenFingerprint: String? = null
+
+    companion object {
+        private const val TIMEOUT_MS = 15_000
+
+        fun hasAgent(agents: List<Agent>, paneId: String) = agents.any { it.paneId == paneId }
+    }
+}

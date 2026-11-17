@@ -1,0 +1,40 @@
+# Gradle / Android
+.gradle/
+.kotlin/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local configuration, credentials and signing
+.env
+.env.*
+*.jks
+*.keystore
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+keystore.properties
+signing.properties
+
+# Runtime output
+*.log
+*.tmp
