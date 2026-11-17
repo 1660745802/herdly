@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -14,7 +16,22 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.2.0"
+        versionName = "0.1.0"
+    }
+
+    // Local release signing. keystore.properties is never committed.
+    val signingProperties = rootProject.file("keystore.properties")
+        .takeIf { it.exists() }
+        ?.let { file -> Properties().apply { file.inputStream().use { load(it) } } }
+    signingConfigs {
+        if (signingProperties != null) {
+            create("release") {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +44,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
