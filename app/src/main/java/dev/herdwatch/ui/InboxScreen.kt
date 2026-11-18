@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -164,9 +165,9 @@ fun InboxScreen(
                 value = ui.query,
                 onValueChange = onQuery,
                 modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp).focusRequester(searchFocus),
-                placeholder = { Text("名称、机器、标签页或分屏 ID") },
+                placeholder = { Text("名称、机器、项目、工作区、标签页、分屏或目录") },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
                     imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }),
                 label = { Text("搜索收件箱") },
@@ -222,18 +223,18 @@ fun InboxScreen(
                         }
                     }
                 }
-                item { DutyCard(filtered, ui.repo.hosts, now, onOpenAgent, onReconnect) }
+                item { DutyCard(agents, ui.repo.hosts, now, onOpenAgent, onReconnect) }
                 if (agents.isEmpty() && ui.repo.hosts.any { it.conn is ConnState.Connected }) {
                     item {
                         EmptyBlock(
-                            title = "已连接，还没有 agent",
+                            title = "现在没有 Agent",
                             body = "可以创建新任务，或检查主机里的工作区和分屏。",
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (onNewTask != null) {
                                     Button(onClick = onNewTask) { Text("启动新任务") }
                                 } else {
-                                    Text("点右下角「新任务」创建并启动 agent。", style = MaterialTheme.typography.bodyMedium)
+                                    Text("点右下角「派新任务」创建并启动 Agent。", style = MaterialTheme.typography.bodyMedium)
                                 }
                                 if (onOpenHost != null) {
                                     ui.repo.hosts.filter { it.conn is ConnState.Connected }.forEach { runtime ->
@@ -255,7 +256,7 @@ fun InboxScreen(
                     val clipboard = LocalClipboardManager.current
                     EmptyBlock(
                         title = "把 Herdr 装进口袋",
-                        body = "Herdly不替你跑 agent，只负责看和批。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，收件箱会列出每个 agent",
+                        body = "Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，值守页会列出每个 Agent",
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Button(onClick = onAddHost, shape = RoundedCornerShape(10.dp)) {
@@ -289,8 +290,8 @@ fun InboxScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    FilterTab("全部", ui.filter == InboxFilter.ALL, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ALL) }
-                    FilterTab("需要我", ui.filter == InboxFilter.ATTENTION, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ATTENTION) }
+                    FilterTab("需要处理", ui.filter == InboxFilter.ATTENTION, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ATTENTION) }
+                    FilterTab("全部 Agent", ui.filter == InboxFilter.ALL, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ALL) }
                     Text(
                         "${filtered.size} 项${if (ui.query.isNotBlank()) "匹配" else ""}",
                         modifier = Modifier.align(Alignment.CenterVertically),
@@ -318,16 +319,18 @@ fun InboxScreen(
             if (filtered.isEmpty() && agents.isNotEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(top = 36.dp, bottom = 24.dp)) {
-                        Text("没有匹配的 agent", style = MaterialTheme.typography.titleMedium)
+                        Text("没有匹配的 Agent", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            if (ui.filter == InboxFilter.ATTENTION) "当前筛选没有待处理项。" else "试试其他关键词，或清除搜索。",
+                            if (ui.query.isNotBlank()) "搜索了名称、机器、项目、工作区、标签页、分屏和目录。"
+                            else if (ui.filter == InboxFilter.ATTENTION) "现在没有需要处理的项。"
+                            else "当前没有 Agent。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (ui.filter == InboxFilter.ATTENTION) {
-                                TextButton(onClick = { onFilter(InboxFilter.ALL) }) { Text("查看全部") }
+                                TextButton(onClick = { onFilter(InboxFilter.ALL) }) { Text("查看全部 Agent") }
                             }
                             if (ui.query.isNotBlank()) {
                                 TextButton(onClick = { onQuery("") }) { Text("清除搜索") }
@@ -440,8 +443,6 @@ private fun DutyCard(
     onReconnect: (String) -> Unit,
 ) {
     val p = statusPalette()
-    val configuration = LocalConfiguration.current
-    val compact = configuration.screenHeightDp < 640 || configuration.fontScale >= 1.3f
     val waiting = agents.filter { it.status == AgentStatus.WAITING }
     val unknownCount = agents.count { it.status == AgentStatus.UNKNOWN }
     val workingCount = agents.count { it.status == AgentStatus.WORKING }
@@ -469,7 +470,7 @@ private fun DutyCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        "${waiting.size} 个等待处理",
+                        "${waiting.size} 项需要处理",
                         style = MaterialTheme.typography.titleSmall,
                         color = p.waiting,
                         modifier = Modifier.semantics { heading() },
@@ -486,16 +487,16 @@ private fun DutyCard(
                     TextButton(
                         onClick = { onOpen(longest) },
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-                    ) { Text("查看") }
+                    ) { Text("处理最久的一项") }
                 }
             }
         } else {
             Text(
-                if (failures.isNotEmpty()) "部分机器未连接" else "没有等待处理的 agent",
+                if (failures.isNotEmpty()) "部分机器未连接" else "现在不用处理",
                 style = MaterialTheme.typography.titleSmall,
             )
         }
-        if (counts.isNotBlank() && !compact) {
+        if (counts.isNotBlank()) {
             Text(
                 counts,
                 style = MaterialTheme.typography.bodySmall,
@@ -582,7 +583,7 @@ private fun AgentRow(agent: Agent, now: Long, runtime: HostRuntime?, modifier: M
                     .background(if (agent.status == AgentStatus.WAITING) color else Color.Transparent, RoundedCornerShape(2.dp)),
             )
             Spacer(Modifier.width(10.dp))
-            StatusGlyph(agent.status, size = 15)
+            StatusGlyph(agent.status, modifier = Modifier.clearAndSetSemantics { }, size = 15)
             Spacer(Modifier.width(10.dp))
             Text(
                 agent.name,

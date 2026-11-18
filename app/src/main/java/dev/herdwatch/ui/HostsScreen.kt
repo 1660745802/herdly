@@ -21,14 +21,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,6 +60,7 @@ fun HostsScreen(
     onEdit: (HostConfig) -> Unit,
     onDelete: (String) -> Unit,
     onOpen: (String) -> Unit,
+    onOpenHelp: () -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<HostConfig?>(null) }
     val configuration = LocalConfiguration.current
@@ -76,6 +78,9 @@ fun HostsScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            IconButton(onClick = onOpenHelp) {
+                Icon(Icons.Default.Info, contentDescription = "使用与安全")
             }
             Button(onClick = onAdd, shape = RoundedCornerShape(10.dp)) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -143,8 +148,16 @@ private fun HostCard(runtime: HostRuntime, onOpen: () -> Unit, onReconnect: () -
     val p = statusPalette()
     val conn = runtime.conn
     var details by rememberSaveable(host.id) { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val fingerprint = host.fingerprint ?: runtime.fingerprint
+    val connectionStateLabel = when (conn) {
+        is ConnState.Connected -> "已连接"
+        ConnState.Connecting -> "连接中"
+        is ConnState.Failed -> "连接失败"
+        ConnState.Idle -> "未连接"
+    }
+    val primaryAction = if (conn is ConnState.Connected) onOpen else onReconnect
     val color = when (conn) {
         is ConnState.Connected -> p.review
         ConnState.Connecting -> p.working
@@ -155,17 +168,27 @@ private fun HostCard(runtime: HostRuntime, onOpen: () -> Unit, onReconnect: () -
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
+            .semantics { stateDescription = connectionStateLabel }
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(color, CircleShape))
             Spacer(Modifier.width(9.dp))
             Text(host.label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = "编辑 ${host.label}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "移除 ${host.label}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box {
+                IconButton(onClick = { menu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "管理 ${host.label}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("编辑连接") },
+                        onClick = { menu = false; onEdit() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("移除机器", color = MaterialTheme.colorScheme.error) },
+                        onClick = { menu = false; onDelete() },
+                    )
+                }
             }
         }
         Text("${host.user}@${host.host}:${host.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -198,12 +221,15 @@ private fun HostCard(runtime: HostRuntime, onOpen: () -> Unit, onReconnect: () -
         }
         Spacer(Modifier.height(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (conn is ConnState.Connected) {
-                OutlinedButton(onClick = onOpen, shape = RoundedCornerShape(9.dp)) { Text("检查会话", softWrap = false) }
-            } else {
-                OutlinedButton(onClick = onReconnect, enabled = conn != ConnState.Connecting, shape = RoundedCornerShape(9.dp)) {
-                    Text(if (conn == ConnState.Connecting) "连接中" else "连接机器", softWrap = false)
-                }
+            Button(onClick = primaryAction, enabled = conn != ConnState.Connecting, shape = RoundedCornerShape(9.dp)) {
+                Text(
+                    when (conn) {
+                        is ConnState.Connected -> "检查会话"
+                        ConnState.Connecting -> "连接中"
+                        is ConnState.Failed, ConnState.Idle -> "连接机器"
+                    },
+                    softWrap = false,
+                )
             }
             TextButton(
                 onClick = { details = !details },

@@ -73,8 +73,8 @@ class DailyWorkflowTest {
             listOf(waiting.key, unknown.key, review.key),
             inboxQueue(agents, InboxFilter.ATTENTION, "").map { it.key },
         )
-        // Searching a pane id must find the agent even though the term is in no label.
-        assertEquals(listOf(working.key), inboxQueue(agents, InboxFilter.ALL, "P-WORK").map { it.key })
+        // Searching is a locating action: it must reach agents outside the default attention view.
+        assertEquals(listOf(working.key), inboxQueue(agents, InboxFilter.ATTENTION, "P-WORK").map { it.key })
     }
 
     @Test fun `hiding search keeps the query and its queue filtering`() = runTest {
@@ -134,6 +134,26 @@ class DailyWorkflowTest {
             // Re-opening structure must keep the earliest origin, not the structure screen.
             vm.openStructure(host.id)
             vm.back()
+            assertEquals(Screen.Hosts, vm.ui.value.screen)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun `help back returns to machines`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val vm = viewModel(RepositoryPreferences(), FakeHostConnection(host, snapshot()))
+            models.put("vm", vm)
+            runCurrent()
+
+            vm.navigate(Screen.Hosts)
+            vm.navigate(Screen.Settings)
+            vm.back()
+
             assertEquals(Screen.Hosts, vm.ui.value.screen)
         } finally {
             models.clear()

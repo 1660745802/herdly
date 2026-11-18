@@ -18,7 +18,7 @@ private val inboxOrder = compareBy<Agent> { inboxStatusOrder.indexOf(it.status) 
 /** The visible inbox and detail traversal must describe the same queue. */
 internal fun inboxQueue(agents: List<Agent>, filter: InboxFilter, query: String): List<Agent> =
     agents.filter { agent ->
-        val matchesFilter = filter == InboxFilter.ALL || agent.status in attentionStatuses
+        val matchesFilter = query.isNotBlank() || filter == InboxFilter.ALL || agent.status in attentionStatuses
         val matchesQuery = query.isBlank() || listOf(
             agent.name,
             agent.repo,

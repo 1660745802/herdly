@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -184,7 +185,7 @@ fun AgentScreen(
                 Text(agent.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() })
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusGlyph(agent.status, size = 10)
+                    StatusGlyph(agent.status, modifier = Modifier.clearAndSetSemantics { }, size = 10)
                     Text(agent.status.label, style = MaterialTheme.typography.labelMedium, color = agentColor)
                     if (agent.status != AgentStatus.IDLE) {
                         Text(formatElapsed(agent.sinceMillis), style = MonoStyle.copy(fontSize = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -237,12 +238,27 @@ fun AgentScreen(
                     )
                     TextButton(
                         onClick = {
-                            if (pauseUpdates) { userPaused = false; accessibilityPaused = false }
-                            else userPaused = true
+                            userPaused = !userPaused
                         },
-                        modifier = Modifier.semantics { stateDescription = if (detail.readingPaused) "自动更新已暂停" else "自动更新已开启" },
+                        enabled = !accessibilityPaused,
+                        modifier = Modifier.semantics {
+                            stateDescription = when {
+                                accessibilityPaused -> "TalkBack 已启用，自动更新保持暂停"
+                                userPaused -> "自动更新已暂停"
+                                else -> "自动更新已开启"
+                            }
+                        },
                         contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text(if (pauseUpdates) "恢复更新" else "暂停更新", style = MaterialTheme.typography.labelMedium) }
+                    ) {
+                        Text(
+                            when {
+                                accessibilityPaused -> "TalkBack 下暂停"
+                                userPaused -> "恢复更新"
+                                else -> "暂停更新"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
                 if (!detail.hostConnected) {
                     DetailNotice("${agent.hostLabel} 尚未连接，保留上次屏幕和草稿。", action = {
@@ -265,19 +281,7 @@ fun AgentScreen(
                 }
                 val ask = detail.ask
                 if (ask != null) {
-                    ApprovalCard(
-                        ask = ask,
-                        sending = detail.sending,
-                        enabled = detail.canChoose,
-                        blockedReason = when {
-                            detail.truncated -> "快照不完整，请先读取更多并核对原文。"
-                            detail.operationUncertain -> "上次操作结果待核实，请刷新屏幕后再判断。"
-                            !detail.canChoose && !detail.sending -> "当前选项暂不可用，请重新读取并核对屏幕。"
-                            else -> null
-                        },
-                        onChoose = onChoose,
-                        onReadEvidence = { reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated) },
-                    )
+                    DecisionPrompt(ask = ask)
                 } else if (agent.status == AgentStatus.WAITING || agent.status == AgentStatus.UNKNOWN) {
                     Surface(color = palette.waitingWash, shape = RoundedCornerShape(14.dp)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -355,6 +359,21 @@ fun AgentScreen(
                         Spacer(Modifier.weight(1f))
                         Text(if (stickToBottom) "跟随中" else "历史中", color = TerminalMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
                     }
+                }
+                if (ask != null) {
+                    ApprovalActions(
+                        ask = ask,
+                        sending = detail.sending,
+                        enabled = detail.canChoose,
+                        blockedReason = when {
+                            detail.truncated -> "快照不完整，请先读取更多并核对原文。"
+                            detail.operationUncertain -> "上次操作结果待核实，请刷新屏幕后再判断。"
+                            !detail.canChoose && !detail.sending -> "当前选项暂不可用，请重新读取并核对屏幕。"
+                            else -> null
+                        },
+                        onChoose = onChoose,
+                        onReadEvidence = { reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated) },
+                    )
                 }
                 val signals = agent.stateLabels.values.take(3) + agent.tokens.entries.take(3).map { "${it.key} ${it.value}" }
                 if (signals.isNotEmpty()) {
@@ -504,22 +523,37 @@ private fun DetailNotice(text: String, isError: Boolean = false, action: (@Compo
 }
 
 @Composable
-private fun ApprovalCard(ask: Ask, sending: Boolean, enabled: Boolean, blockedReason: String?, onChoose: (AskOption) -> Unit, onReadEvidence: () -> Unit) {
+private fun DecisionPrompt(ask: Ask) {
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("等待你的决定", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            if (ask.confidence != AskConfidence.HIGH) {
+                Text("选项来自屏幕解析，请先核对下面的原文。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            SelectionContainer {
+                Text(
+                    ask.question,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            ask.risk?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error) }
+            Text("先核对屏幕证据，再选择操作。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ApprovalActions(ask: Ask, sending: Boolean, enabled: Boolean, blockedReason: String?, onChoose: (AskOption) -> Unit, onReadEvidence: () -> Unit) {
     var pendingStanding by remember(ask) { mutableStateOf<AskOption?>(null) }
     val request: (AskOption) -> Unit = { option ->
         if (requiresStandingConfirmation(option)) pendingStanding = option else onChoose(option)
     }
     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("当前需要你的决定", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Text("做出决定", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             TextButton(onClick = onReadEvidence, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                Text("核对屏幕原文", style = MaterialTheme.typography.labelMedium)
+                Text("全屏核对屏幕原文", style = MaterialTheme.typography.labelMedium)
             }
-            if (ask.confidence != AskConfidence.HIGH) {
-                Text("选项来自屏幕解析，请核对下面的原文。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            SelectionContainer { Text(ask.question, style = MaterialTheme.typography.bodyLarge) }
-            ask.risk?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error) }
             // Keep every option visible, including multiple ALLOW choices with different scopes.
             ask.options.forEach { option ->
                 val modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)

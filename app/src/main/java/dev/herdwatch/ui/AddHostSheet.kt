@@ -2,6 +2,7 @@ package dev.herdwatch.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -228,37 +230,45 @@ fun AddHostSheet(
             }
 
             Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "首次连接自动记录指纹；已保存的指纹变化时停止连接。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(10.dp))
-                Button(
-                    enabled = !adding,
-                    shape = RoundedCornerShape(10.dp),
-                    onClick = {
-                        validation = when {
-                            host.isBlank() -> "主机不能为空"
-                            user.isBlank() -> "用户名不能为空"
-                            secret.isBlank() -> if (authType == AuthType.PASSWORD) "密码不能为空" else "私钥不能为空"
-                            (port.toIntOrNull() ?: 0) !in 1..65535 -> "端口须为 1–65535"
-                            herdrCommand.isBlank() -> "请填写 herdr 命令或绝对路径"
-                            else -> null
-                        }
-                        if (validation == null) {
-                            onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim())
-                        }
-                    },
-                ) {
-                    if (adding) {
-                        CircularProgressIndicator(Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("保存中…")
-                    } else {
-                        Text("保存配置")
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val stackedActions = maxWidth < 420.dp
+                if (stackedActions) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "首次连接自动记录指纹；已保存的指纹变化时停止连接。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        SaveHostButton(
+                            adding = adding,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                validation = validateHost(host, user, secret, authType, port, herdrCommand)
+                                if (validation == null) {
+                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim())
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "首次连接自动记录指纹；已保存的指纹变化时停止连接。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        SaveHostButton(
+                            adding = adding,
+                            modifier = Modifier.widthIn(min = 112.dp),
+                            onClick = {
+                                validation = validateHost(host, user, secret, authType, port, herdrCommand)
+                                if (validation == null) {
+                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim())
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -270,4 +280,38 @@ fun AddHostSheet(
             )
         }
     }
+}
+
+@Composable
+private fun SaveHostButton(adding: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = !adding,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.heightIn(min = 48.dp),
+    ) {
+        if (adding) {
+            CircularProgressIndicator(Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("保存中…")
+        } else {
+            Text("保存配置")
+        }
+    }
+}
+
+private fun validateHost(
+    host: String,
+    user: String,
+    secret: String,
+    authType: AuthType,
+    port: String,
+    herdrCommand: String,
+): String? = when {
+    host.isBlank() -> "主机不能为空"
+    user.isBlank() -> "用户名不能为空"
+    secret.isBlank() -> if (authType == AuthType.PASSWORD) "密码不能为空" else "私钥不能为空"
+    (port.toIntOrNull() ?: 0) !in 1..65535 -> "端口须为 1–65535"
+    herdrCommand.isBlank() -> "请填写 herdr 命令或绝对路径"
+    else -> null
 }

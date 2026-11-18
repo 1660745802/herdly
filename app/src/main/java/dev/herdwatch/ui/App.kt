@@ -3,9 +3,6 @@ package dev.herdwatch.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,31 +11,20 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -49,15 +35,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -97,16 +77,17 @@ fun HerdwatchRoot(vm: AppViewModel) {
         }
     }
 
-    BackHandler(enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure) { vm.back() }
+    BackHandler(
+        enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure || ui.screen == Screen.Settings,
+    ) { vm.back() }
 
     val tabs = remember {
         listOf(
-            Tab("收件箱", Icons.AutoMirrored.Filled.List, Screen.Inbox),
+            Tab("值守", Icons.AutoMirrored.Filled.List, Screen.Inbox),
             Tab("机器", Icons.Default.Home, Screen.Hosts),
-            Tab("设置", Icons.Default.Settings, Screen.Settings),
         )
     }
-    val showTabs = ui.screen !is Screen.Detail
+    val showTabs = ui.screen == Screen.Inbox || ui.screen == Screen.Hosts
     val pageState = rememberSaveableStateHolder()
 
     Scaffold(
@@ -124,70 +105,20 @@ fun HerdwatchRoot(vm: AppViewModel) {
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     shape = RoundedCornerShape(18.dp),
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("新任务") },
+                    text = { Text("派新任务") },
                 )
             }
         },
         bottomBar = {
             if (showTabs) {
-                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f))
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .height(60.dp)
-                            .padding(horizontal = 16.dp)
-                            .selectableGroup(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        tabs.forEach { tab ->
-                            val selected = ui.screen == tab.screen || (tab.screen == Screen.Hosts && ui.screen is Screen.Structure)
-                            val tint by animateColorAsState(
-                                targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                animationSpec = tween(180),
-                                label = "tab-tint",
-                            )
-                            val pill by animateColorAsState(
-                                targetValue = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else Color.Transparent,
-                                animationSpec = tween(180),
-                                label = "tab-pill",
-                            )
-                            val iconScale by animateFloatAsState(
-                                targetValue = if (selected) 1.06f else 1f,
-                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 380f),
-                                label = "tab-scale",
-                            )
-                            Column(
-                                Modifier
-                                    .weight(1f)
-                                    .height(56.dp)
-                                    .selectable(selected = selected, role = Role.Tab, onClick = { vm.navigate(tab.screen) }),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Box(
-                                    Modifier
-                                        .width(42.dp)
-                                        .height(26.dp)
-                                        .background(pill, RoundedCornerShape(13.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        tab.icon,
-                                        contentDescription = null,
-                                        tint = tint,
-                                        modifier = Modifier.size(19.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale },
-                                    )
-                                }
-                                Text(
-                                    tab.label,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.5.sp),
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = tint,
-                                )
-                            }
-                        }
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = ui.screen == tab.screen,
+                            onClick = { vm.navigate(tab.screen) },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.label) },
+                        )
                     }
                 }
             }
@@ -241,6 +172,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onEdit = vm::editHost,
                             onDelete = vm::deleteHost,
                             onOpen = vm::openStructure,
+                            onOpenHelp = { vm.navigate(Screen.Settings) },
                         )
                         is Screen.Structure -> {
                             val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
@@ -269,7 +201,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                 )
                             }
                         }
-                        Screen.Settings -> SettingsScreen(ui.repo.hosts)
+                        Screen.Settings -> SettingsScreen(ui.repo.hosts, onBack = vm::back)
                         is Screen.Detail -> AgentScreen(
                             detail = ui.detail,
                             onBack = vm::back,

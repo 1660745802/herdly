@@ -14,6 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,14 +39,24 @@ import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.theme.MonoStyle
 
 @Composable
-fun SettingsScreen(hosts: List<HostRuntime>) {
+fun SettingsScreen(hosts: List<HostRuntime>, onBack: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
     ) {
-        Text("设置", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 12.dp))
-        Text("连接、隐私与使用帮助", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回机器")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("使用与安全", style = MaterialTheme.typography.headlineMedium)
+                Text("连接、隐私与使用帮助", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         Spacer(Modifier.height(20.dp))
         Column(
             Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(16.dp),
@@ -80,7 +94,7 @@ fun SettingsScreen(hosts: List<HostRuntime>) {
         }
         Spacer(Modifier.height(14.dp))
         SettingsDetails("关于 Herdly", "版本与操作边界") {
-            SettingsRow("版本", "Herdly 0.2.0 · Herdr protocol 22")
+            SettingsRow("版本", "Herdly 0.1.0 · Herdr protocol 22")
             SettingsRow("用途", "发现需要介入的 agent、阅读终端证据、发送操作。手机端不提供文件管理、端口转发或完整终端。")
             SettingsRow("操作反馈", "远端接受请求不代表 agent 已执行完成。以重新读取的终端和后续快照核实；结果不确定时先检查，避免重复发送。")
         }

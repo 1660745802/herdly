@@ -69,7 +69,7 @@ data class DetailState(
 data class UiState(
     val repo: RepoState = RepoState(),
     val screen: Screen = Screen.Inbox,
-    val filter: InboxFilter = InboxFilter.ALL,
+    val filter: InboxFilter = InboxFilter.ATTENTION,
     val query: String = "",
     val searching: Boolean = false,
     val detail: DetailState = DetailState(),
@@ -256,9 +256,14 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         leavePage()
         traversal = emptyList()
         val current = _ui.value.screen
+        val destination = when (current) {
+            is Screen.Structure -> structureOrigin
+            Screen.Settings -> Screen.Hosts
+            else -> Screen.Inbox
+        }
         _ui.update {
             it.copy(
-                screen = if (current is Screen.Structure) structureOrigin else Screen.Inbox,
+                screen = destination,
                 detail = DetailState(),
             )
         }

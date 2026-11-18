@@ -24,14 +24,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.ui.theme.statusPalette
@@ -59,7 +59,7 @@ fun StatusGlyph(status: AgentStatus, modifier: Modifier = Modifier, size: Int = 
         AgentStatus.IDLE -> p.idle
         AgentStatus.UNKNOWN -> p.unknown
     }
-    Canvas(modifier.size(size.dp)) {
+    Canvas(modifier.size(size.dp).semantics { contentDescription = "状态：${status.label}" }) {
         val s = this.size.minDimension
         val stroke = min(1.6f * density, s / 8f)
         val c = Offset(s / 2, s / 2)
@@ -125,7 +125,7 @@ fun StatusChip(status: AgentStatus, modifier: Modifier = Modifier, withLabel: Bo
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        StatusGlyph(status, size = 11)
+        StatusGlyph(status, modifier = Modifier.clearAndSetSemantics { }, size = 11)
         if (withLabel) {
             Text(status.label, style = MaterialTheme.typography.labelMedium, color = color)
         }
@@ -139,7 +139,7 @@ fun SectionHeader(title: String, count: Int, status: AgentStatus? = null, modifi
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (status != null) {
-            StatusGlyph(status, size = 12)
+            StatusGlyph(status, modifier = Modifier.clearAndSetSemantics { }, size = 12)
             Spacer(Modifier.width(8.dp))
         }
         Text(title, style = MaterialTheme.typography.titleMedium)
@@ -203,5 +203,3 @@ fun formatClock(at: Long?): String {
 }
 
 fun pct(v: Float): Int = (v * 100).roundToInt()
-
-val Accent = Color(0xFF2F4BE0)
