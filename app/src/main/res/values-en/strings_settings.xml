@@ -81,7 +81,7 @@
     <string name="settings_about">Version &amp; scope</string>
     <string name="settings_about_summary">Version, purpose, and action feedback</string>
     <string name="settings_row_version">Version</string>
-    <string name="settings_version_value">Herdly 0.1.0 · Herdr protocol 22</string>
+    <string name="settings_version_value">Herdly 0.2.0 · Herdr protocol 22</string>
     <string name="settings_row_purpose">Purpose</string>
     <string name="settings_row_purpose_body">Find agents that need you, read terminal evidence, and send actions. The phone app has no file manager, port forwarding, or full terminal.</string>
     <string name="settings_row_feedback">Action feedback</string>

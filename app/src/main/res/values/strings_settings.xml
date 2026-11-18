@@ -80,7 +80,7 @@
     <string name="settings_about">版本与操作边界</string>
     <string name="settings_about_summary">版本、用途与操作反馈</string>
     <string name="settings_row_version">版本</string>
-    <string name="settings_version_value">Herdly 0.1.0 · Herdr protocol 22</string>
+    <string name="settings_version_value">Herdly 0.2.0 · Herdr protocol 22</string>
     <string name="settings_row_purpose">用途</string>
     <string name="settings_row_purpose_body">发现需要介入的 agent、阅读终端证据、发送操作。手机端不提供文件管理、端口转发或完整终端。</string>
     <string name="settings_row_feedback">操作反馈</string>
