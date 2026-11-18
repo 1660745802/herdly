@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 交互式 SSH 终端页 -->
+    <string name="terminal_connecting">正在连接…</string>
+    <string name="terminal_connection_lost">连接中断</string>
+    <string name="terminal_back_desc">返回机器列表</string>
+    <!-- %1$s：user@host 形式的目标；副标题在进入全屏程序时追加后缀 -->
+    <string name="terminal_subtitle_alt_screen">%1$s · 全屏程序</string>
+    <string name="terminal_reconnect_short">重连</string>
+    <string name="terminal_options_desc">终端选项</string>
+    <string name="terminal_font_larger">放大字号</string>
+    <string name="terminal_font_smaller">缩小字号</string>
+    <!-- %1$d：当前字号 -->
+    <string name="terminal_font_size">字号 %1$d</string>
+    <string name="terminal_keys_show_always">始终显示按键栏</string>
+    <string name="terminal_keys_hide_always">隐藏按键栏</string>
+    <string name="terminal_state_connecting">连接中</string>
+    <string name="terminal_state_connected">已连接</string>
+    <string name="terminal_state_disconnected">已断开</string>
+    <string name="terminal_ssh_starting">正在建立 SSH 会话…</string>
+    <string name="terminal_no_output">还没有输出。</string>
+    <string name="terminal_scroll_to_bottom">回到底部</string>
+    <string name="terminal_keys_expand">终端按键</string>
+    <string name="terminal_keys_collapse">收起按键</string>
+    <string name="terminal_keys_expand_desc">展开终端按键</string>
+    <string name="terminal_keys_collapse_desc">收起终端按键</string>
+    <string name="terminal_input_desc">终端命令输入</string>
+    <string name="terminal_input_placeholder">输入命令，回车执行</string>
+    <string name="terminal_send">发送</string>
+    <string name="terminal_paste">粘贴</string>
+    <string name="terminal_input_line">行输入</string>
+    <string name="terminal_input_direct">直通输入</string>
+    <string name="terminal_direct_hint">直通：每个字符立即发送（适合 vim/tmux）</string>
+    <!-- 按键标签保持英文原样，只本地化无障碍描述 -->
+    <string name="terminal_key_escape">Esc 键</string>
+    <string name="terminal_key_tab">Tab 键</string>
+    <string name="terminal_key_shift_tab">⇧Tab</string>
+    <string name="terminal_key_shift_tab_a11y">Shift+Tab 键（反向切换焦点）</string>
+    <string name="terminal_key_ctrl">Ctrl 组合键</string>
+    <string name="terminal_key_up">方向键上</string>
+    <string name="terminal_key_down">方向键下</string>
+    <string name="terminal_key_right">方向键右</string>
+    <string name="terminal_key_left">方向键左</string>
+    <string name="terminal_key_ctrl_c">Ctrl+C，中断当前命令</string>
+    <string name="terminal_key_ctrl_d">Ctrl+D，结束输入</string>
+    <string name="terminal_key_ctrl_z">Ctrl+Z，挂起当前进程</string>
+    <!-- 首次连接的主机指纹确认 -->
+    <string name="terminal_fingerprint_title">确认主机指纹</string>
+    <!-- %1$s：主机名或目标地址 -->
+    <string name="terminal_fingerprint_body">这是首次连接 %1$s。信任后，该主机的主机密钥指纹会被保存，之后的连接会自动核对。</string>
+    <string name="terminal_fingerprint_security">在确认指纹之前，应用不会把密码或其他凭据发送给这台主机，因此现在中断连接不会有任何凭据泄漏。只有指纹与主机管理员给出的一致时才继续；指纹不符可能意味着有人在中间人攻击。</string>
+    <string name="terminal_fingerprint_fingerprint_label">主机密钥指纹</string>
+    <string name="terminal_fingerprint_cancel">取消连接</string>
+    <string name="terminal_fingerprint_trust">信任并连接</string>
+    <string name="terminal_key_page_up">上翻一页</string>
+    <string name="terminal_key_page_down">下翻一页</string>
+    <string name="terminal_key_backspace">退格</string>
+</resources>

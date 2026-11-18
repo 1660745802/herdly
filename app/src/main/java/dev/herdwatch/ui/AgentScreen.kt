@@ -5,7 +5,15 @@ import android.widget.Toast
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -14,16 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -31,9 +36,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -46,19 +54,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dev.herdwatch.R
 import dev.herdwatch.domain.requiresStandingConfirmation
+import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.Ask
 import dev.herdwatch.model.AskConfidence
 import dev.herdwatch.model.AskOption
+import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsRadius
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.LocalDs
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoDialog
+import dev.herdwatch.ui.design.NeoKey
+import dev.herdwatch.ui.design.NeoDivider
+import dev.herdwatch.ui.design.NeoField
+import dev.herdwatch.ui.design.NeoGlyph
+import dev.herdwatch.ui.design.NeoIcon
+import dev.herdwatch.ui.design.NeoIconButton
+import dev.herdwatch.ui.design.NeoLamp
+import dev.herdwatch.ui.design.NeoMenu
+import dev.herdwatch.ui.design.NeoMenuDivider
+import dev.herdwatch.ui.design.NeoMenuItem
+import dev.herdwatch.ui.design.NeoSkeleton
+import dev.herdwatch.ui.design.NeoSheet
+import dev.herdwatch.ui.design.NeoWell
+import dev.herdwatch.ui.design.ds
+import dev.herdwatch.ui.theme.LocalTerminalTokens
 import dev.herdwatch.ui.theme.MonoStyle
-import dev.herdwatch.ui.theme.statusPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val TerminalBackground = Color(0xFF13151A)
-private val TerminalText = Color(0xFFE4E7EE)
-private val TerminalMuted = Color(0xFFA8B0C0)
+private val TerminalBackground: Color @Composable get() = LocalTerminalTokens.current.background
+private val TerminalText: Color @Composable get() = LocalTerminalTokens.current.text
+private val TerminalMuted: Color @Composable get() = LocalTerminalTokens.current.muted
 private data class ReaderSnapshot(val text: String, val loadedAt: Long?, val truncated: Boolean)
 
 @Composable
@@ -79,24 +112,19 @@ fun AgentScreen(
     canOpenPrevious: Boolean,
     canOpenNext: Boolean,
     onLoadMore: () -> Unit,
+    onSetSnapshotLines: (Int) -> Unit,
     onStop: () -> Unit,
     onExplain: () -> Unit,
     onDismissExplain: () -> Unit,
     onRename: (String) -> Unit,
 ) {
     val agent = detail.agent ?: return
-    val palette = statusPalette()
-    val agentColor = when (agent.status) {
-        AgentStatus.WAITING -> palette.waiting
-        AgentStatus.UNKNOWN -> palette.unknown
-        AgentStatus.WORKING -> palette.working
-        AgentStatus.REVIEW -> palette.review
-        AgentStatus.IDLE -> palette.idle
-    }
+    val colors = ds()
     var confirmStop by remember(agent.key) { mutableStateOf(false) }
     var renaming by remember(agent.key) { mutableStateOf(false) }
     var menu by remember(agent.key) { mutableStateOf(false) }
     var confirmVerification by remember(agent.key) { mutableStateOf(false) }
+    var choosing by remember(agent.key) { mutableStateOf(false) }
     var selecting by remember(agent.key) { mutableStateOf(false) }
     var reader by remember(agent.key) { mutableStateOf<ReaderSnapshot?>(null) }
     var readerFontSize by rememberSaveable { mutableIntStateOf(13) }
@@ -123,6 +151,28 @@ fun AgentScreen(
         onDispose { accessibility.removeTouchExplorationStateChangeListener(listener) }
     }
     val pauseUpdates = userPaused || accessibilityPaused
+    val autoUpdateStateLabel = stringResource(
+        when {
+            accessibilityPaused -> R.string.agent_state_talkback_paused
+            userPaused -> R.string.agent_state_autoupdate_paused
+            else -> R.string.agent_state_autoupdate_on
+        },
+    )
+    val foldStateLabel = stringResource(if (focusedOutput) R.string.agent_state_on else R.string.agent_state_off)
+    val wrapStateLabel = stringResource(if (wrapOutput) R.string.agent_state_on else R.string.agent_state_off)
+    val foldDescription = stringResource(R.string.agent_cd_fold_decorations)
+    val keyboardStateLabel = stringResource(
+        if (keyboardExpanded) R.string.agent_state_expanded else R.string.agent_state_collapsed,
+    )
+    val ctrlStateLabel = stringResource(if (ctrlLatched) R.string.agent_ctrl_latched else R.string.agent_ctrl_idle)
+    val replyDescription = stringResource(R.string.agent_cd_reply_to, agent.name)
+    val sendDescription = stringResource(R.string.agent_cd_send_to, agent.name)
+    val copiedToast = stringResource(R.string.common_copied)
+    val copiedScreenToast = stringResource(R.string.agent_toast_copied_screen)
+    val arrowUpDescription = stringResource(R.string.agent_cd_arrow_up)
+    val arrowDownDescription = stringResource(R.string.agent_cd_arrow_down)
+    val arrowLeftDescription = stringResource(R.string.agent_cd_arrow_left)
+    val arrowRightDescription = stringResource(R.string.agent_cd_arrow_right)
     val latestPositionCallback by rememberUpdatedState(onReadingPosition)
     LaunchedEffect(agent.key, detail.loadedAt) {
         if (!restoredPosition && detail.loadedAt != null) {
@@ -136,11 +186,14 @@ fun AgentScreen(
         snapshotFlow { restoredPosition to ReadingPosition(pageScroll.value, paneScroll.value, stickToBottom, userPaused) }
             .collect { (restored, position) -> if (restored) latestPositionCallback(agent.key, position) }
     }
-    LaunchedEffect(agent.key, pauseUpdates, selecting, reader) { onReadingPaused(pauseUpdates || selecting || reader != null) }
+    LaunchedEffect(agent.key, pauseUpdates, selecting, reader, choosing) { onReadingPaused(pauseUpdates || selecting || reader != null || choosing) }
+    LaunchedEffect(detail.sending) {
+        if (detail.sending && choosing) choosing = false
+    }
     val latestRefresh by rememberUpdatedState(onAutoRefresh)
     val currentSending by rememberUpdatedState(detail.sending)
     val currentLoading by rememberUpdatedState(detail.loading)
-    val currentPaused by rememberUpdatedState(pauseUpdates || selecting || reader != null)
+    val currentPaused by rememberUpdatedState(pauseUpdates || selecting || reader != null || choosing)
     val visibleText = remember(detail.text, focusedOutput) {
         if (focusedOutput) focusTerminalText(detail.text) else detail.text
     }
@@ -172,166 +225,245 @@ fun AgentScreen(
         }
     }
 
-    Column(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .navigationBarsPadding().imePadding(),
+    // The IME inset already includes the nav bar height, so union them instead of stacking
+    // padding: the composer must clear the gesture bar when the keyboard is closed.
+    BoxWithConstraints(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(
+                WindowInsets.statusBars.union(WindowInsets.ime.union(WindowInsets.navigationBars)),
+            ),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp),
+    val compact = maxHeight < 640.dp || LocalDensity.current.fontScale >= 1.3f
+    val typing = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val minimal = maxHeight < 360.dp
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxWidth().weight(1f)) {
+        if (!minimal) Row(
+            Modifier.fillMaxWidth().padding(start = DsSpace.xxs, end = DsSpace.xs, top = DsSpace.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回收件箱") }
+            NeoIconButton(
+                glyph = NeoGlyph.Back,
+                onClick = onBack,
+                contentDescription = stringResource(R.string.agent_cd_back),
+            )
             Column(Modifier.weight(1f)) {
-                Text(agent.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { heading() })
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusGlyph(agent.status, modifier = Modifier.clearAndSetSemantics { }, size = 10)
-                    Text(agent.status.label, style = MaterialTheme.typography.labelMedium, color = agentColor)
-                    if (agent.status != AgentStatus.IDLE) {
-                        Text(formatElapsed(agent.sinceMillis), style = MonoStyle.copy(fontSize = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(agent.name, style = if (compact) DsTypography.headline else DsTypography.title, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().semantics { heading() })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    NeoLamp(
+                        color = when (agent.status) {
+                            AgentStatus.WAITING -> colors.danger
+                            AgentStatus.WORKING -> colors.accent
+                            AgentStatus.REVIEW -> colors.ok
+                            AgentStatus.IDLE, AgentStatus.UNKNOWN -> colors.textFaint
+                        },
+                        size = 7.dp,
+                        modifier = Modifier.clearAndSetSemantics { },
+                    )
+                    Text(stringResource(agent.status.labelRes), style = DsTypography.caption, color = colors.textSoft, maxLines = 1)
+                    if (!compact && agent.status != AgentStatus.IDLE) {
+                        Text(formatElapsed(agent.sinceMillis), style = DsTypography.mono, color = colors.textFaint, maxLines = 1)
                     }
                 }
             }
-            IconButton(onClick = onRefresh, enabled = !detail.loading && !detail.sending) {
-                Icon(Icons.Default.Refresh, contentDescription = "重新读取屏幕")
-            }
+            NeoIconButton(
+                glyph = NeoGlyph.Refresh,
+                onClick = onRefresh,
+                contentDescription = stringResource(R.string.agent_cd_reread_screen),
+                enabled = !detail.loading && !detail.sending,
+            )
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "更多操作") }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("全屏阅读原文") }, onClick = {
-                        menu = false; reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated)
-                    }, enabled = detail.text.isNotBlank())
-                    DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; renaming = true }, enabled = !detail.sending)
-                    DropdownMenuItem(text = { Text("状态来源") }, onClick = { menu = false; onExplain() })
-                    DropdownMenuItem(text = { Text("复制完整屏幕") }, onClick = {
-                        menu = false
-                        clipboard.setText(AnnotatedString(detail.text))
-                        Toast.makeText(context, "已复制完整屏幕", Toast.LENGTH_SHORT).show()
-                    }, enabled = detail.text.isNotBlank())
-                    DropdownMenuItem(text = { Text("中断 Agent", color = palette.danger) }, onClick = { menu = false; confirmStop = true }, enabled = !detail.sending)
+                NeoIconButton(
+                    glyph = NeoGlyph.More,
+                    onClick = { menu = true },
+                    contentDescription = stringResource(R.string.agent_cd_more_actions),
+                )
+                NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_read_fullscreen),
+                        onClick = {
+                            menu = false; reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated)
+                        },
+                        enabled = detail.text.isNotBlank(),
+                    )
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_rename),
+                        onClick = { menu = false; renaming = true },
+                        enabled = !detail.sending,
+                    )
+                    NeoMenuItem(
+                        label = stringResource(
+                            if (detail.snapshotLines < 1200) R.string.agent_menu_expand_snapshot_1200
+                            else R.string.agent_menu_reread_snapshot_1200,
+                        ),
+                        onClick = { menu = false; onLoadMore() },
+                        enabled = !detail.loading && detail.hostConnected,
+                    )
+                    if (detail.snapshotLines > 400) NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_restore_snapshot_400),
+                        onClick = { menu = false; onSetSnapshotLines(400) },
+                        enabled = !detail.loading && detail.hostConnected,
+                    )
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_status_source),
+                        onClick = { menu = false; onExplain() },
+                    )
+                    NeoMenuDivider()
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_copy_screen),
+                        onClick = {
+                            menu = false
+                            clipboard.setText(AnnotatedString(detail.text))
+                            Toast.makeText(context, copiedScreenToast, Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = detail.text.isNotBlank(),
+                    )
+                    NeoMenuItem(
+                        label = stringResource(
+                            if (wrapOutput) R.string.agent_menu_wrap_off else R.string.agent_menu_wrap_on,
+                        ),
+                        onClick = {
+                            menu = false
+                            wrapOutput = !wrapOutput
+                        },
+                        modifier = Modifier.semantics { stateDescription = wrapStateLabel },
+                    )
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_select_copy),
+                        onClick = {
+                            menu = false
+                            selecting = true
+                        },
+                        enabled = detail.text.isNotBlank(),
+                    )
+                    NeoMenuDivider()
+                    NeoMenuItem(
+                        label = stringResource(R.string.agent_menu_stop),
+                        onClick = { menu = false; confirmStop = true },
+                        enabled = !detail.sending,
+                        danger = true,
+                    )
                 }
             }
         }
-        Text(
+        if (!compact) Text(
             listOfNotNull(agent.hostLabel, agent.workspaceLabel ?: agent.repo, agent.tabLabel, agent.paneId)
                 .filter { it.isNotBlank() }.distinct().joinToString(" / "),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+            style = DsTypography.mono,
+            color = colors.textSoft,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(start = DsSpace.xxl, end = DsSpace.xl, top = DsSpace.xxs, bottom = DsSpace.xs),
         )
-        if (canOpenPrevious || canOpenNext) {
+        if (!compact && (canOpenPrevious || canOpenNext)) {
             AgentTraversal(agent.key, canOpenPrevious, canOpenNext, detail.queuePosition, detail.queueSize, onSwipeAgent)
         }
 
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val terminalHeight = (maxHeight * 0.70f).coerceIn(240.dp, 520.dp)
-            Column(
-                Modifier.fillMaxSize().verticalScroll(pageScroll).padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).background(if (detail.stale) palette.unknown else palette.review, androidx.compose.foundation.shape.CircleShape))
-                    Text(
-                        if (detail.loading) "正在读取…" else if (detail.stale) "快照待同步" else "读取于 ${formatClock(detail.loadedAt)}",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f).padding(start = 7.dp),
-                    )
-                    TextButton(
-                        onClick = {
-                            userPaused = !userPaused
-                        },
-                        enabled = !accessibilityPaused,
-                        modifier = Modifier.semantics {
-                            stateDescription = when {
-                                accessibilityPaused -> "TalkBack 已启用，自动更新保持暂停"
-                                userPaused -> "自动更新已暂停"
-                                else -> "自动更新已开启"
-                            }
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) {
-                        Text(
-                            when {
-                                accessibilityPaused -> "TalkBack 下暂停"
-                                userPaused -> "恢复更新"
-                                else -> "暂停更新"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
-                if (!detail.hostConnected) {
-                    DetailNotice("${agent.hostLabel} 尚未连接，保留上次屏幕和草稿。", action = {
-                        TextButton(onClick = onReconnect, enabled = !detail.hostConnecting) {
-                            Text(if (detail.hostConnecting) "正在重连…" else "重连并读取")
-                        }
-                    })
-                } else if (detail.stale) DetailNotice("此页证据尚未同步，请重新读取后再判断。")
-                detail.error?.let { error ->
-                    DetailNotice(error, isError = true, action = {
-                        if (detail.hostConnected) TextButton(onClick = onRefresh, enabled = !detail.loading) { Text("重新读取") }
-                    })
-                }
-                detail.operationNotice?.let { notice ->
-                    DetailNotice(notice, isError = detail.operationUncertain, action = {
-                        if (detail.canVerifyOperation) {
-                            TextButton(onClick = { confirmVerification = true }) { Text("我已核对远端状态…") }
-                        }
-                    })
-                }
-                val ask = detail.ask
-                if (ask != null) {
-                    DecisionPrompt(ask = ask)
-                } else if (agent.status == AgentStatus.WAITING || agent.status == AgentStatus.UNKNOWN) {
-                    Surface(color = palette.waitingWash, shape = RoundedCornerShape(14.dp)) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(if (agent.status == AgentStatus.UNKNOWN) "状态待核实" else "需要查看原文", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "尚未识别出可安全选择的选项。请核对完整屏幕，再使用回复或终端按键。",
-                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                Column(
-                    Modifier.fillMaxWidth().height(terminalHeight).background(TerminalBackground, RoundedCornerShape(16.dp)),
+        // One fixed-height status strip instead of a variable notice stack.
+        //
+        // Previously every message (offline, stale, error, operation result, "no safe option")
+        // added a card above the terminal, so the terminal grew and shrank as the agent's state
+        // changed and the page never settled. Now exactly one line is shown, the most actionable
+        // one, and the rest live behind the strip's action.
+        StatusStrip(
+            detail = detail,
+            agent = agent,
+            userPaused = userPaused,
+            accessibilityPaused = accessibilityPaused,
+            autoUpdateStateLabel = autoUpdateStateLabel,
+            onTogglePause = { userPaused = !userPaused },
+            onRefresh = onRefresh,
+            onReconnect = onReconnect,
+            onVerify = { confirmVerification = true },
+        )
+
+        NeoWell(
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = DsSpace.m),
+            corner = DsRadius.well,
+            fill = TerminalBackground,
+        ) {
+            // fillMaxHeight, not fillMaxSize: the well is already width-constrained by its parent,
+            // and asking for max size here re-measured it at the column's full width, which pushed
+            // the whole page past the viewport.
+            Column(Modifier.fillMaxWidth().fillMaxHeight()) {
+                // Terminal chrome is drawn with the same type scale and hit sizes as the rest of
+                // the app; Material TextButtons here were the last mismatched control on the page.
+                if (!minimal) Row(
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = DsSpace.m, end = DsSpace.xs),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                            Text("屏幕证据", color = TerminalText, style = MaterialTheme.typography.labelLarge)
-                            Text("读取于 ${formatClock(detail.loadedAt)}${if (detail.truncated) " · 不完整" else ""}", color = TerminalMuted, style = MaterialTheme.typography.bodySmall)
-                        }
-                        TextButton(onClick = { reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated) }, enabled = detail.text.isNotBlank()) { Text("全屏", color = TerminalText) }
-                        TextButton(onClick = { focusedOutput = !focusedOutput }, modifier = Modifier.semantics {
-                            contentDescription = "折叠装饰线与多余空行"
-                            stateDescription = if (focusedOutput) "已开启" else "已关闭"
-                        }) { Text(if (focusedOutput) "看原文" else "聚焦", color = Color(0xFFB6C3FF)) }
-                    }
+                    Text(
+                        stringResource(
+                            if (detail.truncated) R.string.agent_snapshot_lines_truncated
+                            else R.string.agent_snapshot_lines,
+                            detail.snapshotLines,
+                        ),
+                        color = TerminalMuted,
+                        style = DsTypography.caption,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TerminalChromeAction(
+                        label = stringResource(R.string.agent_fullscreen),
+                        enabled = detail.text.isNotBlank(),
+                        onClick = { reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated) },
+                    )
+                    TerminalChromeAction(
+                        label = stringResource(if (focusedOutput) R.string.agent_view_source else R.string.agent_focus),
+                        enabled = true,
+                        accent = true,
+                        onClick = { focusedOutput = !focusedOutput },
+                        modifier = Modifier.semantics {
+                            contentDescription = foldDescription
+                            stateDescription = foldStateLabel
+                        },
+                    )
+                }
                     HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (detail.text.isBlank() && detail.loading) {
                             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = TerminalMuted)
-                                Text("正在读取屏幕…", color = TerminalMuted)
+                                Text(stringResource(R.string.agent_reading_screen), color = TerminalMuted)
                             }
                         } else {
                             SelectionContainer {
-                                Column(Modifier.fillMaxSize().verticalScroll(paneScroll).padding(14.dp)) {
+                                Column(Modifier.fillMaxWidth().fillMaxHeight().verticalScroll(paneScroll).padding(14.dp)) {
                                     if (focusedOutput) {
-                                        Text("已折叠装饰线和多余空行；审批仍核对完整原文。", style = MaterialTheme.typography.bodySmall, color = TerminalMuted)
+                                        Text(
+                                            stringResource(R.string.agent_folded_hint),
+                                            style = DsTypography.caption,
+                                            color = TerminalMuted,
+                                        )
                                         Spacer(Modifier.height(10.dp))
                                     }
                                     val textModifier = if (wrapOutput) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState())
                                     Text(
-                                        visibleText.ifBlank { "当前屏幕为空。" },
+                                        visibleText.ifBlank { stringResource(R.string.agent_screen_empty) },
                                         modifier = textModifier,
                                         style = MonoStyle.copy(fontSize = 12.5.sp, lineHeight = 19.sp),
                                         color = TerminalText, softWrap = wrapOutput,
                                     )
                                     if (detail.truncated) {
                                         Spacer(Modifier.height(12.dp))
-                                        Text("更早内容已截断。当前显示的是快照，不是完整滚动历史。", color = TerminalMuted, style = MaterialTheme.typography.bodySmall)
-                                        TextButton(onClick = onLoadMore, enabled = !detail.loading) { Text("读取更多", color = Color(0xFFB6C3FF)) }
+                                        Text(
+                                            stringResource(
+                                                if (detail.snapshotLines < 1200) R.string.agent_truncated_hint
+                                                else R.string.agent_truncated_hint_max,
+                                            ),
+                                            color = TerminalMuted,
+                                            style = DsTypography.caption,
+                                        )
+                                        if (detail.snapshotLines < 1200) {
+                                            TerminalChromeAction(
+                                                label = stringResource(R.string.agent_expand_to_1200),
+                                                enabled = !detail.loading,
+                                                onClick = onLoadMore,
+                                                accent = true,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -339,153 +471,446 @@ fun AgentScreen(
                         if (detail.loading && detail.text.isNotBlank()) {
                             CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(16.dp), color = TerminalMuted, strokeWidth = 2.dp)
                         }
-                        if (!stickToBottom) {
-                            FilledTonalButton(
+                        Box(Modifier.align(Alignment.BottomCenter).padding(DsSpace.s)) {
+                            BackToBottomChip(
+                                visible = !stickToBottom,
+                                unseen = unseenOutput,
                                 onClick = {
                                     stickToBottom = true
                                     unseenOutput = false
                                     scope.launch { paneScroll.animateScrollTo(paneScroll.maxValue) }
                                 },
-                                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
-                            ) { Text(if (unseenOutput) "有新内容 · 回到底部" else "回到底部") }
+                            )
                         }
                     }
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { wrapOutput = !wrapOutput }, modifier = Modifier.semantics {
-                            contentDescription = "终端自动换行"
-                            stateDescription = if (wrapOutput) "已开启" else "已关闭"
-                        }) { Text(if (wrapOutput) "自动换行" else "横向查看", color = TerminalMuted, style = MaterialTheme.typography.labelMedium) }
-                        TextButton(onClick = { selecting = true }, enabled = detail.text.isNotBlank()) { Text("选择复制", color = TerminalMuted, style = MaterialTheme.typography.labelMedium) }
-                        Spacer(Modifier.weight(1f))
-                        Text(if (stickToBottom) "跟随中" else "历史中", color = TerminalMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 8.dp))
-                    }
-                }
-                if (ask != null) {
-                    ApprovalActions(
-                        ask = ask,
-                        sending = detail.sending,
-                        enabled = detail.canChoose,
-                        blockedReason = when {
-                            detail.truncated -> "快照不完整，请先读取更多并核对原文。"
-                            detail.operationUncertain -> "上次操作结果待核实，请刷新屏幕后再判断。"
-                            !detail.canChoose && !detail.sending -> "当前选项暂不可用，请重新读取并核对屏幕。"
-                            else -> null
-                        },
-                        onChoose = onChoose,
-                        onReadEvidence = { reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated) },
-                    )
-                }
-                val signals = agent.stateLabels.values.take(3) + agent.tokens.entries.take(3).map { "${it.key} ${it.value}" }
-                if (signals.isNotEmpty()) {
-                    Text(signals.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
 
-        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { keyboardExpanded = !keyboardExpanded }, modifier = Modifier.semantics {
-                        stateDescription = if (keyboardExpanded) "已展开" else "已收起"
-                    }) { Text(if (keyboardExpanded) "收起按键" else "终端按键") }
-                    Spacer(Modifier.weight(1f))
-                    if (detail.sending) {
-                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("正在提交…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        Text("${agent.hostLabel} / ${agent.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        // Layout contract for this page (do not "simplify" it):
+        //   BoxWithConstraints { Column(fillMaxSize) {
+        //       Column(weight(1f)) { header; traversal; status strip; NeoWell(weight(1f)) }
+        //       Column(dock)   // measured, never weighted
+        //   } }
+        // The dock must be the SECOND CHILD of the outer Column. When it ended up a sibling of that
+        // Column inside the Box, Compose drew it first at the top-left and the weighted body took the
+        // full height, so the composer covered the status bar. Keep the braces exactly as they are.
+        Column(
+            Modifier.fillMaxWidth().background(colors.base).padding(horizontal = DsSpace.m),
+        ) {
+            if (!typing) AnimatedVisibility(
+                visible = detail.ask != null,
+                enter = fadeIn(tween(160)) + expandVertically(tween(200)),
+                exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
+            ) {
+                val ask = detail.ask ?: return@AnimatedVisibility
+                Row(
+                    Modifier.fillMaxWidth().padding(top = DsSpace.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(
+                                if (ask.confidence == AskConfidence.HIGH) R.string.agent_need_decision
+                                else R.string.agent_recognition_unverified,
+                            ),
+                            style = DsTypography.caption,
+                            color = colors.accent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            ask.question,
+                            style = DsTypography.body,
+                            color = colors.text,
+                            maxLines = if (compact) 1 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
+                    NeoButton(
+                        label = pluralStringResource(R.plurals.agent_view_options, ask.options.size, ask.options.size),
+                        onClick = { choosing = true },
+                        tone = NeoButtonTone.Quiet,
+                        compact = true,
+                    )
                 }
-                AnimatedVisibility(keyboardExpanded) {
-                    Column {
-                        Text("直接向当前 pane 发送按键，发送前请核对屏幕。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf("Esc" to "esc", "Tab" to "tab", "↑" to "up", "↓" to "down", "←" to "left", "→" to "right", "Ctrl" to "__ctrl", "r" to "r", "o" to "o", "d" to "d", "y" to "y", "n" to "n", "Enter" to "enter").forEach { (label, key) ->
-                                OutlinedButton(
-                                    onClick = {
+            }
+            if (!typing) Row(verticalAlignment = Alignment.CenterVertically) {
+                NeoButton(
+                    label = stringResource(if (keyboardExpanded) R.string.agent_keys_collapse else R.string.agent_keys),
+                    onClick = { keyboardExpanded = !keyboardExpanded },
+                    tone = NeoButtonTone.Quiet,
+                    compact = true,
+                    modifier = Modifier.semantics {
+                        stateDescription = keyboardStateLabel
+                    },
+                )
+                Spacer(Modifier.weight(1f))
+                if (detail.sending) {
+                    NeoSkeleton(Modifier.width(14.dp), height = 14.dp, corner = 7.dp)
+                    Spacer(Modifier.width(DsSpace.s))
+                    Text(stringResource(R.string.agent_submitting), style = DsTypography.caption, color = colors.textSoft)
+                } else {
+                    Text(stringResource(R.string.agent_identity, agent.hostLabel, agent.name), maxLines = 1, overflow = TextOverflow.Ellipsis, style = DsTypography.caption, color = colors.textSoft, modifier = Modifier.weight(1f))
+                }
+            }
+            AnimatedVisibility(keyboardExpanded && !typing) {
+                Column {
+                    if (!compact) Text(stringResource(R.string.agent_keys_hint), style = DsTypography.caption, color = colors.textSoft, modifier = Modifier.padding(horizontal = 8.dp))
+                    // Same key material as the terminal key bar: NeoKey, not an outlined Material
+                    // button, so a thumb learns one key shape across both pages.
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(DsSpace.xs),
+                    ) {
+                        val keys = listOf(
+                            "Esc" to "esc",
+                            "Tab" to "tab",
+                            "↑" to "up",
+                            "↓" to "down",
+                            "←" to "left",
+                            "→" to "right",
+                            "Ctrl" to "__ctrl",
+                            "y" to "y",
+                            "n" to "n",
+                            "Enter" to "enter",
+                        )
+                        keys.forEach { (label, key) ->
+                            Box(
+                                Modifier.semantics {
+                                    if (key == "__ctrl") stateDescription = ctrlStateLabel
+                                    when (key) {
+                                        "up" -> contentDescription = arrowUpDescription
+                                        "down" -> contentDescription = arrowDownDescription
+                                        "left" -> contentDescription = arrowLeftDescription
+                                        "right" -> contentDescription = arrowRightDescription
+                                    }
+                                },
+                            ) {
+                                NeoKey(
+                                    label = label,
+                                    onPress = {
                                         when {
                                             key == "__ctrl" -> ctrlLatched = !ctrlLatched
-                                            ctrlLatched && key.length == 1 -> { onSendKeys(listOf("ctrl-$key")); ctrlLatched = false }
-                                            else -> { onSendKeys(listOf(key)); ctrlLatched = false }
+                                            ctrlLatched && key.length == 1 -> {
+                                                onSendKeys(listOf("ctrl-$key"))
+                                                ctrlLatched = false
+                                            }
+
+                                            else -> {
+                                                onSendKeys(listOf(key))
+                                                ctrlLatched = false
+                                            }
                                         }
                                     },
-                                    enabled = detail.canSend,
-                                    modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).semantics {
-                                        if (key == "__ctrl") stateDescription = if (ctrlLatched) "已按下，下个字母将发送组合键" else "未按下"
-                                        when (key) {
-                                            "up" -> contentDescription = "方向键上"
-                                            "down" -> contentDescription = "方向键下"
-                                            "left" -> contentDescription = "方向键左"
-                                            "right" -> contentDescription = "方向键右"
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (key == "__ctrl" && ctrlLatched) MaterialTheme.colorScheme.primaryContainer else Color.Transparent),
-                                ) { Text(label, style = MonoStyle) }
+                                    wide = key == "Enter",
+                                    active = key == "__ctrl" && ctrlLatched,
+                                )
                             }
-                            TextButton(onClick = { confirmStop = true }, enabled = detail.canSend, modifier = Modifier.heightIn(min = 48.dp)) { Text("中断…", color = palette.danger) }
                         }
+                        NeoKey(label = stringResource(R.string.agent_stop_ellipsis), onPress = { confirmStop = true }, wide = true)
                     }
                 }
+            }
+            NeoWell(
+                Modifier.fillMaxWidth().padding(bottom = DsSpace.xs),
+                corner = DsRadius.control,
+            ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(bottom = 8.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(start = 14.dp, end = 2.dp),
+                    Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicTextField(
                         value = detail.draft,
                         onValueChange = onDraftChange,
-                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 12.dp).semantics { contentDescription = "回复 ${agent.name}" },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        maxLines = 4,
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = DsSpace.m).semantics { contentDescription = replyDescription },
+                        textStyle = DsTypography.body.copy(color = colors.text),
+                        cursorBrush = SolidColor(colors.accent),
+                        maxLines = if (compact) 1 else 4,
                         decorationBox = { inner ->
-                            if (detail.draft.isEmpty()) Text("回复 Agent…", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (detail.draft.isEmpty()) Text(stringResource(R.string.agent_reply_placeholder), style = DsTypography.body, color = colors.textFaint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             inner()
                         },
                     )
-                    IconButton(onClick = { onSendPrompt(detail.draft) }, enabled = detail.draft.isNotBlank() && detail.canSend) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送到 ${agent.name}")
-                    }
+                    NeoButton(
+                        label = stringResource(R.string.agent_send_reply),
+                        onClick = { onSendPrompt(detail.draft) },
+                        tone = NeoButtonTone.Primary,
+                        enabled = detail.draft.isNotBlank() && detail.canSend,
+                        compact = true,
+                        modifier = Modifier.semantics { contentDescription = sendDescription },
+                    )
                 }
             }
         }
     }
+    }
+    if (choosing) {
+        NeoSheet(onDismissRequest = { choosing = false }) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = DsSpace.xl).padding(bottom = DsSpace.xl),
+                verticalArrangement = Arrangement.spacedBy(DsSpace.m),
+            ) {
+                Text(
+                    stringResource(R.string.agent_context_line, agent.hostLabel, agent.name, agent.paneId),
+                    color = colors.textSoft,
+                    style = DsTypography.mono,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val ask = detail.ask
+                if (ask == null) {
+                    Text(stringResource(R.string.agent_no_options_now), color = colors.text, style = DsTypography.body)
+                } else {
+                    DecisionPrompt(ask)
+                    NeoButton(
+                        label = stringResource(R.string.agent_verify_screen_source),
+                        onClick = {
+                            choosing = false
+                            reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated)
+                        },
+                        tone = NeoButtonTone.Quiet,
+                        compact = true,
+                    )
+                    ApprovalActions(
+                        ask, detail.sending, detail.canChoose,
+                        detail.error ?: detail.operationNotice ?: when {
+                            detail.truncated -> stringResource(R.string.agent_blocked_truncated)
+                            detail.operationUncertain -> stringResource(R.string.agent_blocked_unverified)
+                            !detail.canChoose && !detail.sending -> stringResource(R.string.agent_blocked_cannot_approve)
+                            else -> null
+                        },
+                        onChoose = onChoose,
+                    )
+                }
+                NeoButton(
+                    label = stringResource(R.string.agent_back_to_terminal),
+                    onClick = { choosing = false },
+                    tone = NeoButtonTone.Ghost,
+                )
+            }
+        }
+    }
     reader?.let { snapshot ->
-        TerminalReader(snapshot.text, "${agent.hostLabel} / ${agent.name}", snapshot.loadedAt, snapshot.truncated,
+        TerminalReader(snapshot.text, stringResource(R.string.agent_identity, agent.hostLabel, agent.name), snapshot.loadedAt, snapshot.truncated,
             readerFontSize, onFontSize = { readerFontSize = it }, onDismiss = { reader = null })
     }
     if (selecting) SelectionSheet(detail.text, onCopy = {
         clipboard.setText(AnnotatedString(it))
-        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, copiedToast, Toast.LENGTH_SHORT).show()
     }, onDismiss = { selecting = false })
     detail.explain?.let { text ->
-        AlertDialog(onDismissRequest = onDismissExplain, title = { Text("Herdr 的状态判断") }, text = {
-            SelectionContainer { Text(text, style = MonoStyle, modifier = Modifier.verticalScroll(rememberScrollState())) }
-        }, confirmButton = { TextButton(onClick = onDismissExplain) { Text("关闭") } })
+        // Read-only explainer: the only action is "close", so it is the ghost dismissal slot.
+        NeoDialog(
+            onDismissRequest = onDismissExplain,
+            title = stringResource(R.string.agent_explain_title),
+            dismissLabel = stringResource(R.string.common_close),
+        ) {
+            SelectionContainer {
+                Text(
+                    text,
+                    style = MonoStyle,
+                    color = colors.text,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            }
+        }
     }
     if (confirmVerification) {
-        AlertDialog(onDismissRequest = { confirmVerification = false }, title = { Text("已核对远端状态？") }, text = {
-            Text("请先刷新并阅读屏幕，确认上次操作是否已执行。解除限制后可以再次操作；重复提交可能再次执行命令。")
-        }, confirmButton = {
-            TextButton(onClick = { confirmVerification = false; onVerifyOperation() }, enabled = detail.canVerifyOperation) { Text("已核对，继续操作") }
-        }, dismissButton = { TextButton(onClick = { confirmVerification = false }) { Text("返回核对") } })
+        NeoDialog(
+            onDismissRequest = { confirmVerification = false },
+            title = stringResource(R.string.agent_confirm_verify_title),
+            subtitle = stringResource(R.string.agent_confirm_verify_body),
+            confirmLabel = stringResource(R.string.agent_confirm_verify_action),
+            onConfirm = { confirmVerification = false; onVerifyOperation() },
+            dismissLabel = stringResource(R.string.agent_confirm_verify_dismiss),
+            confirmEnabled = detail.canVerifyOperation,
+        )
     }
     if (renaming) {
         var value by remember(agent.key) { mutableStateOf(agent.name) }
-        AlertDialog(onDismissRequest = { renaming = false }, title = { Text("重命名 Agent") }, text = {
-            OutlinedTextField(value, onValueChange = { value = it.take(40) }, singleLine = true, label = { Text("新名字") }, modifier = Modifier.fillMaxWidth())
-        }, confirmButton = { TextButton(enabled = value.isNotBlank() && value.trim() != agent.name, onClick = { onRename(value.trim()); renaming = false }) { Text("保存") } }, dismissButton = { TextButton(onClick = { renaming = false }) { Text("取消") } })
+        NeoDialog(
+            onDismissRequest = { renaming = false },
+            title = stringResource(R.string.agent_rename_title),
+            confirmLabel = stringResource(R.string.common_save),
+            onConfirm = { onRename(value.trim()); renaming = false },
+            dismissLabel = stringResource(R.string.common_cancel),
+            confirmEnabled = value.isNotBlank() && value.trim() != agent.name,
+        ) {
+            NeoField(
+                value = value,
+                onValueChange = { value = it.take(40) },
+                label = stringResource(R.string.agent_rename_label),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
     if (confirmStop) {
-        AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("中断 ${agent.name}？") }, text = { Text("将向 ${agent.hostLabel} / ${agent.paneId} 发送 Ctrl-C。当前步骤可能终止，pane 会保留。") }, confirmButton = {
-            TextButton(onClick = { confirmStop = false; onStop() }, enabled = detail.canSend) { Text("中断", color = palette.danger) }
-        }, dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("取消") } })
+        NeoDialog(
+            onDismissRequest = { confirmStop = false },
+            title = stringResource(R.string.agent_confirm_stop_title, agent.name),
+            subtitle = stringResource(R.string.agent_confirm_stop_body, agent.hostLabel, agent.paneId),
+            confirmLabel = stringResource(R.string.agent_stop),
+            onConfirm = { confirmStop = false; onStop() },
+            dismissLabel = stringResource(R.string.common_cancel),
+            destructive = true,
+            confirmEnabled = detail.canSend,
+        )
+    }
+}
+
+/** Text-only action on the terminal chrome: 44dp tall, no ripple, design-system type. */
+@Composable
+private fun TerminalChromeAction(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    accent: Boolean = false,
+) {
+    val colors = ds()
+    val tint = when {
+        !enabled -> TerminalMuted.copy(alpha = 0.55f)
+        accent -> LocalTerminalTokens.current.accent
+        else -> TerminalText
+    }
+    Box(
+        modifier = modifier
+            .heightIn(min = 44.dp)
+            .clip(RoundedCornerShape(DsRadius.key))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = DsSpace.m),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = DsTypography.body, color = tint, maxLines = 1)
+    }
+}
+
+/**
+ * The only status line on the page: one row, one message, one action.
+ *
+ * Priority is deliberate — an error outranks an uncertain operation result, which outranks
+ * staleness, which outranks the reading clock. Everything else stays reachable (refresh, pause,
+ * reconnect, verify) without ever changing the height of the terminal below.
+ */
+@Composable
+private fun StatusStrip(
+    detail: DetailState,
+    agent: Agent,
+    userPaused: Boolean,
+    accessibilityPaused: Boolean,
+    autoUpdateStateLabel: String,
+    onTogglePause: () -> Unit,
+    onRefresh: () -> Unit,
+    onReconnect: () -> Unit,
+    onVerify: () -> Unit,
+) {
+    val colors = ds()
+    val error = detail.error
+    val notice = detail.operationNotice
+    val lamp: Color
+    val message: String
+    var action: (@Composable () -> Unit)? = null
+    when {
+        error != null -> {
+            lamp = colors.danger
+            message = error
+            if (detail.hostConnected) action = {
+                NeoButton(
+                    label = stringResource(R.string.agent_reread),
+                    onClick = onRefresh,
+                    tone = NeoButtonTone.Ghost,
+                    enabled = !detail.loading,
+                    compact = true,
+                )
+            }
+        }
+
+        notice != null -> {
+            lamp = if (detail.operationUncertain) colors.warn else colors.ok
+            message = notice
+            if (detail.canVerifyOperation) action = {
+                NeoButton(
+                    label = stringResource(R.string.agent_verify_remote),
+                    onClick = onVerify,
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                )
+            }
+        }
+
+        !detail.hostConnected -> {
+            lamp = colors.warn
+            message = stringResource(R.string.agent_host_disconnected, agent.hostLabel)
+            action = {
+                NeoButton(
+                    label = stringResource(
+                        if (detail.hostConnecting) R.string.agent_reconnecting else R.string.agent_reconnect_and_read,
+                    ),
+                    onClick = onReconnect,
+                    tone = NeoButtonTone.Ghost,
+                    enabled = !detail.hostConnecting,
+                    compact = true,
+                )
+            }
+        }
+
+        detail.stale -> {
+            lamp = colors.warn
+            message = stringResource(R.string.agent_evidence_not_synced)
+        }
+
+        accessibilityPaused -> {
+            lamp = colors.textFaint
+            message = stringResource(R.string.agent_pause_talkback)
+        }
+
+        else -> {
+            lamp = if (userPaused) colors.textFaint else colors.ok
+            message = when {
+                userPaused -> stringResource(R.string.agent_updates_paused)
+                detail.loading -> stringResource(R.string.agent_reading)
+                detail.loadedAt != null -> stringResource(R.string.agent_read_at, formatClock(detail.loadedAt))
+                else -> stringResource(R.string.agent_reading)
+            }
+            action = {
+                NeoButton(
+                    label = stringResource(
+                        if (userPaused) R.string.agent_resume_updates else R.string.agent_pause_updates,
+                    ),
+                    onClick = onTogglePause,
+                    tone = NeoButtonTone.Ghost,
+                    enabled = !accessibilityPaused,
+                    compact = true,
+                    modifier = Modifier.semantics { stateDescription = autoUpdateStateLabel },
+                )
+            }
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(start = DsSpace.m, end = DsSpace.m, top = DsSpace.xs, bottom = DsSpace.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+    ) {
+        NeoLamp(color = lamp, size = 6.dp, modifier = Modifier.clearAndSetSemantics { })
+        Text(
+            message,
+            style = DsTypography.caption,
+            color = if (error != null) colors.danger else colors.textSoft,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        action?.invoke()
     }
 }
 
 @Composable
 private fun AgentTraversal(agentKey: String, canPrevious: Boolean, canNext: Boolean, position: Int, total: Int, onMove: (Int) -> Unit) {
+    val colors = ds()
     var drag by remember(agentKey) { mutableStateOf(0f) }
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
     val latestMove by rememberUpdatedState(onMove)
@@ -506,17 +931,44 @@ private fun AgentTraversal(agentKey: String, canPrevious: Boolean, canNext: Bool
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = { onMove(-1) }, enabled = canPrevious) { Text("上一条") }
-        Text("$position / $total", style = MonoStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).graphicsLayer { translationX = offset }, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        TextButton(onClick = { onMove(1) }, enabled = canNext) { Text("下一条") }
+        NeoIconButton(
+            glyph = NeoGlyph.ChevronRight,
+            onClick = { onMove(-1) },
+            contentDescription = stringResource(R.string.agent_prev),
+            enabled = canPrevious,
+            modifier = Modifier.rotate(180f),
+        )
+        Text("$position / $total", style = DsTypography.mono, color = colors.textSoft, modifier = Modifier.weight(1f).graphicsLayer { translationX = offset }, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        NeoIconButton(
+            glyph = NeoGlyph.ChevronRight,
+            onClick = { onMove(1) },
+            contentDescription = stringResource(R.string.agent_next),
+            enabled = canNext,
+        )
     }
 }
 
 @Composable
 private fun DetailNotice(text: String, isError: Boolean = false, action: (@Composable () -> Unit)? = null) {
-    Surface(color = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
-        Column(Modifier.fillMaxWidth().padding(14.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
+    val colors = ds()
+    NeoWell(Modifier.fillMaxWidth(), corner = DsRadius.control) {
+        Column(
+            Modifier.fillMaxWidth().padding(DsSpace.l).semantics { liveRegion = LiveRegionMode.Polite },
+            verticalArrangement = Arrangement.spacedBy(DsSpace.xs),
+        ) {
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                NeoLamp(
+                    color = if (isError) colors.danger else colors.warn,
+                    size = 5.dp,
+                    modifier = Modifier.padding(top = DsSpace.xxs).clearAndSetSemantics { },
+                )
+                Text(
+                    text,
+                    style = DsTypography.body,
+                    color = colors.text,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             action?.invoke()
         }
     }
@@ -524,54 +976,111 @@ private fun DetailNotice(text: String, isError: Boolean = false, action: (@Compo
 
 @Composable
 private fun DecisionPrompt(ask: Ask) {
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("等待你的决定", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            if (ask.confidence != AskConfidence.HIGH) {
-                Text("选项来自屏幕解析，请先核对下面的原文。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
-            SelectionContainer {
-                Text(
-                    ask.question,
-                    style = MaterialTheme.typography.bodyLarge,
+    val colors = ds()
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(DsSpace.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            Text(
+                stringResource(R.string.agent_need_decision),
+                style = DsTypography.caption,
+                color = colors.accent,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (ask.confidence != AskConfidence.HIGH) Text(
+                stringResource(R.string.agent_recognition_unverified),
+                style = DsTypography.caption,
+                color = colors.textSoft,
+            )
+        }
+        SelectionContainer { Text(ask.question, style = DsTypography.headline, color = colors.text) }
+        ask.risk?.let { risk ->
+            Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s), verticalAlignment = Alignment.Top) {
+                NeoIcon(
+                    NeoGlyph.Warning,
+                    modifier = Modifier.padding(top = DsSpace.xxs).size(14.dp),
+                    tint = colors.danger,
+                    contentDescription = null,
                 )
+                Text(risk, style = DsTypography.caption, color = colors.text, modifier = Modifier.weight(1f))
             }
-            ask.risk?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error) }
-            Text("先核对屏幕证据，再选择操作。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun ApprovalActions(ask: Ask, sending: Boolean, enabled: Boolean, blockedReason: String?, onChoose: (AskOption) -> Unit, onReadEvidence: () -> Unit) {
+private fun ApprovalActions(ask: Ask, sending: Boolean, enabled: Boolean, blockedReason: String?, onChoose: (AskOption) -> Unit) {
+    val colors = ds()
     var pendingStanding by remember(ask) { mutableStateOf<AskOption?>(null) }
     val request: (AskOption) -> Unit = { option ->
         if (requiresStandingConfirmation(option)) pendingStanding = option else onChoose(option)
     }
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("做出决定", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-            TextButton(onClick = onReadEvidence, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                Text("全屏核对屏幕原文", style = MaterialTheme.typography.labelMedium)
-            }
-            // Keep every option visible, including multiple ALLOW choices with different scopes.
-            ask.options.forEach { option ->
-                val modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                if (option == ask.allow && !requiresStandingConfirmation(option)) {
-                    Button(onClick = { request(option) }, enabled = enabled, modifier = modifier, shape = RoundedCornerShape(10.dp)) { Text(if (sending) "正在提交…" else option.label) }
-                } else {
-                    OutlinedButton(onClick = { request(option) }, enabled = enabled, modifier = modifier, shape = RoundedCornerShape(10.dp)) {
-                        Text(option.label, color = if (requiresStandingConfirmation(option)) MaterialTheme.colorScheme.error else Color.Unspecified)
-                    }
-                }
-            }
-            Text(blockedReason ?: "发送前会复核问题、选项和上下文。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+        NeoDivider()
+        Text(
+            stringResource(R.string.agent_choose_action),
+            style = DsTypography.caption,
+            color = colors.textFaint,
+            modifier = Modifier.semantics { heading() },
+        )
+        // Keep every option visible, including multiple ALLOW choices with different scopes.
+        ask.options.forEach { option ->
+            ApprovalOption(
+                label = if (sending && option == ask.allow) stringResource(R.string.agent_submitting) else option.label,
+                danger = requiresStandingConfirmation(option),
+                enabled = enabled,
+            ) { request(option) }
         }
+        Text(blockedReason ?: stringResource(R.string.agent_approval_review_hint), style = DsTypography.caption, color = colors.textSoft)
     }
     pendingStanding?.let { option ->
-        AlertDialog(onDismissRequest = { pendingStanding = null }, title = { Text("确认长期授权") }, text = { Text("${option.label}\n\n这项选择可能让后续同类请求不再询问，请核对授权范围。") }, confirmButton = {
-            TextButton(onClick = { pendingStanding = null; onChoose(option) }, enabled = enabled) { Text("确认长期授权", color = MaterialTheme.colorScheme.error) }
-        }, dismissButton = { TextButton(onClick = { pendingStanding = null }) { Text("取消") } })
+        NeoDialog(
+            onDismissRequest = { pendingStanding = null },
+            title = stringResource(R.string.agent_standing_title),
+            subtitle = stringResource(R.string.agent_standing_body, option.label),
+            confirmLabel = stringResource(R.string.agent_standing_confirm),
+            onConfirm = { pendingStanding = null; onChoose(option) },
+            dismissLabel = stringResource(R.string.common_cancel),
+            destructive = true,
+            confirmEnabled = enabled,
+        )
+    }
+}
+
+/**
+ * Full-width approval choice: the whole label must stay readable, so this is a lifted quiet slab
+ * rather than a [NeoButton], which can only show one ellipsised line. Standing (long-lived)
+ * authorisations keep the danger ink; everything else is text — no accent is added to approving.
+ */
+@Composable
+private fun ApprovalOption(
+    label: String,
+    danger: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val colors = ds()
+    NeoCard(
+        modifier = modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+        depth = if (enabled) DsElev.soft else DsElev.flat,
+        onClick = if (enabled) onClick else null,
+    ) {
+        Box(
+            Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                label,
+                style = DsTypography.bodyStrong,
+                color = when {
+                    !enabled -> colors.textFaint
+                    danger -> colors.danger
+                    else -> colors.text
+                },
+            )
+        }
     }
 }
 
@@ -596,19 +1105,70 @@ private fun SelectionSheet(text: String, onCopy: (String) -> Unit, onDismiss: ()
     var value by remember(text) { mutableStateOf(TextFieldValue(text)) }
     val selection = value.selection
     val selected = if (!selection.collapsed) text.substring(selection.min.coerceIn(0, text.length), selection.max.coerceIn(0, text.length)) else ""
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.88f).background(TerminalBackground, RoundedCornerShape(18.dp)).padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("选择复制", style = MaterialTheme.typography.titleMedium, color = TerminalText, modifier = Modifier.weight(1f))
-                TextButton(onClick = { value = value.copy(selection = TextRange(0, text.length)) }) { Text("全选", color = TerminalMuted) }
-                TextButton(onClick = { onCopy(selected) }, enabled = selected.isNotEmpty()) { Text("复制", color = if (selected.isNotEmpty()) Color(0xFFB6C3FF) else TerminalMuted) }
-                TextButton(onClick = onDismiss) { Text("关闭", color = TerminalMuted) }
-            }
-            Text("长按选择，拖动两端调整范围。", style = MaterialTheme.typography.bodySmall, color = TerminalMuted)
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp)) {
-                BasicTextField(value = value, onValueChange = { value = it }, readOnly = true, modifier = Modifier.fillMaxWidth(), textStyle = MonoStyle.copy(color = TerminalText), cursorBrush = SolidColor(Color.Transparent))
+    val terminal = LocalTerminalTokens.current
+    // The picker is drawn on the terminal material, so the design palette is remapped to the
+    // terminal inks for everything inside it: a chassis-dark label on a dark well would be
+    // unreadable in the light theme. Layout, callbacks and gating are unchanged.
+    val colors = ds().copy(
+        baseRaised = terminal.background,
+        well = terminal.background,
+        text = terminal.text,
+        textSoft = terminal.muted,
+        textFaint = terminal.muted,
+        accent = terminal.accent,
+    )
+    CompositionLocalProvider(LocalDs provides colors) {
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(
+                Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.88f)
+                    .background(terminal.background, RoundedCornerShape(DsRadius.card))
+                    .padding(DsSpace.m),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.agent_select_copy_title), style = DsTypography.title, color = colors.text, modifier = Modifier.weight(1f))
+                    NeoButton(
+                        label = stringResource(R.string.agent_select_all),
+                        onClick = { value = value.copy(selection = TextRange(0, text.length)) },
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
+                    NeoButton(
+                        label = stringResource(R.string.common_copy),
+                        onClick = { onCopy(selected) },
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                        enabled = selected.isNotEmpty(),
+                    )
+                    NeoButton(
+                        label = stringResource(R.string.common_close),
+                        onClick = onDismiss,
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
+                }
+                Text(stringResource(R.string.agent_selection_hint), style = DsTypography.caption, color = colors.textSoft)
+                Spacer(Modifier.height(DsSpace.s))
+                Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(DsSpace.s)) {
+                    BasicTextField(value = value, onValueChange = { value = it }, readOnly = true, modifier = Modifier.fillMaxWidth(), textStyle = MonoStyle.copy(color = colors.text), cursorBrush = SolidColor(Color.Transparent))
+                }
             }
         }
+    }
+}
+
+/** Floating "back to bottom" affordance. Kept at file level so it is not lexically inside a ColumnScope. */
+@Composable
+private fun BackToBottomChip(visible: Boolean, unseen: Boolean, onClick: () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(140)) + scaleIn(tween(160), initialScale = 0.92f),
+        exit = fadeOut(tween(110)) + scaleOut(tween(120), targetScale = 0.92f),
+    ) {
+        NeoButton(
+            label = if (unseen) stringResource(R.string.agent_back_to_bottom_new) else stringResource(R.string.agent_back_to_bottom),
+            onClick = onClick,
+            tone = NeoButtonTone.Quiet,
+            compact = true,
+        )
     }
 }

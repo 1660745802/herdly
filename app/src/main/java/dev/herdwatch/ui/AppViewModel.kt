@@ -4,13 +4,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import dev.herdwatch.HerdwatchApp
+import dev.herdwatch.R
 import dev.herdwatch.data.HerdRepository
+import dev.herdwatch.data.InputMode
+import dev.herdwatch.data.LanguageMode
+import dev.herdwatch.data.AppPreferences
+import dev.herdwatch.data.DensityMode
+import dev.herdwatch.data.MotionMode
+import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepoState
+import dev.herdwatch.data.ThemeMode
+import dev.herdwatch.data.UpdateChecker
 import dev.herdwatch.domain.ApprovalEvidence
 import dev.herdwatch.domain.ApprovalPolicy
 import dev.herdwatch.domain.OperationState
 import dev.herdwatch.domain.PageTicket
 import dev.herdwatch.domain.operationRpc
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.Ask
@@ -59,6 +69,7 @@ data class DetailState(
     val canVerifyOperation: Boolean = false,
     val stale: Boolean = true,
     val readingPaused: Boolean = false,
+    val snapshotLines: Int = 400,
     val canOpenPrevious: Boolean = false,
     val canOpenNext: Boolean = false,
     val queuePosition: Int = 0,
@@ -69,7 +80,8 @@ data class DetailState(
 data class UiState(
     val repo: RepoState = RepoState(),
     val screen: Screen = Screen.Inbox,
-    val filter: InboxFilter = InboxFilter.ATTENTION,
+    /** 「全部」在前，也是默认视图；需要处理只是其中一个筛选。 */
+    val filter: InboxFilter = InboxFilter.ALL,
     val query: String = "",
     val searching: Boolean = false,
     val detail: DetailState = DetailState(),
@@ -89,9 +101,27 @@ data class StartAgentRequest(
     val resume: Boolean = false,
 )
 
-class AppViewModel(private val repository: HerdRepository) : ViewModel() {
+/** Manual update check: never runs on its own, so there is no polling state to model. */
+data class UpdateUi(
+    val checking: Boolean = false,
+    val result: UpdateChecker.Result? = null,
+)
+
+class AppViewModel(
+    private val repository: HerdRepository,
+    private val preferencesStore: PreferencesStore,
+    private val appVersion: String = "0.0.0",
+) : ViewModel() {
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
+
+    val preferences: StateFlow<AppPreferences> = preferencesStore.state
+
+    private val terminal = TerminalController(
+        scope = viewModelScope,
+        onFingerprintTrusted = { hostId, fingerprint -> repository.updateFingerprint(hostId, fingerprint) },
+    )
+    val terminalState: StateFlow<TerminalUiState> = terminal.state
 
     private var loadJob: Job? = null
     private var explainJob: Job? = null
@@ -103,6 +133,9 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
     private var structureOrigin: Screen = Screen.Hosts
     private val readingPositions = object : LinkedHashMap<String, ReadingPosition>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReadingPosition>?) = size > 80
+    }
+    private val snapshotLineLimits = object : LinkedHashMap<String, Int>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?) = size > 80
     }
     private val reconnecting = mutableSetOf<String>()
 
@@ -216,12 +249,14 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
             capturedPage?.let { page ->
                 if (matches(page)) _ui.value.detail.agent?.let { loadPane(it) }
             }
+            if (_ui.value.screen is Screen.Terminal) reopenTerminal()
         }
     }
 
     fun onBackground() {
         foreground = false
         leavePage()
+        terminal.close()
         _ui.update { it.copy(detail = decorate(it.detail.copy(stale = true, loading = false, explainLoading = false))) }
         repository.setForeground(false)
     }
@@ -248,16 +283,23 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
             _ui.value.repo.agents.firstOrNull { it.key == screen.agentKey }?.let { openAgent(it) }
             return
         }
+        if (screen is Screen.Terminal) {
+            openTerminal(screen.hostId)
+            return
+        }
+        if (_ui.value.screen is Screen.Terminal) terminal.close()
         leavePage()
         _ui.update { it.copy(screen = screen, detail = DetailState()) }
     }
 
     fun back() {
         leavePage()
+        if (_ui.value.screen is Screen.Terminal) terminal.close()
         traversal = emptyList()
         val current = _ui.value.screen
         val destination = when (current) {
             is Screen.Structure -> structureOrigin
+            is Screen.Terminal -> Screen.Hosts
             Screen.Settings -> Screen.Hosts
             else -> Screen.Inbox
         }
@@ -273,6 +315,109 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         if (_ui.value.screen !is Screen.Structure) structureOrigin = _ui.value.screen
         navigate(Screen.Structure(hostId))
     }
+
+    /**
+     * Opens a plain SSH shell on the host. This is deliberately independent of Herdr: it works on
+     * any SSH host, and Herdr keeps its own bridge connection.
+     */
+    fun openTerminal(hostId: String) {
+        val runtime = _ui.value.repo.hosts.firstOrNull { it.host.id == hostId }
+        if (runtime == null) {
+            _ui.update { it.copy(message = Str.get(R.string.vm_host_not_found)) }
+            return
+        }
+        leavePage()
+        _ui.update { it.copy(screen = Screen.Terminal(hostId), detail = DetailState()) }
+        terminal.setInputMode(preferencesStore.state.value.inputMode)
+        terminal.open(runtime.host, preferencesStore.state.value.terminalFontSize)
+    }
+
+    private fun reopenTerminal() {
+        val hostId = (_ui.value.screen as? Screen.Terminal)?.hostId ?: return
+        openTerminal(hostId)
+    }
+
+    fun closeTerminal() {
+        terminal.close()
+        back()
+    }
+
+    fun terminalInput(text: String, submit: Boolean = false) = terminal.write(text, submit)
+
+    fun terminalKey(sequence: String) = terminal.key(sequence)
+
+    fun terminalResize(cols: Int, rows: Int) = terminal.resize(cols, rows)
+
+    fun terminalFontSize(size: Float) {
+        preferencesStore.setTerminalFontSize(size)
+        terminal.setFontSize(size)
+    }
+
+    /** The user confirmed the fingerprint shown for this first connection. */
+    fun terminalTrustFingerprint() = terminal.trustFingerprint()
+
+    /**
+     * Language is applied by the Activity through the platform locale service; the ViewModel only
+     * persists the choice so the switch survives process death.
+     */
+    fun setLanguage(mode: LanguageMode) = preferencesStore.setLanguage(mode)
+
+    /** Result of the last manual 「检查更新」, null before the first check. */
+    private val _update = MutableStateFlow<UpdateUi>(UpdateUi())
+    val update: StateFlow<UpdateUi> = _update.asStateFlow()
+    private var updateJob: Job? = null
+
+    fun checkForUpdate() {
+        if (_update.value.checking) return
+        updateJob?.cancel()
+        _update.value = UpdateUi(checking = true)
+        updateJob = viewModelScope.launch {
+            val result = UpdateChecker(appVersion).check()
+            _update.update { it.copy(checking = false, result = result) }
+        }
+    }
+
+    fun clearUpdateResult() {
+        updateJob?.cancel()
+        _update.value = UpdateUi()
+    }
+
+    /** Current installed version, for the about block. */
+    val version: String get() = appVersion
+
+    fun setTheme(mode: ThemeMode) = preferencesStore.setTheme(mode)
+
+    fun setMotion(mode: MotionMode) = preferencesStore.setMotion(mode)
+
+    fun setDensity(mode: DensityMode) = preferencesStore.setDensity(mode)
+
+    fun setKeyBarRows(rows: Int) = preferencesStore.setKeyBarRows(rows)
+
+    fun setLongPressRepeat(enabled: Boolean) = preferencesStore.setLongPressRepeat(enabled)
+
+    fun setInputMode(mode: InputMode) {
+        preferencesStore.setInputMode(mode)
+        terminal.setInputMode(mode)
+    }
+
+
+    /** Forgets every pinned host key; the next connection asks for confirmation again. */
+    fun resetFingerprints() {
+        viewModelScope.launch { repository.resetFingerprints() }
+    }
+
+    /** Default snapshot size for every pane; per-pane overrides still win until the page closes. */
+    fun setDefaultSnapshotLines(lines: Int) {
+        val requested = if (lines >= 1200) 1200 else 400
+        preferencesStore.setSnapshotLines(requested)
+        snapshotLineLimits.clear()
+        val detail = _ui.value.detail
+        if (detail.agent != null && detail.snapshotLines != requested) setSnapshotLines(requested)
+    }
+
+    fun terminalReconnect() = terminal.reconnect()
+
+    fun terminalFollow() = terminal.follow()
 
     fun openStartAgent(hostId: String, paneId: String? = null) = _ui.update {
         it.copy(
@@ -292,70 +437,70 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         args: List<String>,
     ) {
         _ui.update { it.copy(showNewTask = false) }
-        screenMutation("启动请求已接受；请核对新任务。") {
+        screenMutation(Str.get(R.string.vm_start_accepted)) {
             repository.startInNewTab(hostId, workspaceId, kind, name.ifBlank { kind }, args).getOrThrow()
         }
     }
 
     fun startAgent(request: StartAgentRequest, paneId: String, kind: String, name: String, args: List<String>) {
         _ui.update { it.copy(startAgent = null) }
-        screenMutation("启动请求已接受：$name；请核对远端状态。") {
+        screenMutation(Str.get(R.string.vm_start_accepted_named, name)) {
             repository.startAgent(request.hostId, paneId, kind, name.ifBlank { kind }, args).getOrThrow()
         }
     }
 
     fun restoreAgent(agent: Agent) {
         val args = resumeArgs(agent.kind)
-        screenMutation("恢复请求已接受：${agent.name}；请核对远端状态。") {
+        screenMutation(Str.get(R.string.vm_restore_accepted, agent.name)) {
             repository.startAgent(agent.hostId, agent.paneId, agent.kind, agent.name, args).getOrThrow()
         }
     }
 
-    fun createWorkspace(hostId: String) = structureAction(hostId, "已新建 workspace") {
+    fun createWorkspace(hostId: String) = structureAction(hostId, Str.get(R.string.vm_created_workspace)) {
         repository.createWorkspace(hostId, null)
     }
 
-    fun createTab(hostId: String, workspaceId: String) = structureAction(hostId, "已新建 tab") {
+    fun createTab(hostId: String, workspaceId: String) = structureAction(hostId, Str.get(R.string.vm_created_tab)) {
         repository.createTab(hostId, workspaceId, null)
     }
 
     fun splitPane(hostId: String, paneId: String, direction: String) =
-        structureAction(hostId, if (direction == "right") "已向右拆分" else "已向下拆分") {
+        structureAction(hostId, if (direction == "right") Str.get(R.string.vm_split_right) else Str.get(R.string.vm_split_down)) {
             repository.splitPane(hostId, paneId, direction)
         }
 
-    fun closePane(hostId: String, paneId: String) = structureAction(hostId, "已关闭 pane") {
+    fun closePane(hostId: String, paneId: String) = structureAction(hostId, Str.get(R.string.vm_closed_pane)) {
         repository.closePane(hostId, paneId)
     }
 
-    fun closeTab(hostId: String, tabId: String) = structureAction(hostId, "已关闭 tab") {
+    fun closeTab(hostId: String, tabId: String) = structureAction(hostId, Str.get(R.string.vm_closed_tab)) {
         repository.closeTab(hostId, tabId)
     }
 
-    fun closeWorkspace(hostId: String, workspaceId: String) = structureAction(hostId, "已关闭 workspace") {
+    fun closeWorkspace(hostId: String, workspaceId: String) = structureAction(hostId, Str.get(R.string.vm_closed_workspace)) {
         repository.closeWorkspace(hostId, workspaceId)
     }
 
-    fun focusPane(hostId: String, paneId: String) = structureAction(hostId, "已在主机上聚焦") {
+    fun focusPane(hostId: String, paneId: String) = structureAction(hostId, Str.get(R.string.vm_focused_pane)) {
         repository.focusPane(hostId, paneId)
     }
 
-    fun focusTab(hostId: String, tabId: String) = structureAction(hostId, "已切换到 tab") {
+    fun focusTab(hostId: String, tabId: String) = structureAction(hostId, Str.get(R.string.vm_focused_tab)) {
         repository.focusTab(hostId, tabId)
     }
 
-    fun focusWorkspace(hostId: String, workspaceId: String) = structureAction(hostId, "已切换到 workspace") {
+    fun focusWorkspace(hostId: String, workspaceId: String) = structureAction(hostId, Str.get(R.string.vm_focused_workspace)) {
         repository.focusWorkspace(hostId, workspaceId)
     }
 
     fun renameWorkspace(hostId: String, workspaceId: String, label: String) =
-        structureAction(hostId, "已重命名工作区") { repository.renameWorkspace(hostId, workspaceId, label) }
+        structureAction(hostId, Str.get(R.string.vm_renamed_workspace)) { repository.renameWorkspace(hostId, workspaceId, label) }
 
     fun renameTab(hostId: String, tabId: String, label: String) =
-        structureAction(hostId, "已重命名标签页") { repository.renameTab(hostId, tabId, label) }
+        structureAction(hostId, Str.get(R.string.vm_renamed_tab)) { repository.renameTab(hostId, tabId, label) }
 
     fun renamePane(hostId: String, paneId: String, label: String) =
-        structureAction(hostId, "已重命名分屏") { repository.renamePane(hostId, paneId, label) }
+        structureAction(hostId, Str.get(R.string.vm_renamed_pane)) { repository.renamePane(hostId, paneId, label) }
 
     fun renameAgent(name: String) {
         val page = ticket() ?: return
@@ -375,13 +520,13 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
             } catch (_: Throwable) {
                 // The API includes a refresh after mutation; failure does not prove rejection.
             } finally {
-                finishOperation(agent, operation, if (accepted) "重命名请求已接受。" else "重命名结果不确定，请核对远端状态。", !accepted)
+                finishOperation(agent, operation, if (accepted) Str.get(R.string.vm_rename_accepted) else Str.get(R.string.vm_rename_uncertain), !accepted)
             }
         }
     }
 
     private fun structureAction(hostId: String, success: String, block: suspend () -> Unit) {
-        screenMutation("$success（请求已接受，请核对同步状态）", block)
+        screenMutation(Str.get(R.string.vm_mutation_accepted, success), block)
     }
 
     private fun screenMutation(success: String, block: suspend () -> Unit) {
@@ -399,10 +544,10 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                 currentCoroutineContext().ensureActive()
                 show(success)
             } catch (cancelled: CancellationException) {
-                show("请求已中断，结果可能不确定；请核对远端状态，勿直接重复操作。")
+                show(Str.get(R.string.vm_request_interrupted))
                 throw cancelled
             } catch (t: Throwable) {
-                show("操作结果待核实，请检查远端状态：${dev.herdwatch.data.humanize(t)}")
+                show(Str.get(R.string.vm_operation_check_remote, dev.herdwatch.data.humanize(t)))
             }
         }
     }
@@ -410,21 +555,26 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
     private fun humanizeExplain(json: kotlinx.serialization.json.JsonObject): String {
         fun str(key: String) = json[key]?.jsonPrimitive?.contentOrNull
         val lines = mutableListOf<String>()
-        lines += "Herdr 判定：${str("state") ?: "unknown"}"
-        str("matched_rule")?.takeIf { it.isNotBlank() }?.let { lines += "命中规则：$it" }
+        lines += Str.get(R.string.vm_explain_state, str("state") ?: "unknown")
+        str("matched_rule")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_matched_rule, it) }
         if (json["screen_detection_skipped"]?.jsonPrimitive?.booleanOrNull == true) {
             val why = str("screen_detection_skip_reason")
             lines += if (why == "full_lifecycle_hook_authority") {
-                "屏幕识别已跳过：状态直接来自 agent 的生命周期钩子，不靠猜屏幕。"
+                Str.get(R.string.vm_explain_detect_skipped_hook)
             } else {
-                "屏幕识别已跳过" + (why?.let { "：$it" } ?: "。")
+                why?.let { Str.get(R.string.vm_explain_detect_skipped_reason, it) }
+                    ?: Str.get(R.string.vm_explain_detect_skipped)
             }
         }
-        listOf("visible_blocker" to "屏幕上有阻塞", "visible_idle" to "屏幕上是空闲", "visible_working" to "屏幕上在工作")
+        listOf(
+            "visible_blocker" to Str.get(R.string.vm_visible_blocker),
+            "visible_idle" to Str.get(R.string.vm_visible_idle),
+            "visible_working" to Str.get(R.string.vm_visible_working),
+        )
             .filter { json[it.first]?.jsonPrimitive?.booleanOrNull == true }
-            .forEach { lines += "可见信号：${it.second}" }
-        str("fallback_reason")?.takeIf { it.isNotBlank() }?.let { lines += "降级原因：$it" }
-        str("warning")?.takeIf { it.isNotBlank() }?.let { lines += "注意：$it" }
+            .forEach { lines += Str.get(R.string.vm_visible_signal, it.second) }
+        str("fallback_reason")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_fallback_reason, it) }
+        str("warning")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_warning, it) }
         return lines.joinToString("\n")
     }
 
@@ -444,10 +594,11 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         showAgent(target)
     }
 
-    fun openAgent(agent: Agent) {
+    fun openAgent(agent: Agent, hostFilterId: String? = null) {
         val state = _ui.value
         val live = state.repo.agents.firstOrNull { it.key == agent.key } ?: return
-        traversal = inboxQueue(state.repo.agents, state.filter, state.query).map { it.key }
+        val agents = state.repo.agents.filter { hostFilterId == null || it.hostId == hostFilterId }
+        traversal = inboxQueue(agents, state.filter, state.query).map { it.key }
             .let { if (live.key in it) it else listOf(live.key) }
         showAgent(live)
     }
@@ -456,6 +607,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         leavePage()
         _ui.update {
             it.copy(screen = Screen.Detail(agent.key), detail = decorate(DetailState(agent = agent, loading = true,
+                snapshotLines = snapshotLineLimits[agent.key] ?: preferencesStore.state.value.snapshotLines,
                 readingPosition = readingPositions[agent.key] ?: ReadingPosition(),
                 readingPaused = readingPositions[agent.key]?.paused == true)))
         }
@@ -472,7 +624,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         val agent = _ui.value.detail.agent ?: return
         if (_ui.value.detail.explainLoading || !foreground) return
         val request = ++explainGeneration
-        updateDetail(page) { it.copy(explainLoading = true, explain = "Herdr 正在解释这个状态…") }
+        updateDetail(page) { it.copy(explainLoading = true, explain = Str.get(R.string.vm_explain_loading)) }
         explainJob = viewModelScope.launch {
             try {
                 val json = repository.explain(agent)
@@ -481,7 +633,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (t: Throwable) {
-                if (request == explainGeneration) updateDetail(page) { it.copy(explainLoading = false, explain = "读不到解释：${dev.herdwatch.data.humanize(t)}") }
+                if (request == explainGeneration) updateDetail(page) { it.copy(explainLoading = false, explain = Str.get(R.string.vm_explain_failed, dev.herdwatch.data.humanize(t))) }
             }
         }
     }
@@ -492,9 +644,17 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         _ui.update { it.copy(detail = it.detail.copy(explain = null, explainLoading = false)) }
     }
 
-    fun loadMore() {
+    fun loadMore() = setSnapshotLines(1200)
+
+    /** Requested recent-snapshot size, not a claim about returned history. */
+    fun setSnapshotLines(lines: Int) {
+        if (_ui.value.detail.sending) return
         val agent = _ui.value.detail.agent ?: return
-        loadPane(agent, 600)
+        val page = ticket() ?: return
+        val requested = if (lines >= 1200) 1200 else 400
+        snapshotLineLimits[page.agentKey] = requested
+        updateDetail(page) { it.copy(snapshotLines = requested) }
+        loadPane(agent)
     }
 
     /** Quiet reads still have their own request generation and retain visible read errors. */
@@ -510,13 +670,18 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         if (_ui.value.detail.readingPaused == paused) return
         // The first load still supplies evidence when TalkBack pauses a newly opened page.
         // Once evidence is visible, invalidate an in-flight quiet read before freezing it.
-        val freezeVisible = paused && _ui.value.detail.loadedAt != null
+        // Freezing the view must not invalidate an approval's preflight/post-read.
+        val freezeVisible = paused && _ui.value.detail.loadedAt != null && !_ui.value.detail.sending
         if (freezeVisible) {
             readGeneration++
             loadJob?.cancel()
         }
-        updateDetail(page) { it.copy(readingPaused = paused, loading = if (freezeVisible) false else it.loading) }
-        if (!paused) _ui.value.detail.agent?.let { loadPane(it, quiet = true) }
+        updateDetail(page) {
+            val sameSequence = _ui.value.repo.agents.any { live -> live.key == page.agentKey && live.stateChangeSeq == it.shownSeq }
+            it.copy(readingPaused = paused, loading = if (freezeVisible) false else it.loading,
+                stale = it.stale || (freezeVisible && !sameSequence))
+        }
+        if (!paused && !_ui.value.detail.sending) _ui.value.detail.agent?.let { loadPane(it, quiet = true) }
     }
 
     private fun applyPane(page: PageTicket, pane: PaneText, shownSeq: Long) {
@@ -536,9 +701,10 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         }
     }
 
-    private fun loadPane(agent: Agent, lines: Int = 400, quiet: Boolean = false) {
+    private fun loadPane(agent: Agent, quiet: Boolean = false) {
         val page = ticket() ?: return
         if (!matches(page) || page.agentKey != agent.key || !foreground) return
+        val lines = _ui.value.detail.snapshotLines
         val request = ++readGeneration
         loadJob?.cancel()
         updateDetail(page) { it.copy(loading = !quiet, error = null) }
@@ -548,11 +714,11 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                 currentCoroutineContext().ensureActive()
                 if (request == readGeneration) applyPane(page, pane, agent.stateChangeSeq)
             } catch (cancelled: CancellationException) {
-                if (request == readGeneration) updateDetail(page) { it.copy(loading = false, stale = true, error = "读取已取消，显示上次内容。") }
+                if (request == readGeneration) updateDetail(page) { it.copy(loading = false, stale = true, error = Str.get(R.string.vm_read_cancelled)) }
                 throw cancelled
             } catch (t: Throwable) {
                 if (request == readGeneration) updateDetail(page) {
-                    it.copy(loading = false, stale = true, error = "读取失败，显示上次内容：${dev.herdwatch.data.humanize(t)}")
+                    it.copy(loading = false, stale = true, error = Str.get(R.string.vm_read_failed, dev.herdwatch.data.humanize(t)))
                 }
             }
         }
@@ -595,25 +761,28 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         val frozen = evidence(detail)
         val invalid = ApprovalPolicy.validate(frozen, option, frozen)
         if (invalid != null || !detail.canChoose) {
-            updateDetail(page) { it.copy(error = invalid ?: "请先核对远端操作结果或刷新当前证据，再进行辅助审批。") }
+            updateDetail(page) { it.copy(error = invalid ?: Str.get(R.string.vm_approval_verify_first)) }
             return
         }
-        val operation = beginOperation(agent) ?: return
+        val operation = beginOperation(agent) ?: run {
+            updateDetail(page) { it.copy(error = Str.get(R.string.vm_approval_not_sent)) }
+            return
+        }
         val preflightRequest = readGeneration
         viewModelScope.launch {
             var attempted = false
             var accepted = false
-            var notice = "审批已取消，没有发送。"
+            var notice = Str.get(R.string.vm_approval_cancelled)
             var uncertain = false
             var blocked: ApprovalEvidence? = null
             try {
-                val fresh = ApprovalPolicy.evidence(repository.readPane(agent))
+                val fresh = ApprovalPolicy.evidence(repository.readPane(agent, detail.snapshotLines))
                 currentCoroutineContext().ensureActive()
                 // A preflight completing on another page must never initiate a write.
                 if (!matches(page) || !connected(agent) || preflightRequest != readGeneration) return@launch
                 val current = _ui.value.repo.agents.firstOrNull { it.key == agent.key }
                 val reason = ApprovalPolicy.validate(frozen, option, fresh)
-                    ?: if (current?.status != AgentStatus.WAITING && current?.status != AgentStatus.UNKNOWN) "它已不在等待审批，没有发送。" else null
+                    ?: if (current?.status != AgentStatus.WAITING && current?.status != AgentStatus.UNKNOWN) Str.get(R.string.vm_not_waiting_not_sent) else null
                 if (reason != null) {
                     applyPane(page, fresh.pane, agent.stateChangeSeq)
                     notice = reason
@@ -625,38 +794,38 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                 repository.sendKeys(agent, option.keys).getOrThrow()
                 accepted = true
                 currentCoroutineContext().ensureActive()
-                notice = "按键请求已接受：${option.label}。远端执行结果待核实。"
+                notice = Str.get(R.string.vm_key_accepted, option.label)
                 uncertain = true
                 delay(700)
                 if (!matches(page) || !foreground) return@launch
                 val postRequest = ++readGeneration
                 loadJob?.cancel()
-                val after = repository.readPane(agent)
+                val after = repository.readPane(agent, detail.snapshotLines)
                 currentCoroutineContext().ensureActive()
                 if (!matches(page) || postRequest != readGeneration) return@launch
                 applyPane(page, after, agent.stateChangeSeq)
                 if (after.truncated) {
-                    notice = "按键请求已接受，但后续屏幕不完整；执行结果待核实，请勿重复审批。"
+                    notice = Str.get(R.string.vm_key_accepted_truncated)
                 } else if (ApprovalPolicy.sameContext(fresh, ApprovalPolicy.evidence(after))) {
-                    notice = "按键请求已接受，屏幕暂未变化；执行结果待核实，请勿重复审批。"
+                    notice = Str.get(R.string.vm_key_accepted_unchanged)
                 } else {
-                    notice = "按键请求已接受，已观察到屏幕变化；这不代表远端任务执行成功。"
+                    notice = Str.get(R.string.vm_key_accepted_changed)
                     uncertain = false
                 }
             } catch (cancelled: CancellationException) {
                 notice = when {
-                    accepted -> "按键请求已接受，后续核对已取消；执行结果不确定，请勿重复审批。"
-                    attempted -> "审批请求已中断，是否已接受不确定；请核对后再操作。"
-                    else -> "审批核对已取消，没有发送。"
+                    accepted -> Str.get(R.string.vm_key_accepted_verify_cancelled)
+                    attempted -> Str.get(R.string.vm_approval_interrupted)
+                    else -> Str.get(R.string.vm_approval_verify_cancelled)
                 }
                 uncertain = attempted
                 throw cancelled
             } catch (t: Throwable) {
                 uncertain = attempted
                 notice = when {
-                    accepted -> "按键请求已接受，但后续读取失败；执行结果待核实。${dev.herdwatch.data.humanize(t)}"
-                    attempted -> "审批结果不确定，请核对远端状态，勿直接重发。${dev.herdwatch.data.humanize(t)}"
-                    else -> "没能重读屏幕，没有发送。${dev.herdwatch.data.humanize(t)}"
+                    accepted -> Str.get(R.string.vm_key_accepted_read_failed, dev.herdwatch.data.humanize(t))
+                    attempted -> Str.get(R.string.vm_approval_uncertain, dev.herdwatch.data.humanize(t))
+                    else -> Str.get(R.string.vm_reread_failed_not_sent, dev.herdwatch.data.humanize(t))
                 }
             } finally {
                 finishOperation(agent, operation, notice, uncertain, blocked)
@@ -667,7 +836,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
     fun sendRawKeys(keys: List<String>) {
         if (keys.isEmpty()) return
         val capturedKeys = keys.toList()
-        sendManual("按键", rpc = { repository.sendKeys(it, capturedKeys) })
+        sendManual(Str.get(R.string.vm_label_keys), rpc = { repository.sendKeys(it, capturedKeys) })
     }
 
     fun sendPrompt(text: String = _ui.value.detail.draft, onSent: () -> Unit = {}) {
@@ -680,7 +849,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         syncOperation(agent.key)
         val captured = operations.draft(agent.key)
         var unchanged = false
-        sendManual("回复", rpc = { repository.prompt(it, value) }, onRpcAccepted = {
+        sendManual(Str.get(R.string.vm_label_reply), rpc = { repository.prompt(it, value) }, onRpcAccepted = {
             unchanged = operations.draft(agent.key) == captured
             if (captured.text == text) operations.clearDraft(agent.key, captured)
             syncOperation(agent.key)
@@ -703,7 +872,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
         viewModelScope.launch {
             var attempted = false
             var accepted = false
-            var notice = "$label 已取消，没有发送。"
+            var notice = Str.get(R.string.vm_send_cancelled, label)
             try {
                 currentCoroutineContext().ensureActive()
                 if (!matches(page) || !connected(agent)) return@launch
@@ -712,15 +881,15 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                     accepted = true
                     onRpcAccepted()
                 }
-                notice = "$label 请求已接受；远端执行结果仍需核对。"
+                notice = Str.get(R.string.vm_send_accepted, label)
                 onAccepted(page)
                 delay(600)
                 if (matches(page) && foreground) loadPane(agent)
             } catch (cancelled: CancellationException) {
-                notice = if (accepted) "$label 请求已接受，后续核对已取消。" else if (attempted) "$label 请求中断，是否已接受不确定；请核对远端状态。" else "$label 已取消，没有发送。"
+                notice = if (accepted) Str.get(R.string.vm_send_accepted_verify_cancelled, label) else if (attempted) Str.get(R.string.vm_send_interrupted, label) else Str.get(R.string.vm_send_cancelled, label)
                 throw cancelled
             } catch (t: Throwable) {
-                notice = if (accepted) "$label 请求已接受，但后续处理失败：${dev.herdwatch.data.humanize(t)}" else if (attempted) "$label 结果不确定，请核对后再操作：${dev.herdwatch.data.humanize(t)}" else "$label 没有发送：${dev.herdwatch.data.humanize(t)}"
+                notice = if (accepted) Str.get(R.string.vm_send_accepted_followup_failed, label, dev.herdwatch.data.humanize(t)) else if (attempted) Str.get(R.string.vm_send_uncertain, label, dev.herdwatch.data.humanize(t)) else Str.get(R.string.vm_send_not_sent, label, dev.herdwatch.data.humanize(t))
             } finally {
                 finishOperation(agent, operation, notice, attempted && !accepted, if (attempted) frozen else null)
             }
@@ -767,7 +936,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                         addingHost = false,
                         showAddHost = false,
                         editingHost = null,
-                        message = if (id == null) "已添加 ${config.label}" else "已更新 ${config.label}",
+                        message = if (id == null) Str.get(R.string.vm_host_added, config.label) else Str.get(R.string.vm_host_updated, config.label),
                     )
                 }
                 if (id != null) repository.connectHost(config.id)
@@ -775,7 +944,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
                 throw cancelled
             } catch (t: Throwable) {
                 _ui.update {
-                    it.copy(addingHost = false, message = "保存失败：${dev.herdwatch.data.humanize(t)}")
+                    it.copy(addingHost = false, message = Str.get(R.string.vm_save_failed, dev.herdwatch.data.humanize(t)))
                 }
             } finally {
                 _ui.update { it.copy(addingHost = false) }
@@ -784,7 +953,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
     }
 
     fun deleteHost(hostId: String) {
-        screenMutation("已移除主机") { repository.removeHost(hostId) }
+        screenMutation(Str.get(R.string.vm_host_removed)) { repository.removeHost(hostId) }
     }
 
     fun reconnect(hostId: String) {
@@ -809,6 +978,7 @@ class AppViewModel(private val repository: HerdRepository) : ViewModel() {
 
     class Factory(private val app: HerdwatchApp) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = AppViewModel(app.repository) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            AppViewModel(app.repository, app.preferencesStore, app.appVersion) as T
     }
 }

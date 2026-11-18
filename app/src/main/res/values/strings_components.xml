@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 公用组件：状态点、时间/时长格式化 -->
+    <string name="components_status_a11y">状态：%1$s</string>
+    <string name="components_just_now">刚刚</string>
+    <string name="components_not_synced">未同步</string>
+    <plurals name="components_seconds_ago">
+        <item quantity="other">%1$d 秒前</item>
+    </plurals>
+    <plurals name="components_minutes_ago">
+        <item quantity="other">%1$d 分钟前</item>
+    </plurals>
+    <plurals name="components_elapsed_hours">
+        <item quantity="other">%1$d 小时 %2$d 分</item>
+    </plurals>
+    <plurals name="components_elapsed_days">
+        <item quantity="other">%1$d 天</item>
+    </plurals>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="policy_unavailable_truncated">The screen is incomplete. Expand and check it yourself; assisted approval is off, but you can still act manually after reading the original.</string>
+    <string name="policy_unavailable_unrecognized">No decision could be identified to check.</string>
+    <string name="policy_option_expired">That option is stale. Re-check the current question.</string>
+    <string name="policy_option_no_keys">The option has no valid keys, so nothing was sent.</string>
+    <string name="policy_revision_changed">The screen changed, so nothing was sent. Check the new content.</string>
+    <string name="policy_context_changed">The question or its context changed, so nothing was sent. Check the new content.</string>
+    <string name="policy_verified_notice">You verified the remote state. Later actions still re-read the evidence.</string>
+    <string name="codec_unknown_error">Unknown error</string>
+    <string name="codec_id_mismatch">Response id mismatch: expected %1$s, got %2$s</string>
+    <string name="codec_no_result">The response has no result</string>
+    <string name="codec_no_read">pane.read response is missing read</string>
+    <string name="store_bad_cipher_length">Ciphertext length is invalid</string>
+</resources>

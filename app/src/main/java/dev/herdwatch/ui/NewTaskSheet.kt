@@ -11,26 +11,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,13 +28,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostRuntime
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoChip
+import dev.herdwatch.ui.design.NeoField
+import dev.herdwatch.ui.design.NeoSheet
+import dev.herdwatch.ui.design.NeoToggle
+import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.statusPalette
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewTaskSheet(
     hosts: List<HostRuntime>,
@@ -74,6 +76,8 @@ fun NewTaskSheet(
     var resume by rememberSaveable { mutableStateOf(false) }
     var argsText by rememberSaveable { mutableStateOf("") }
     val p = statusPalette()
+    val resumeLabel = stringResource(R.string.newtask_resume_label)
+    val colors = ds()
 
     fun resumeArgs(k: String) = AppViewModel.resumeArgs(k)
     fun applyKind(next: String) {
@@ -86,11 +90,8 @@ fun NewTaskSheet(
         argsText = if (on) resumeArgs(kind).joinToString("\n") else ""
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
+    // NeoSheet 用 ds().base 作底，和页面共用一块底盘（Material surface 不是这个颜色）。
+    NeoSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -98,125 +99,176 @@ fun NewTaskSheet(
                 .imePadding()
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
         ) {
-            Text("新任务", style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.newtask_title), style = DsTypography.title, color = colors.text)
             Text(
-                "在已连接的机器上创建新标签页并启动 agent。提交后请查看会话确认结果。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                stringResource(R.string.newtask_body),
+                style = DsTypography.caption,
+                color = colors.textSoft,
             )
             Spacer(Modifier.height(14.dp))
 
-            Text("机器", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.newtask_host_label), style = DsTypography.micro, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
                 items(hosts, key = { it.host.id }) { h ->
                     val ok = h.conn is ConnState.Connected
-                    FilterChip(
+                    TaskChip(
+                        label = stringResource(
+                            R.string.newtask_host_chip,
+                            h.host.label,
+                            if (ok) stringResource(R.string.newtask_connected) else stringResource(R.string.newtask_disconnected),
+                        ),
                         selected = h.host.id == hostId,
                         enabled = ok,
+                        dot = if (ok) p.review else p.idle,
                         onClick = { hostId = h.host.id },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                        label = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                androidx.compose.foundation.layout.Box(
-                                    Modifier
-                                        .size(6.dp)
-                                        .background(if (ok) p.review else p.idle, CircleShape),
-                                )
-                                Spacer(Modifier.width(5.dp))
-                                Text("${h.host.label} · ${if (ok) "已连接" else "未连接"}")
-                            }
-                        },
                     )
                 }
             }
             if (connected.isEmpty()) {
-                Text("没有已连接的机器。返回「机器」添加配置或重试连接后，再创建任务。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.newtask_no_connected), style = DsTypography.caption, color = colors.textSoft)
             }
 
-            Text("项目", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.newtask_project_label), style = DsTypography.micro, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
                 item {
-                    FilterChip(
+                    TaskChip(
+                        label = stringResource(R.string.newtask_new_workspace),
                         selected = workspaceId == null,
                         enabled = host != null,
-                        modifier = Modifier.heightIn(min = 48.dp),
                         onClick = { workspaceId = null },
-                        label = { Text("＋ 新工作区") },
                     )
                 }
                 items(host?.structure?.workspaces.orEmpty(), key = { it.id }) { w ->
-                    FilterChip(
+                    NeoChip(
+                        label = w.label,
                         selected = workspaceId == w.id,
-                        modifier = Modifier.heightIn(min = 48.dp),
                         onClick = { workspaceId = w.id },
-                        label = { Text(w.label) },
+                        modifier = Modifier.heightIn(min = 48.dp),
                     )
                 }
             }
             if (workspaceId != null) {
                 Text(
-                    "目标：${host?.host?.label ?: "机器未连接"} / ${workspace?.label ?: "工作区已不可用，请重新选择"}\n目录：${workspace?.worktreePath ?: "由主机工作区决定"}\n将在此工作区新建标签页。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    stringResource(
+                        R.string.newtask_target_existing,
+                        host?.host?.label ?: stringResource(R.string.newtask_host_unconnected),
+                        workspace?.label ?: stringResource(R.string.newtask_workspace_unavailable),
+                        workspace?.worktreePath ?: stringResource(R.string.newtask_cwd_by_workspace),
+                    ),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
                 )
             } else {
                 Text(
-                    "目标：${host?.host?.label ?: "请选择已连接的机器"} / 新工作区 / 新标签页\n工作目录由主机默认设置决定。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    stringResource(
+                        R.string.newtask_target_new,
+                        host?.host?.label ?: stringResource(R.string.newtask_select_host),
+                    ),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
                 )
             }
             Spacer(Modifier.height(12.dp))
 
-            Text("Agent", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Agent", style = DsTypography.micro, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
                 items(dev.herdwatch.domain.AgentKinds.common) { k ->
-                    FilterChip(selected = kind == k, onClick = { applyKind(k) }, label = { Text(k) }, modifier = Modifier.heightIn(min = 48.dp))
+                    NeoChip(
+                        label = k,
+                        selected = kind == k,
+                        onClick = { applyKind(k) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
             }
-            OutlinedTextField(
+            // NeoField 没有 isError/supportingText：支持文案放到字段下方，
+            // 错误态用 danger 色 + liveRegion 播报，等价于 Material 的 error 语义。
+            val nameError = duplicateName || name.isBlank()
+            val nameSupport = if (duplicateName) stringResource(R.string.newtask_duplicate_name)
+            else stringResource(R.string.newtask_name_hint)
+            NeoField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Agent 名称") },
+                label = stringResource(R.string.newtask_name_label),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                isError = duplicateName || name.isBlank(),
-                supportingText = { Text(if (duplicateName) "此主机上已有同名 agent 或分屏，请换一个名字" else "使用主机内唯一的名称") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(DsSpace.xs))
+            Text(
+                nameSupport,
+                style = DsTypography.caption,
+                color = if (nameError) colors.danger else colors.textSoft,
+                modifier = if (nameError) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier,
+            )
+            Spacer(Modifier.height(DsSpace.s))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("接着上次会话", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.newtask_resume_label), style = DsTypography.body, color = colors.text)
                     Text(
-                        if (resume) "使用下方续接参数；由 agent 查找历史会话" else "新开一个会话",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        if (resume) stringResource(R.string.newtask_resume_on_hint) else stringResource(R.string.newtask_resume_off_hint),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
                     )
                 }
-                Switch(checked = resume, onCheckedChange = { applyResume(it) }, modifier = Modifier.semantics { contentDescription = "接着上次会话" })
+                NeoToggle(
+                    checked = resume,
+                    onCheckedChange = { applyResume(it) },
+                    modifier = Modifier.semantics { contentDescription = resumeLabel },
+                )
             }
             if (resume) {
-                OutlinedTextField(
+                NeoField(
                     value = argsText,
                     onValueChange = { argsText = it },
-                    label = { Text("启动参数（每行一个）") },
-                    supportingText = { Text("含空格的路径也放在同一行，无需添加引号") },
+                    label = stringResource(R.string.newtask_args_label),
+                    singleLine = false,
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
+                Spacer(Modifier.height(DsSpace.xs))
+                Text(
+                    stringResource(R.string.newtask_args_hint),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                )
             }
             Spacer(Modifier.height(14.dp))
-            Button(
+            NeoButton(
+                label = stringResource(R.string.newtask_start_action, name.trim().ifBlank { kind }),
                 onClick = {
-                    val target = hosts.firstOrNull { it.host.id == hostId && it.conn is ConnState.Connected } ?: return@Button
-                    if (name.isBlank() || duplicateName || (workspaceId != null && target.structure.workspaces.none { it.id == workspaceId })) return@Button
+                    val target = hosts.firstOrNull { it.host.id == hostId && it.conn is ConnState.Connected } ?: return@NeoButton
+                    if (name.isBlank() || duplicateName || (workspaceId != null && target.structure.workspaces.none { it.id == workspaceId })) return@NeoButton
                     onStart(target.host.id, workspaceId, kind, name.trim(), if (resume) argsText.lines().filter { it.isNotBlank() } else emptyList())
                 },
+                tone = NeoButtonTone.Primary,
                 enabled = validTarget && name.isNotBlank() && !duplicateName,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-            ) { Text("创建并启动 ${name.trim().ifBlank { kind }}") }
+            )
         }
     }
+}
+
+/**
+ * NeoChip 没有 `enabled` 参数：禁用态用降低的不透明度 + `disabled()` 语义 + onClick 门控表达，
+ * 保持原来 FilterChip(enabled = ...) 的观感与行为。
+ */
+@Composable
+private fun TaskChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    dot: Color? = null,
+) {
+    NeoChip(
+        label = label,
+        selected = selected,
+        dot = dot,
+        onClick = { if (enabled) onClick() },
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .alpha(if (enabled) 1f else 0.45f)
+            .semantics { if (!enabled) disabled() },
+    )
 }

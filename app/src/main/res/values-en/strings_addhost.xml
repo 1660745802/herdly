@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="addhost_title_add">Add host</string>
+    <string name="addhost_title_edit">Edit host</string>
+    <string name="addhost_subtitle">Connects directly over SSH; credentials are encrypted on this device. After saving we try to connect — check the host list for the result.</string>
+    <string name="addhost_label_optional">Name (optional)</string>
+    <string name="addhost_host">Host</string>
+    <string name="addhost_host_placeholder">192.168.1.10 or build.example.com</string>
+    <string name="addhost_port">Port</string>
+    <string name="addhost_user">Username</string>
+    <string name="addhost_password">Password</string>
+    <string name="addhost_key">Private key</string>
+    <string name="addhost_key_full">Private key (full OpenSSH / PEM)</string>
+    <string name="addhost_passphrase_optional">Key passphrase (optional)</string>
+    <string name="addhost_expanded">Expanded</string>
+    <string name="addhost_collapsed">Collapsed</string>
+    <string name="addhost_advanced_hide">Hide advanced settings</string>
+    <string name="addhost_advanced_show">Advanced: session and command path</string>
+    <string name="addhost_session_optional">Herdr session (optional)</string>
+    <string name="addhost_session_placeholder">Default session</string>
+    <string name="addhost_herdr_command">Herdr command</string>
+    <string name="addhost_herdr_command_hint">Non-interactive SSH may have a short PATH; an absolute path works here</string>
+    <string name="addhost_fingerprint_note">The fingerprint is recorded on first connect; the connection stops if a saved fingerprint changes.</string>
+    <string name="addhost_check_hint">Tip: run herdr remote-api-bridge --check on the host and confirm it prints herdr-api-bridge-v1.</string>
+    <string name="addhost_saving">Saving…</string>
+    <string name="addhost_err_host_required">Host cannot be empty</string>
+    <string name="addhost_err_user_required">Username cannot be empty</string>
+    <string name="addhost_err_password_required">Password cannot be empty</string>
+    <string name="addhost_err_key_required">Private key cannot be empty</string>
+    <string name="addhost_err_port_range">Port must be 1–65535</string>
+    <string name="addhost_err_herdr_required">Enter the herdr command or an absolute path</string>
+</resources>

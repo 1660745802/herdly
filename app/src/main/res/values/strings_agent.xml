@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Agent 详情：顶部栏 -->
+    <string name="agent_cd_back">返回收件箱</string>
+    <string name="agent_cd_rename">重命名 Agent</string>
+    <string name="agent_cd_reread_screen">重新读取屏幕</string>
+    <string name="agent_cd_more_actions">更多操作</string>
+
+    <!-- Agent 详情：更多菜单 -->
+    <string name="agent_menu_read_fullscreen">全屏阅读原文</string>
+    <string name="agent_rename">重命名</string>
+    <string name="agent_menu_expand_snapshot_1200">扩大快照至 1200 行</string>
+    <string name="agent_menu_reread_snapshot_1200">重新读取 1200 行快照</string>
+    <string name="agent_menu_restore_snapshot_400">恢复 400 行快照</string>
+    <string name="agent_menu_status_source">状态来源</string>
+    <string name="agent_menu_copy_screen">复制完整屏幕</string>
+    <string name="agent_toast_copied_screen">已复制完整屏幕</string>
+    <string name="agent_menu_wrap_on">开启自动换行</string>
+    <string name="agent_menu_wrap_off">关闭自动换行</string>
+    <string name="agent_menu_select_copy">选择并复制屏幕</string>
+    <string name="agent_menu_stop">中断 Agent</string>
+
+    <!-- Agent 详情：快照读取状态 -->
+    <string name="agent_reading">正在读取…</string>
+    <string name="agent_snapshot_stale">快照待同步</string>
+    <string name="agent_read_at">读取于 %1$s</string>
+    <string name="agent_state_talkback_paused">TalkBack 已启用，自动更新保持暂停</string>
+    <string name="agent_state_autoupdate_paused">自动更新已暂停</string>
+    <string name="agent_state_autoupdate_on">自动更新已开启</string>
+    <string name="agent_pause_talkback">TalkBack 下暂停</string>
+    <string name="agent_resume_updates">恢复更新</string>
+    <string name="agent_pause_updates">暂停更新</string>
+
+    <!-- Agent 详情：连接与证据提示 -->
+    <string name="agent_host_disconnected">%1$s 尚未连接，保留上次屏幕和草稿。</string>
+    <string name="agent_reconnecting">正在重连…</string>
+    <string name="agent_reconnect_and_read">重连并读取</string>
+    <string name="agent_evidence_not_synced">此页证据尚未同步，请重新读取后再判断。</string>
+    <string name="agent_reread">重新读取</string>
+    <string name="agent_verify_remote">我已核对远端状态…</string>
+
+    <!-- Agent 详情：不确定态 -->
+    <string name="agent_status_unverified">状态待核实</string>
+    <string name="agent_need_read_source">需要查看原文</string>
+    <string name="agent_no_safe_option">尚未识别出可安全选择的选项。请核对完整屏幕，再使用回复或终端按键。</string>
+
+    <!-- Agent 详情：终端面板 -->
+    <string name="agent_snapshot_lines">%1$d 行快照</string>
+    <string name="agent_snapshot_lines_truncated">%1$d 行快照 · 已截断</string>
+    <string name="agent_fullscreen">全屏</string>
+    <string name="agent_cd_fold_decorations">折叠装饰线与多余空行</string>
+    <string name="agent_state_on">已开启</string>
+    <string name="agent_state_off">已关闭</string>
+    <string name="agent_view_source">看原文</string>
+    <string name="agent_focus">聚焦</string>
+    <string name="agent_reading_screen">正在读取屏幕…</string>
+    <string name="agent_folded_hint">已折叠装饰线和多余空行；审批仍核对完整原文。</string>
+    <string name="agent_screen_empty">当前屏幕为空。</string>
+    <string name="agent_truncated_hint">快照已截断。可扩大到 1200 行；当前协议不支持翻页读取更早 scrollback。</string>
+    <string name="agent_truncated_hint_max">读取范围已设为最近 1200 行；当前显示内容仍被截断。协议不支持翻页读取更早 scrollback。</string>
+    <string name="agent_expand_to_1200">扩大到 1200 行</string>
+
+    <!-- Agent 详情：审批区 -->
+    <string name="agent_need_decision">需要你决定</string>
+    <string name="agent_recognition_unverified">识别待核对</string>
+    <plurals name="agent_view_options">
+        <item quantity="other">查看选项 · %1$d</item>
+    </plurals>
+    <string name="agent_state_expanded">已展开</string>
+    <string name="agent_state_collapsed">已收起</string>
+    <string name="agent_keys_collapse">收起按键</string>
+    <string name="agent_keys">终端按键</string>
+    <string name="agent_submitting">正在提交…</string>
+    <string name="agent_keys_hint">直接向当前 pane 发送按键，发送前请核对屏幕。</string>
+    <string name="agent_ctrl_latched">已按下，下个字母将发送组合键</string>
+    <string name="agent_ctrl_idle">未按下</string>
+    <string name="agent_cd_arrow_up">方向键上</string>
+    <string name="agent_cd_arrow_down">方向键下</string>
+    <string name="agent_cd_arrow_left">方向键左</string>
+    <string name="agent_cd_arrow_right">方向键右</string>
+    <string name="agent_stop_ellipsis">中断…</string>
+    <string name="agent_cd_reply_to">回复 %1$s</string>
+    <string name="agent_reply_placeholder">回复 Agent…</string>
+    <string name="agent_cd_send_to">发送到 %1$s</string>
+    <string name="agent_send_reply">发送</string>
+
+    <!-- Agent 详情：审批面板 -->
+    <string name="agent_context_line">%1$s / %2$s · %3$s</string>
+    <string name="agent_identity">%1$s / %2$s</string>
+    <string name="agent_no_options_now">当前已无可识别的审批选项，请返回核对最新屏幕。</string>
+    <string name="agent_verify_screen_source">核对屏幕原文</string>
+    <string name="agent_blocked_truncated">快照不完整，请扩大读取并核对原文。</string>
+    <string name="agent_blocked_unverified">上次操作结果待核实，请刷新屏幕后再判断。</string>
+    <string name="agent_blocked_cannot_approve">当前不可审批，请返回重新读取并核对屏幕。</string>
+    <string name="agent_back_to_terminal">返回终端</string>
+
+    <!-- Agent 详情：对话框 -->
+    <string name="agent_explain_title">Herdr 的状态判断</string>
+    <string name="agent_confirm_verify_title">已核对远端状态？</string>
+    <string name="agent_confirm_verify_body">请先刷新并阅读屏幕，确认上次操作是否已执行。解除限制后可以再次操作；重复提交可能再次执行命令。</string>
+    <string name="agent_confirm_verify_action">已核对，继续操作</string>
+    <string name="agent_confirm_verify_dismiss">返回核对</string>
+    <string name="agent_rename_title">重命名 Agent</string>
+    <string name="agent_rename_label">新名字</string>
+    <string name="agent_confirm_stop_title">中断 %1$s？</string>
+    <string name="agent_confirm_stop_body">将向 %1$s / %2$s 发送 Ctrl-C。当前步骤可能终止，pane 会保留。</string>
+    <string name="agent_stop">中断</string>
+
+    <!-- Agent 详情：上下条遍历 -->
+    <string name="agent_prev">上一条</string>
+    <string name="agent_next">下一条</string>
+
+    <!-- Agent 详情：审批选项与长期授权 -->
+    <string name="agent_choose_action">选择操作</string>
+    <string name="agent_approval_review_hint">发送前会复核问题、选项和上下文。</string>
+    <string name="agent_standing_title">确认长期授权</string>
+    <string name="agent_standing_body">%1$s\n\n这项选择可能让后续同类请求不再询问，请核对授权范围。</string>
+    <string name="agent_standing_confirm">确认长期授权</string>
+
+    <!-- Agent 详情：选择复制 -->
+    <string name="agent_select_copy_title">选择复制</string>
+    <string name="agent_select_all">全选</string>
+    <string name="agent_selection_hint">长按选择，拖动两端调整范围。</string>
+
+    <!-- Agent 详情：回到底部 -->
+    <string name="agent_back_to_bottom_new">有新内容 · 回到底部</string>
+    <string name="agent_back_to_bottom">回到底部</string>
+    <string name="agent_updates_paused">自动读取已暂停，点右侧继续</string>
+</resources>

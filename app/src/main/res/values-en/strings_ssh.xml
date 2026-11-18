@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ssh_host_key_mismatch">Host key changed.\nExpected %1$s\nActual %2$s\nThis can be a reinstall — or someone in the middle.</string>
+    <string name="ssh_request_timeout">Herdr request timed out. If it was a write request, check whether it was accepted.</string>
+    <string name="ssh_client_closed">SSH client is closed</string>
+    <string name="ssh_not_connected">Not connected to %1$s</string>
+    <string name="ssh_write_failed">Failed to write to the terminal: %1$s</string>
+    <string name="ssh_read_failed">Failed to read from the terminal: %1$s</string>
+    <string name="ssh_connect_failed">Could not connect to %1$s: %2$s</string>
+    <string name="ssh_open_shell_failed">Could not open a shell channel: %1$s</string>
+    <string name="ssh_session_closed">SSH session is closed</string>
+    <string name="ssh_no_host_key">SSH did not return a host key</string>
+    <string name="ssh_auth_failed">Authentication failed. Check the username, password or key.</string>
+    <string name="ssh_connect_timeout">Connection timed out after %1$d s. Host unreachable or wrong port.</string>
+    <string name="ssh_refused">Connection refused. Wrong host or port.</string>
+    <string name="ssh_unknown_host">Host %1$s not found</string>
+    <string name="ssh_bridge_no_reply">bridge returned nothing (%1$s): %2$s</string>
+    <string name="ssh_unknown_host_key">First connection — confirm this host key: %1$s</string>
+</resources>

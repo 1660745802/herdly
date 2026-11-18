@@ -1,5 +1,7 @@
 package dev.herdwatch.domain
 
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Ask
 import dev.herdwatch.model.AskConfidence
 import dev.herdwatch.model.AskOption
@@ -18,8 +20,8 @@ object ApprovalPolicy {
             a.pane.text.replace("\r\n", "\n").trimEnd() == b.pane.text.replace("\r\n", "\n").trimEnd()
 
     fun unavailable(evidence: ApprovalEvidence): String? = when {
-        evidence.pane.truncated -> "屏幕内容不完整，请展开核对；辅助审批已停用，可核对原文后手动操作。"
-        evidence.ask == null || evidence.ask.confidence == AskConfidence.NONE -> "尚未识别可核对的问题。"
+        evidence.pane.truncated -> Str.get(R.string.policy_unavailable_truncated)
+        evidence.ask == null || evidence.ask.confidence == AskConfidence.NONE -> Str.get(R.string.policy_unavailable_unrecognized)
         else -> null
     }
 
@@ -27,14 +29,14 @@ object ApprovalPolicy {
     fun validate(frozen: ApprovalEvidence, option: AskOption, fresh: ApprovalEvidence): String? = when {
         frozen.ask == null ||
             (frozen.ask.options.none { it === option } && frozen.ask.allow !== option && frozen.ask.deny !== option) ||
-            frozen.ask.options.none { it == option } -> "选项已过期，请重新核对当前问题。"
-        option.keys.isEmpty() -> "选项没有有效按键，没有发送。"
+            frozen.ask.options.none { it == option } -> Str.get(R.string.policy_option_expired)
+        option.keys.isEmpty() -> Str.get(R.string.policy_option_no_keys)
         unavailable(frozen) != null -> unavailable(frozen)
         unavailable(fresh) != null -> unavailable(fresh)
         // A valid revision becoming absent is also a loss of evidence, not equality.
         ((frozen.pane.revision ?: 0) > 0 || (fresh.pane.revision ?: 0) > 0) &&
-            frozen.pane.revision != fresh.pane.revision -> "屏幕版本已变化，没有发送。请核对新内容。"
-        !sameContext(frozen, fresh) -> "问题或上下文已变化，没有发送。请核对新内容。"
+            frozen.pane.revision != fresh.pane.revision -> Str.get(R.string.policy_revision_changed)
+        !sameContext(frozen, fresh) -> Str.get(R.string.policy_context_changed)
         else -> null
     }
 }

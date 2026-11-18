@@ -12,23 +12,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,19 +27,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import dev.herdwatch.R
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.herdwatch.model.Screen
 
-private data class Tab(val label: String, val icon: ImageVector, val screen: Screen)
+private data class Tab(val label: String, val icon: dev.herdwatch.ui.design.NeoGlyph, val screen: Screen)
 
 @Composable
 fun HerdwatchRoot(vm: AppViewModel) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val prefs by vm.preferences.collectAsStateWithLifecycle()
+    val terminal by vm.terminalState.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val version = vm.version
     val snackbar = remember { SnackbarHostState() }
     val processLifecycle = ProcessLifecycleOwner.get()
 
@@ -78,58 +76,70 @@ fun HerdwatchRoot(vm: AppViewModel) {
     }
 
     BackHandler(
-        enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure || ui.screen == Screen.Settings,
+        enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure ||
+            ui.screen is Screen.Terminal || ui.screen == Screen.Settings || ui.screen == Screen.StyleGuide,
     ) { vm.back() }
 
-    val tabs = remember {
+    val tabInbox = stringResource(R.string.app_tab_inbox)
+    val tabHosts = stringResource(R.string.app_tab_hosts)
+    val tabSettings = stringResource(R.string.app_tab_settings)
+    val newTaskLabel = stringResource(R.string.app_new_task)
+    val tabs = remember(tabInbox, tabHosts, tabSettings) {
         listOf(
-            Tab("值守", Icons.AutoMirrored.Filled.List, Screen.Inbox),
-            Tab("机器", Icons.Default.Home, Screen.Hosts),
+            Tab(tabInbox, dev.herdwatch.ui.design.NeoGlyph.Tray, Screen.Inbox),
+            Tab(tabHosts, dev.herdwatch.ui.design.NeoGlyph.Server, Screen.Hosts),
+            Tab(tabSettings, dev.herdwatch.ui.design.NeoGlyph.Sliders, Screen.Settings),
         )
     }
-    val showTabs = ui.screen == Screen.Inbox || ui.screen == Screen.Hosts
+    val showTabs = ui.screen == Screen.Inbox || ui.screen == Screen.Hosts || ui.screen == Screen.Settings
     val pageState = rememberSaveableStateHolder()
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = Color.Transparent,
+        contentColor = dev.herdwatch.ui.design.ds().text,
+        snackbarHost = {
+            SnackbarHost(snackbar) { data ->
+                dev.herdwatch.ui.design.NeoSnackbarBody(message = data.visuals.message)
+            }
+        },
         floatingActionButton = {
+            val showNewTask = ui.screen == Screen.Inbox && ui.repo.hosts.isNotEmpty()
+            val hasPendingApproval = ui.repo.agents.any { it.status == dev.herdwatch.model.AgentStatus.WAITING }
             AnimatedVisibility(
-                visible = ui.screen == Screen.Inbox && ui.repo.hosts.isNotEmpty(),
+                visible = showNewTask,
                 enter = scaleIn(tween(180)) + fadeIn(tween(140)),
                 exit = scaleOut(tween(120)) + fadeOut(tween(90)),
             ) {
-                ExtendedFloatingActionButton(
+                // Same chassis language as the rest of the app: one lifted control, not a
+                // Material tonal pill with a ripple from a different design system.
+                dev.herdwatch.ui.design.NeoButton(
+                    label = newTaskLabel,
                     onClick = { vm.showNewTask(true) },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shape = RoundedCornerShape(18.dp),
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("派新任务") },
+                    tone = dev.herdwatch.ui.design.NeoButtonTone.Primary,
+                    icon = dev.herdwatch.ui.design.NeoGlyph.Plus,
+                    compact = true,
+                    modifier = Modifier.semantics { contentDescription = newTaskLabel },
                 )
             }
         },
         bottomBar = {
             if (showTabs) {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    tabs.forEach { tab ->
-                        NavigationBarItem(
-                            selected = ui.screen == tab.screen,
-                            onClick = { vm.navigate(tab.screen) },
-                            icon = { Icon(tab.icon, contentDescription = null) },
-                            label = { Text(tab.label) },
-                        )
-                    }
-                }
+                dev.herdwatch.ui.design.NeoTabBar(
+                    tabs = tabs.map { it.label to it.icon },
+                    selectedIndex = tabs.indexOfFirst { it.screen == ui.screen }.coerceAtLeast(0),
+                    onSelect = { vm.navigate(tabs[it].screen) },
+                )
             }
         },
     ) { inner ->
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(bottom = inner.calculateBottomPadding())
-                .statusBarsPadding(),
+                .padding(bottom = inner.calculateBottomPadding()),
         ) {
+            // The backdrop paints under the status bar too; only the content is inset. Insetting the
+            // whole tree left the system bar showing the window's light background above a dark page.
+            GlassBackdrop(Modifier.fillMaxSize())
             AnimatedContent(
                 targetState = ui.screen,
                 contentKey = { screen -> if (screen is Screen.Detail) "detail" else screen },
@@ -148,15 +158,25 @@ fun HerdwatchRoot(vm: AppViewModel) {
                     Screen.Inbox -> "inbox"
                     Screen.Hosts -> "hosts"
                     Screen.Settings -> "settings"
+                    Screen.StyleGuide -> "style-guide"
                     is Screen.Structure -> "structure:${screen.hostId}"
+                    is Screen.Terminal -> "terminal:${screen.hostId}"
                     is Screen.Detail -> "detail" // Drafts live in the ViewModel; avoid unbounded page state per agent.
                 }
+                // Full-screen surfaces own their own insets: the terminal page unions ime+nav bars
+                // on its root, so adding a top inset here would push its dock past the top edge.
+                val insets = if (screen is Screen.Terminal || screen is Screen.Detail) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)
+                }
+                Box(insets) {
                 pageState.SaveableStateProvider(pageKey) {
                     when (screen) {
                         Screen.Inbox -> InboxScreen(
                             ui = ui,
                             onRefresh = vm::refresh,
-                            onOpenAgent = vm::openAgent,
+                            onOpenAgent = { agent, hostId -> vm.openAgent(agent, hostId) },
                             onFilter = vm::setFilter,
                             onQuery = vm::setQuery,
                             onToggleSearch = vm::setSearching,
@@ -172,6 +192,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onEdit = vm::editHost,
                             onDelete = vm::deleteHost,
                             onOpen = vm::openStructure,
+                            onTerminal = vm::openTerminal,
                             onOpenHelp = { vm.navigate(Screen.Settings) },
                         )
                         is Screen.Structure -> {
@@ -201,7 +222,27 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                 )
                             }
                         }
-                        Screen.Settings -> SettingsScreen(ui.repo.hosts, onBack = vm::back)
+                        Screen.Settings -> SettingsScreen(
+                            hosts = ui.repo.hosts,
+                            preferences = prefs,
+                            onBack = vm::back,
+                            onOpenStyleGuide = { vm.navigate(Screen.StyleGuide) },
+                            onLanguage = vm::setLanguage,
+                            onTheme = vm::setTheme,
+                            onMotion = vm::setMotion,
+                            onDensity = vm::setDensity,
+                            onFontSize = vm::terminalFontSize,
+                            onSnapshotLines = vm::setDefaultSnapshotLines,
+                            onKeyBarRows = vm::setKeyBarRows,
+                            onLongPressRepeat = vm::setLongPressRepeat,
+                            onInputMode = vm::setInputMode,
+                            onResetFingerprints = vm::resetFingerprints,
+                            version = version,
+                            update = update,
+                            onCheckUpdate = vm::checkForUpdate,
+                            onDismissUpdate = vm::clearUpdateResult,
+                        )
+                        Screen.StyleGuide -> dev.herdwatch.ui.design.StyleGalleryScreen(onBack = vm::back)
                         is Screen.Detail -> AgentScreen(
                             detail = ui.detail,
                             onBack = vm::back,
@@ -219,12 +260,29 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             canOpenPrevious = ui.detail.canOpenPrevious,
                             canOpenNext = ui.detail.canOpenNext,
                             onLoadMore = vm::loadMore,
+                            onSetSnapshotLines = vm::setSnapshotLines,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },
                             onExplain = vm::explainAgent,
                             onDismissExplain = vm::dismissExplain,
                             onRename = vm::renameAgent,
                         )
+                        is Screen.Terminal -> TerminalScreen(
+                            state = terminal,
+                            onBack = vm::back,
+                            onReconnect = vm::terminalReconnect,
+                            onInput = vm::terminalInput,
+                            onKey = vm::terminalKey,
+                            onResize = vm::terminalResize,
+                            onFontSize = vm::terminalFontSize,
+                            onFollow = vm::terminalFollow,
+                            onTrustFingerprint = vm::terminalTrustFingerprint,
+                            inputMode = prefs.inputMode,
+                            onInputMode = vm::setInputMode,
+                            keyBarRows = prefs.keyBarRows,
+                            longPressRepeat = prefs.longPressRepeat,
+                        )
                     }
+                }
                 }
             }
         }

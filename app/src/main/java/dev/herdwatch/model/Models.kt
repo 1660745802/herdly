@@ -1,5 +1,7 @@
 package dev.herdwatch.model
 
+import dev.herdwatch.R
+
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -28,13 +30,14 @@ enum class AgentStatus {
     IDLE,      // idle
     UNKNOWN;   // present but unclassifiable — never bury it
 
-    val label: String
+    /** Localized label id; UI resolves it with stringResource, no Context needed here. */
+    val labelRes: Int
         get() = when (this) {
-            WAITING -> "等你"
-            WORKING -> "进行中"
-            REVIEW -> "待查看"
-            IDLE -> "空闲"
-            UNKNOWN -> "未识别"
+            WAITING -> R.string.status_waiting
+            WORKING -> R.string.status_working
+            REVIEW -> R.string.status_review
+            IDLE -> R.string.status_idle
+            UNKNOWN -> R.string.status_unknown
         }
 
     companion object {
@@ -166,6 +169,8 @@ sealed interface Screen {
     data object Inbox : Screen
     data object Hosts : Screen
     data object Settings : Screen
+    data object StyleGuide : Screen
     data class Detail(val agentKey: String) : Screen
     data class Structure(val hostId: String) : Screen
+    data class Terminal(val hostId: String) : Screen
 }

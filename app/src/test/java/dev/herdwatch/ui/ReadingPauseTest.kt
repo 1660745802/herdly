@@ -3,7 +3,9 @@ package dev.herdwatch.ui
 import androidx.lifecycle.ViewModelStore
 import dev.herdwatch.data.FakeHostConnection
 import dev.herdwatch.data.HerdRepository
+import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepositoryPreferences
+import dev.herdwatch.i18n.TestStrings
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.HerdStructure
@@ -22,15 +24,72 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.resetMain
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ReadingPauseTest {
+
+    @Before
+    fun installStrings() {
+        TestStrings.install()
+    }
     private fun agent() = Agent(
         "h", "local", "p", "task", "claude", AgentStatus.WAITING,
         cwd = null, workspaceLabel = null, stateChangeSeq = 1,
         completionSeq = 0, focused = false, rawStatus = "blocked",
     )
+
+    @Test fun `expanded snapshot size survives refresh and page reentry and can return to default`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val agent = agent()
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val base = FakeHostConnection(host, Snapshot("test", 1, listOf(agent), HerdStructure()))
+            val requests = mutableListOf<Int>()
+            var fail = false
+            val client = object : HostConnection by base {
+                override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
+                    requests += lines
+                    if (fail) error("fixture read failure")
+                    return PaneText("recent $lines", requests.size.toLong(), false)
+                }
+            }
+            val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("vm", vm)
+            runCurrent()
+            vm.openAgent(agent)
+            runCurrent()
+            vm.loadMore()
+            runCurrent()
+            vm.refreshPaneQuietly()
+            runCurrent()
+            vm.back()
+            vm.openAgent(agent)
+            runCurrent()
+            assertEquals(listOf(400, 1200, 1200, 1200), requests)
+            assertEquals(1200, vm.ui.value.detail.snapshotLines)
+            assertEquals("recent 1200", vm.ui.value.detail.text)
+            vm.setSnapshotLines(400)
+            runCurrent()
+            assertEquals(400, requests.last())
+            // A failed expansion retains the last evidence and clearly reports a read
+            // error; the line count remains a requested preference, not returned data.
+            fail = true
+            vm.loadMore()
+            runCurrent()
+            assertEquals("recent 400", vm.ui.value.detail.text)
+            assertTrue(vm.ui.value.detail.stale)
+            assertTrue(vm.ui.value.detail.error!!.contains(TestStrings.text("vm_read_failed", "").trim()))
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
 
     @Test fun `paused evidence ignores quiet reads and changed status until explicit refresh`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
@@ -50,7 +109,7 @@ class ReadingPauseTest {
                 }
             }
             val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
-            val vm = AppViewModel(repo)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
             models.put("vm", vm)
             runCurrent()
             vm.openAgent(agent)
@@ -98,7 +157,7 @@ class ReadingPauseTest {
                 }
             }
             val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
-            val vm = AppViewModel(repo)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
             models.put("vm", vm)
             runCurrent()
             vm.openAgent(agent)
@@ -140,7 +199,7 @@ class ReadingPauseTest {
                 }
             }
             val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
-            val vm = AppViewModel(repo)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
             models.put("vm", vm)
             runCurrent()
             vm.openAgent(agent)
@@ -184,7 +243,7 @@ class ReadingPauseTest {
                 }
             }
             val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
-            val vm = AppViewModel(repo)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
             models.put("vm", vm)
             runCurrent()
             vm.openAgent(agent)

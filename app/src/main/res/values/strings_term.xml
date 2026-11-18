@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 终端页（纯 SSH shell）的连接状态 -->
+    <string name="term_connection_ended">连接已结束。</string>
+    <string name="term_connection_lost">连接中断。</string>
+</resources>

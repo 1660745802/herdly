@@ -1,91 +1,105 @@
 package dev.herdwatch.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostRuntime
-import dev.herdwatch.ui.theme.MonoStyle
-import dev.herdwatch.ui.theme.statusPalette
+import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsRadius
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoChip
+import dev.herdwatch.ui.design.NeoDivider
+import dev.herdwatch.ui.design.NeoGlyph
+import dev.herdwatch.ui.design.NeoIcon
+import dev.herdwatch.ui.design.NeoIconButton
+import dev.herdwatch.ui.design.NeoSegmented
+import dev.herdwatch.ui.design.NeoLamp
+import dev.herdwatch.ui.design.NeoPageHeader
+import dev.herdwatch.ui.design.NeoSkeleton
+import dev.herdwatch.ui.design.NeoWell
+import dev.herdwatch.ui.design.ds
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InboxScreen(
     ui: UiState,
     onRefresh: () -> Unit,
-    onOpenAgent: (Agent) -> Unit,
+    onOpenAgent: (Agent, String?) -> Unit,
     onFilter: (InboxFilter) -> Unit,
     onQuery: (String) -> Unit,
     onToggleSearch: (Boolean) -> Unit,
@@ -105,90 +119,116 @@ fun InboxScreen(
         }
     }
 
-    val filtered = inboxQueue(agents, ui.filter, ui.query)
-    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    var selectedHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    val hostScope = selectedHostId.takeIf { ui.repo.hosts.size > 1 }
+    val scopedAgents = hostScope?.let { hostId -> agents.filter { it.hostId == hostId } } ?: agents
+    val filtered = inboxQueue(scopedAgents, ui.filter, ui.query)
+    val keyboard = LocalSoftwareKeyboardController.current
+    val syncingLabel = stringResource(R.string.inbox_state_syncing)
+    val refreshLabel = stringResource(R.string.inbox_cd_refresh)
+    val colors = ds()
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (!compact) {
-                BrandMark()
-                Spacer(Modifier.width(10.dp))
-            }
-            Column(Modifier.weight(1f)) {
-                Text("Herdly", style = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium)
-                val connected = ui.repo.hosts.count { it.conn is ConnState.Connected }
-                val connecting = ui.repo.hosts.any { it.conn is ConnState.Connecting }
-                Text(
-                    when {
-                        ui.repo.hosts.isEmpty() -> "手机上的 Herdr 收件箱"
-                        connecting && connected == 0 -> "连接中 · ${agents.size} 个 agent"
-                        compact -> "$connected/${ui.repo.hosts.size} 台在线"
-                        else -> "$connected/${ui.repo.hosts.size} 台在线 · ${agents.size} 个 agent"
-                    },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Column(Modifier.fillMaxSize()) {
+        val connected = ui.repo.hosts.count { it.conn is ConnState.Connected }
+        val connecting = ui.repo.hosts.any { it.conn is ConnState.Connecting }
+        NeoPageHeader(
+            title = "Herdly",
+            subtitle = when {
+                ui.repo.hosts.isEmpty() -> stringResource(R.string.inbox_subtitle_pocket)
+                connecting && connected == 0 ->
+                    pluralStringResource(R.plurals.inbox_subtitle_connecting, agents.size, agents.size)
+                compact -> pluralStringResource(
+                    R.plurals.inbox_summary_hosts_online, ui.repo.hosts.size, connected, ui.repo.hosts.size,
                 )
-            }
-            IconButton(onClick = { keyboard?.hide(); onToggleSearch(!ui.searching) }) {
-                Icon(Icons.Default.Search, contentDescription = if (ui.searching) "收起搜索" else "搜索")
-            }
-            IconButton(onClick = onRefresh, enabled = !ui.repo.refreshing,
-                modifier = Modifier.semantics { stateDescription = if (ui.repo.refreshing) "同步中" else "" },
-            ) {
+                else -> stringResource(
+                    R.string.inbox_summary_hosts_and_agents,
+                    pluralStringResource(
+                        R.plurals.inbox_summary_hosts_online, ui.repo.hosts.size, connected, ui.repo.hosts.size,
+                    ),
+                    pluralStringResource(R.plurals.inbox_count_agents, agents.size, agents.size),
+                )
+            },
+            compact = compact,
+            leading = if (compact) null else ({ BrandMark() }),
+            actions = {
+                NeoIconButton(
+                    glyph = if (ui.searching) NeoGlyph.Close else NeoGlyph.Search,
+                    onClick = { keyboard?.hide(); onToggleSearch(!ui.searching) },
+                    contentDescription = stringResource(
+                        if (ui.searching) R.string.inbox_cd_search_collapse else R.string.inbox_cd_search,
+                    ),
+                )
                 if (ui.repo.refreshing) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .semantics {
+                                contentDescription = refreshLabel
+                                stateDescription = syncingLabel
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        NeoSkeleton(Modifier.width(20.dp), height = 20.dp, corner = 10.dp)
+                    }
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "刷新收件箱")
+                    NeoIconButton(
+                        glyph = NeoGlyph.Refresh,
+                        onClick = onRefresh,
+                        contentDescription = stringResource(R.string.inbox_cd_refresh),
+                    )
                 }
-            }
-        }
+            },
+        )
 
-        if (ui.repo.hosts.isNotEmpty()) {
-            HostStrip(ui.repo.hosts, onOpenHost)
+        if (ui.repo.hosts.size > 1) {
+            HostStrip(
+                hosts = ui.repo.hosts,
+                agents = agents,
+                selectedHostId = selectedHostId,
+                onSelectHost = { selectedHostId = it },
+            )
         }
 
         // 搜索框放在列表外：若作为第一个 item，列表已有滚动位置时它会插到视口上方，
         // 视觉上“点了搜索没反应”。
         AnimatedVisibility(
             visible = ui.searching,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn(tween(motionMillis(160))),
+            exit = fadeOut(tween(motionMillis(120))),
         ) {
             val searchFocus = remember { FocusRequester() }
             LaunchedEffect(Unit) { searchFocus.requestFocus() }
-            OutlinedTextField(
+            InboxSearchField(
                 value = ui.query,
                 onValueChange = onQuery,
-                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 6.dp).focusRequester(searchFocus),
-                placeholder = { Text("名称、机器、项目、工作区、标签页、分屏或目录") },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }),
-                label = { Text("搜索收件箱") },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                trailingIcon = {
-                    if (ui.query.isNotEmpty()) {
-                        IconButton(onClick = { onQuery("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "清空")
-                        }
-                    }
-                },
+                onClear = { onQuery("") },
+                placeholder = stringResource(R.string.inbox_search_placeholder),
+                label = stringResource(R.string.inbox_search_label),
+                clearDescription = stringResource(R.string.inbox_cd_clear_search),
+                focusRequester = searchFocus,
+                modifier = Modifier.fillMaxWidth().padding(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.s),
+                onSearch = { keyboard?.hide() },
             )
         }
 
         if (!ui.searching && ui.query.isNotBlank()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onToggleSearch(true) }, modifier = Modifier.weight(1f)) {
-                    Text("搜索：${ui.query}", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                TextButton(onClick = { onQuery("") }) { Text("清除") }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NeoButton(
+                    label = stringResource(R.string.inbox_search_active, ui.query),
+                    onClick = { onToggleSearch(true) },
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                    modifier = Modifier.weight(1f),
+                )
+                NeoButton(
+                    label = stringResource(R.string.inbox_clear),
+                    onClick = { onQuery("") },
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                )
             }
         }
 
@@ -199,51 +239,99 @@ fun InboxScreen(
         ) {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, end = 20.dp, bottom = 100.dp),
+            contentPadding = PaddingValues(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.m, bottom = 100.dp),
         ) {
             if (ui.repo.hosts.isNotEmpty()) {
                 val connecting = ui.repo.hosts.filter { it.conn == ConnState.Connecting }
                 if (connecting.isNotEmpty() && agents.isEmpty()) {
                     item {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp)
-                                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                        NeoWell(
+                            modifier = Modifier.fillMaxWidth().padding(top = DsSpace.m),
+                            corner = DsRadius.control,
+                            depth = DsElev.inset,
                         ) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                "正在连接 ${connecting.joinToString("、") { it.host.label }}…",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(
+                                Modifier.padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                NeoSkeleton(Modifier.width(18.dp), height = 18.dp, corner = 9.dp)
+                                Spacer(Modifier.width(DsSpace.m))
+                                Text(
+                                    stringResource(
+                                        R.string.inbox_connecting_hosts,
+                                        connecting.joinToString(stringResource(R.string.inbox_list_separator)) { it.host.label },
+                                    ),
+                                    style = DsTypography.body,
+                                    color = colors.textSoft,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
-                item { DutyCard(agents, ui.repo.hosts, now, onOpenAgent, onReconnect) }
-                if (agents.isEmpty() && ui.repo.hosts.any { it.conn is ConnState.Connected }) {
+                item {
+                    DutySummary(
+                        agents = scopedAgents,
+                        hosts = ui.repo.hosts,
+                        now = now,
+                        onOpen = { agent -> onOpenAgent(agent, hostScope) },
+                        onReconnect = onReconnect,
+                        selectedHostId = hostScope,
+                    )
+                }
+                if (scopedAgents.isEmpty() && (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })) {
                     item {
-                        EmptyBlock(
-                            title = "现在没有 Agent",
-                            body = "可以创建新任务，或检查主机里的工作区和分屏。",
+                        InboxEmpty(
+                            icon = NeoGlyph.Tray,
+                            title = stringResource(
+                                if (hostScope == null) R.string.inbox_empty_none_title else R.string.inbox_empty_host_title,
+                            ),
+                            body = stringResource(
+                                if (hostScope == null) R.string.inbox_empty_none_body else R.string.inbox_empty_host_body,
+                            ),
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (onNewTask != null) {
-                                    Button(onClick = onNewTask) { Text("启动新任务") }
-                                } else {
-                                    Text("点右下角「派新任务」创建并启动 Agent。", style = MaterialTheme.typography.bodyMedium)
+                            Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                                if (hostScope != null) {
+                                    NeoButton(
+                                        label = stringResource(R.string.inbox_show_all_hosts),
+                                        onClick = { selectedHostId = null },
+                                        tone = NeoButtonTone.Ghost,
+                                        compact = true,
+                                    )
                                 }
-                                if (onOpenHost != null) {
+                                if (onNewTask != null && hostScope == null) {
+                                    NeoButton(
+                                        label = stringResource(R.string.inbox_start_new_task),
+                                        onClick = onNewTask,
+                                        tone = NeoButtonTone.Primary,
+                                        icon = NeoGlyph.Plus,
+                                    )
+                                } else {
+                                    Text(
+                                        stringResource(R.string.inbox_new_task_hint),
+                                        style = DsTypography.body,
+                                        color = colors.textSoft,
+                                    )
+                                }
+                                if (onOpenHost != null && hostScope == null) {
                                     ui.repo.hosts.filter { it.conn is ConnState.Connected }.forEach { runtime ->
-                                        TextButton(onClick = { onOpenHost(runtime.host.id) }) {
-                                            Text("检查 ${runtime.host.label} 的会话")
-                                        }
+                                        NeoButton(
+                                            label = stringResource(R.string.inbox_check_host_sessions, runtime.host.label),
+                                            onClick = { onOpenHost(runtime.host.id) },
+                                            tone = NeoButtonTone.Ghost,
+                                            icon = NeoGlyph.Server,
+                                            compact = true,
+                                        )
                                     }
                                 } else {
-                                    TextButton(onClick = onRefresh) { Text("重新检查 agent") }
+                                    NeoButton(
+                                        label = stringResource(R.string.inbox_recheck_agents),
+                                        onClick = onRefresh,
+                                        tone = NeoButtonTone.Ghost,
+                                        icon = NeoGlyph.Refresh,
+                                        compact = true,
+                                    )
                                 }
                             }
                         }
@@ -254,86 +342,123 @@ fun InboxScreen(
             if (ui.repo.hosts.isEmpty()) {
                 item {
                     val clipboard = LocalClipboardManager.current
-                    EmptyBlock(
-                        title = "把 Herdr 装进口袋",
-                        body = "Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，值守页会列出每个 Agent",
+                    InboxEmpty(
+                        icon = NeoGlyph.Server,
+                        title = stringResource(R.string.inbox_setup_title),
+                        body = stringResource(R.string.inbox_setup_body),
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = onAddHost, shape = RoundedCornerShape(10.dp)) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("添加机器")
+                        Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                NeoButton(
+                                    label = stringResource(R.string.inbox_add_host),
+                                    onClick = onAddHost,
+                                    tone = NeoButtonTone.Primary,
+                                    icon = NeoGlyph.Plus,
+                                    compact = true,
+                                )
+                                NeoButton(
+                                    label = stringResource(R.string.inbox_copy_check_command),
+                                    onClick = { clipboard.setText(AnnotatedString("herdr remote-api-bridge --check")) },
+                                    tone = NeoButtonTone.Quiet,
+                                    icon = NeoGlyph.Copy,
+                                    compact = true,
+                                )
                             }
-                            Button(
-                                onClick = { clipboard.setText(AnnotatedString("herdr remote-api-bridge --check")) },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                            ) { Text("复制检查命令") }
+                            Text(
+                                stringResource(R.string.inbox_check_command_hint),
+                                style = DsTypography.caption,
+                                color = colors.textSoft,
+                            )
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "在主机上运行上面那条命令，应输出 herdr-api-bridge-v1。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
                 return@LazyColumn
             }
 
             item {
-                FlowRow(
-                    Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp).selectableGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    FilterTab("需要处理", ui.filter == InboxFilter.ATTENTION, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ATTENTION) }
-                    FilterTab("全部 Agent", ui.filter == InboxFilter.ALL, Modifier.align(Alignment.CenterVertically)) { onFilter(InboxFilter.ALL) }
+                // The count drops to its own line instead of squeezing the filter track: at 1.3x
+                // font "Needs attention" would ellipsize inside a half-width segment.
+                Column(Modifier.fillMaxWidth().padding(top = DsSpace.s, bottom = DsSpace.xs)) {
+                    NeoSegmented(
+                        // 「全部」在前，「需要处理」在后：先给全量，再给聚焦视图。
+                        options = listOf(
+                            stringResource(R.string.inbox_filter_all),
+                            stringResource(R.string.inbox_filter_attention),
+                        ),
+                        selectedIndex = if (ui.filter == InboxFilter.ATTENTION) 1 else 0,
+                        onSelect = { index -> onFilter(if (index == 0) InboxFilter.ALL else InboxFilter.ATTENTION) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Text(
-                        "${filtered.size} 项${if (ui.query.isNotBlank()) "匹配" else ""}",
-                        modifier = Modifier.align(Alignment.CenterVertically),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        if (ui.query.isNotBlank())
+                            pluralStringResource(R.plurals.inbox_count_items_matched, filtered.size, filtered.size)
+                        else pluralStringResource(R.plurals.inbox_count_items, filtered.size, filtered.size),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = DsSpace.xs, top = DsSpace.xxs),
                     )
                 }
             }
 
-            fun section(status: AgentStatus, rows: List<Agent>, title: String) {
-                val visible = filtered.filter { it.status == status }
-                if (visible.isEmpty()) return
-                item(key = "h-$status") { SectionHeader(title, visible.size, status) }
-                items(visible, key = { it.key }) { agent ->
-                    AgentRow(agent, now, ui.repo.hosts.firstOrNull { it.host.id == agent.hostId }, Modifier.animateItem()) { onOpenAgent(agent) }
+            // One panel holding the queue. Extruding every row made a five-item list look like
+            // five separate objects glued to the screen; rows are now lines on a single surface.
+            item(key = "queue") {
+                NeoCard(modifier = Modifier.fillMaxWidth().padding(top = DsSpace.s), depth = DsElev.soft) {
+                    Column(Modifier.fillMaxWidth()) {
+                        filtered.forEachIndexed { index, agent ->
+                            AgentRow(
+                                agent,
+                                now,
+                                ui.repo.hosts.firstOrNull { it.host.id == agent.hostId },
+                                hostScoped = hostScope != null,
+                            ) { onOpenAgent(agent, hostScope) }
+                            if (index != filtered.lastIndex) NeoDivider(inset = DsSpace.xl + DsSpace.m)
+                        }
+                    }
                 }
             }
 
-            section(AgentStatus.WAITING, agents.filter { it.status == AgentStatus.WAITING }, "等待你处理")
-            section(AgentStatus.UNKNOWN, agents.filter { it.status == AgentStatus.UNKNOWN }, "状态待核实")
-            section(AgentStatus.REVIEW, agents.filter { it.status == AgentStatus.REVIEW }, "待查看")
-            section(AgentStatus.WORKING, agents.filter { it.status == AgentStatus.WORKING }, "进行中")
-            section(AgentStatus.IDLE, agents.filter { it.status == AgentStatus.IDLE }, "空闲")
-
-            if (filtered.isEmpty() && agents.isNotEmpty()) {
+            if (filtered.isEmpty() && scopedAgents.isNotEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(top = 36.dp, bottom = 24.dp)) {
-                        Text("没有匹配的 Agent", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(4.dp))
                         Text(
-                            if (ui.query.isNotBlank()) "搜索了名称、机器、项目、工作区、标签页、分屏和目录。"
-                            else if (ui.filter == InboxFilter.ATTENTION) "现在没有需要处理的项。"
-                            else "当前没有 Agent。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            stringResource(R.string.inbox_no_match_title),
+                            style = DsTypography.title,
+                            color = colors.text,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Spacer(Modifier.height(DsSpace.xs))
+                        Text(
+                            stringResource(
+                                when {
+                                    ui.query.isNotBlank() -> R.string.inbox_no_match_search_body
+                                    ui.filter == InboxFilter.ATTENTION -> R.string.inbox_no_match_attention_body
+                                    hostScope != null -> R.string.inbox_no_match_host_body
+                                    else -> R.string.inbox_no_match_none_body
+                                },
+                            ),
+                            style = DsTypography.body,
+                            color = colors.textSoft,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
                             if (ui.filter == InboxFilter.ATTENTION) {
-                                TextButton(onClick = { onFilter(InboxFilter.ALL) }) { Text("查看全部 Agent") }
+                                NeoButton(
+                                    label = stringResource(R.string.inbox_show_all_agents),
+                                    onClick = { onFilter(InboxFilter.ALL) },
+                                    tone = NeoButtonTone.Ghost,
+                                    compact = true,
+                                )
                             }
                             if (ui.query.isNotBlank()) {
-                                TextButton(onClick = { onQuery("") }) { Text("清除搜索") }
+                                NeoButton(
+                                    label = stringResource(R.string.inbox_clear_search),
+                                    onClick = { onQuery("") },
+                                    tone = NeoButtonTone.Ghost,
+                                    compact = true,
+                                )
                             }
                         }
                     }
@@ -346,87 +471,82 @@ fun InboxScreen(
 
 @Composable
 private fun BrandMark() {
+    val colors = ds()
     Canvas(
         Modifier
             .size(38.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(Color(0xFF12151A)),
+            .clip(RoundedCornerShape(DsRadius.key))
+            .background(colors.well),
     ) {
         val u = size.width / 108f
-        val paper = Color(0xFFF2EFE6)
         val ink = Brush.verticalGradient(
-            listOf(Color(0xFFFBF7EC), Color(0xFFE2DBC9)),
+            listOf(colors.text, colors.textSoft),
             startY = 39f * u, endY = 75f * u,
         )
         drawRoundRect(ink, Offset(31f * u, 39f * u), Size(46f * u, 36f * u), CornerRadius(14f * u))
-        drawRoundRect(paper, Offset(50f * u, 31f * u), Size(8f * u, 9f * u), CornerRadius(2f * u))
-        drawCircle(Color(0xFFFF8A3D), radius = 4.7f * u, center = Offset(54f * u, 26f * u))
-        drawRoundRect(Color(0xFF12151A), Offset(37f * u, 51f * u), Size(34f * u, 13f * u), CornerRadius(6.5f * u))
-        drawCircle(Color(0xFFFAF6EC), radius = 3.5f * u, center = Offset(44f * u, 57.5f * u))
-        drawCircle(Color(0xFFFF8A3D), radius = 3.5f * u, center = Offset(61f * u, 57.5f * u))
+        drawRoundRect(colors.baseRaised, Offset(50f * u, 31f * u), Size(8f * u, 9f * u), CornerRadius(2f * u))
+        drawCircle(colors.warn, radius = 4.7f * u, center = Offset(54f * u, 26f * u))
+        drawRoundRect(colors.well, Offset(37f * u, 51f * u), Size(34f * u, 13f * u), CornerRadius(6.5f * u))
+        drawCircle(colors.baseRaised, radius = 3.5f * u, center = Offset(44f * u, 57.5f * u))
+        drawCircle(colors.accent, radius = 3.5f * u, center = Offset(61f * u, 57.5f * u))
     }
 }
 
+/** Search field: milled well, no border — the same material as the design-system text field. */
 @Composable
-private fun HostStrip(hosts: List<HostRuntime>, onOpenHost: ((String) -> Unit)?) {
-    LazyRow(
-        Modifier.fillMaxWidth(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(hosts, key = { it.host.id }) { host ->
-            val failed = host.conn as? ConnState.Failed
-            val connected = host.conn is ConnState.Connected
-            val p = statusPalette()
+private fun InboxSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onClear: () -> Unit,
+    placeholder: String,
+    label: String,
+    clearDescription: String,
+    focusRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+    onSearch: () -> Unit,
+) {
+    val colors = ds()
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+        Text(label, style = DsTypography.caption, color = colors.textSoft)
+        NeoWell(Modifier.fillMaxWidth(), corner = DsRadius.control) {
             Row(
-                Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .heightIn(min = 48.dp)
-                    .then(if (onOpenHost != null) Modifier.clickable(
-                        role = androidx.compose.ui.semantics.Role.Button,
-                        onClickLabel = "打开 ${host.host.label}",
-                    ) { onOpenHost(host.host.id) } else Modifier)
-                    .semantics {
-                        if (onOpenHost != null) contentDescription = "${host.host.label}，${when {
-                            failed != null -> "连接失败"
-                            connected -> "已连接"
-                            host.conn == ConnState.Connecting -> "连接中"
-                            else -> "未连接"
-                        }}"
-                    }
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier
-                        .size(6.dp)
-                        .background(
-                            when {
-                                failed != null -> MaterialTheme.colorScheme.error
-                                connected -> p.review
-                                host.conn == ConnState.Connecting -> p.working
-                                else -> MaterialTheme.colorScheme.outline
-                            },
-                            CircleShape,
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = DsTypography.body,
+                            color = colors.textFaint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    BasicTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .padding(vertical = DsSpace.m)
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = label },
+                        singleLine = true,
+                        textStyle = DsTypography.body.copy(color = colors.text),
+                        cursorBrush = SolidColor(colors.accent),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Search,
                         ),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    host.host.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (failed != null) {
-                    Spacer(Modifier.width(6.dp))
-                    Text("连接失败", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
-                } else if (connected) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "已连接",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                    )
+                }
+                if (value.isNotEmpty()) {
+                    NeoIconButton(
+                        glyph = NeoGlyph.Close,
+                        onClick = onClear,
+                        contentDescription = clearDescription,
                     )
                 }
             }
@@ -435,200 +555,372 @@ private fun HostStrip(hosts: List<HostRuntime>, onOpenHost: ((String) -> Unit)?)
 }
 
 @Composable
-private fun DutyCard(
+private fun HostStrip(
+    hosts: List<HostRuntime>,
+    agents: List<Agent>,
+    selectedHostId: String?,
+    onSelectHost: (String?) -> Unit,
+) {
+    val colors = ds()
+    LazyRow(
+        Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = DsSpace.xl),
+        horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+    ) {
+        item(key = "all-hosts") {
+            HostFilterChip(
+                label = stringResource(R.string.inbox_host_all),
+                selected = selectedHostId == null,
+                count = agents.size,
+                status = null,
+                dot = colors.textFaint,
+            ) { onSelectHost(null) }
+        }
+        items(hosts, key = { it.host.id }) { host ->
+            val count = agents.count { it.hostId == host.host.id }
+            val waiting = agents.count { it.hostId == host.host.id && it.status == AgentStatus.WAITING }
+            val status = when {
+                waiting > 0 -> pluralStringResource(R.plurals.inbox_host_waiting, waiting, waiting)
+                host.conn is ConnState.Connected -> stringResource(R.string.inbox_host_online)
+                host.conn is ConnState.Connecting -> stringResource(R.string.inbox_host_connecting)
+                host.conn is ConnState.Failed -> stringResource(R.string.inbox_host_offline)
+                else -> stringResource(R.string.inbox_host_disconnected)
+            }
+            val dot = when {
+                waiting > 0 -> colors.danger
+                host.conn is ConnState.Connected -> colors.ok
+                host.conn is ConnState.Connecting -> colors.warn
+                host.conn is ConnState.Failed -> colors.danger
+                else -> colors.textFaint
+            }
+            HostFilterChip(
+                label = host.host.label,
+                selected = selectedHostId == host.host.id,
+                count = count,
+                status = status,
+                dot = dot,
+            ) { onSelectHost(if (selectedHostId == host.host.id) null else host.host.id) }
+        }
+    }
+}
+
+@Composable
+private fun HostFilterChip(
+    label: String,
+    selected: Boolean,
+    count: Int,
+    status: String?,
+    dot: Color,
+    onClick: () -> Unit,
+) {
+    val text = listOfNotNull(label, count.toString(), status).joinToString(" · ")
+    NeoChip(
+        label = text,
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.heightIn(min = 48.dp),
+        dot = dot,
+    )
+}
+
+@Composable
+private fun DutySummary(
     agents: List<Agent>,
     hosts: List<HostRuntime>,
     now: Long,
     onOpen: (Agent) -> Unit,
     onReconnect: (String) -> Unit,
+    selectedHostId: String?,
 ) {
-    val p = statusPalette()
+    val colors = ds()
     val waiting = agents.filter { it.status == AgentStatus.WAITING }
     val unknownCount = agents.count { it.status == AgentStatus.UNKNOWN }
     val workingCount = agents.count { it.status == AgentStatus.WORKING }
     val reviewCount = agents.count { it.status == AgentStatus.REVIEW }
     val idleCount = agents.count { it.status == AgentStatus.IDLE }
     val longest = waiting.minByOrNull { it.sinceMillis }
-    val failures = hosts.filter { it.conn is ConnState.Failed }
-    val offline = hosts.any { it.conn !is ConnState.Connected }
+    val failures = hosts.filter { (selectedHostId == null || it.host.id == selectedHostId) && it.conn is ConnState.Failed }
+    val offline = hosts.filter { selectedHostId == null || it.host.id == selectedHostId }.any { it.conn !is ConnState.Connected }
     var showFailures by remember { mutableStateOf(false) }
-    val counts = buildList {
-        if (unknownCount > 0) add("$unknownCount 待核实")
-        if (workingCount > 0) add("$workingCount 进行中")
-        if (reviewCount > 0) add("$reviewCount 待查看")
-        if (idleCount > 0) add("$idleCount 空闲")
-    }.joinToString("  ·  ")
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 12.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+    val failuresStateLabel = stringResource(
+        if (showFailures) R.string.inbox_state_expanded else R.string.inbox_state_collapsed,
+    )
+    val failuresToggleLabel = pluralStringResource(
+        if (showFailures) R.plurals.inbox_failures_hide else R.plurals.inbox_failures_show,
+        failures.size,
+        failures.size,
+    )
+    val failuresSummary = pluralStringResource(R.plurals.inbox_failures_short, failures.size, failures.size)
+    NeoCard(
+        modifier = Modifier.fillMaxWidth().padding(top = DsSpace.xs, bottom = DsSpace.xs),
+        depth = DsElev.soft,
     ) {
-        if (waiting.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+            verticalArrangement = Arrangement.spacedBy(DsSpace.s),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (waiting.isNotEmpty()) {
+                    NeoLamp(color = colors.danger, size = 7.dp)
+                    Spacer(Modifier.width(DsSpace.s))
+                    // Count and label live in one plural so locales can place the space themselves
+                    // ("2 need attention" vs "2需要处理"); concatenating them leaked "2Needs attention".
                     Text(
-                        "${waiting.size} 项需要处理",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = p.waiting,
-                        modifier = Modifier.semantics { heading() },
+                        pluralStringResource(
+                            R.plurals.inbox_attention_count, waiting.size, waiting.size,
+                        ),
+                        style = DsTypography.bodyStrong,
+                        color = colors.text,
+                        modifier = Modifier.weight(1f).semantics { heading() },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    if (longest != null) {
+                    NeoButton(
+                        label = stringResource(R.string.inbox_view),
+                        onClick = { onOpen(longest!!) },
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
+                    // The wait duration keeps its own line: inline it used to ellipsize the whole row.
+                } else {
+                    NeoLamp(color = if (failures.isNotEmpty()) colors.warn else colors.ok, size = 7.dp)
+                    Spacer(Modifier.width(DsSpace.s))
+                    Text(
+                        stringResource(if (failures.isNotEmpty()) R.string.inbox_some_hosts_offline else R.string.inbox_nothing_pending),
+                        style = DsTypography.bodyStrong,
+                        color = colors.text,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val other = listOfNotNull(
+                        unknownCount.takeIf { it > 0 }?.let {
+                            pluralStringResource(R.plurals.inbox_count_unverified, it, it)
+                        },
+                        reviewCount.takeIf { it > 0 }?.let {
+                            pluralStringResource(R.plurals.inbox_count_review, it, it)
+                        },
+                        workingCount.takeIf { it > 0 }?.let {
+                            pluralStringResource(R.plurals.inbox_count_working, it, it)
+                        },
+                        idleCount.takeIf { it > 0 }?.let {
+                            pluralStringResource(R.plurals.inbox_count_idle, it, it)
+                        },
+                    ).joinToString(" · ")
+                    if (other.isNotBlank()) {
                         Text(
-                            "最久 ${formatElapsed(longest.sinceMillis, now)}${if (offline) " · 上次同步快照" else ""}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            other,
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                if (longest != null) {
-                    TextButton(
-                        onClick = { onOpen(longest) },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-                    ) { Text("处理最久的一项") }
+            }
+            if (waiting.isNotEmpty()) {
+                // Second line of the same block, flush left with the count above it. Inline it used
+                // to ellipsize the whole row, and a leading "·" here read as a stray bullet.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (offline) {
+                            stringResource(
+                                R.string.inbox_longest_waiting_snapshot,
+                                formatElapsed(longest!!.sinceMillis, now),
+                            )
+                        } else {
+                            stringResource(R.string.inbox_longest_waiting, formatElapsed(longest!!.sinceMillis, now))
+                        },
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (unknownCount > 0) {
+                        Text(
+                            "  ·  " + pluralStringResource(R.plurals.inbox_count_unverified, unknownCount, unknownCount),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
-        } else {
-            Text(
-                if (failures.isNotEmpty()) "部分机器未连接" else "现在不用处理",
-                style = MaterialTheme.typography.titleSmall,
-            )
-        }
-        if (counts.isNotBlank()) {
-            Text(
-                counts,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 3.dp),
-            )
-        }
-        if (failures.isNotEmpty()) {
-            TextButton(
-                onClick = { showFailures = !showFailures },
-                modifier = Modifier.semantics { stateDescription = if (showFailures) "已展开" else "已收起" },
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-            ) { Text("${failures.size} 台连接失败 · ${if (showFailures) "收起" else "查看详情"}", color = MaterialTheme.colorScheme.error) }
-            AnimatedVisibility(showFailures) {
-            Column { failures.forEach { runtime ->
-                Text(
-                    "${runtime.host.label}：${(runtime.conn as ConnState.Failed).message}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Text(
-                    "最后成功同步：${formatAgo(runtime.lastSyncAt, now)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TextButton(onClick = { onReconnect(runtime.host.id) }, enabled = runtime.conn != ConnState.Connecting) { Text("重连 ${runtime.host.label}") }
-            } }
+            if (failures.isNotEmpty()) {
+                NeoDivider()
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    NeoLamp(color = colors.danger, size = 5.dp)
+                    Text(
+                        failuresSummary,
+                        style = DsTypography.caption,
+                        color = colors.text,
+                        modifier = Modifier.weight(1f).padding(start = DsSpace.s).clearAndSetSemantics { },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    NeoIconButton(
+                        glyph = if (showFailures) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
+                        onClick = { showFailures = !showFailures },
+                        contentDescription = failuresToggleLabel,
+                        modifier = Modifier.semantics { stateDescription = failuresStateLabel },
+                    )
+                }
+                ExpandableSection(expanded = showFailures) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(DsSpace.m),
+                        modifier = Modifier.padding(top = DsSpace.s),
+                    ) {
+                        failures.forEach { runtime ->
+                            Column(verticalArrangement = Arrangement.spacedBy(DsSpace.xxs)) {
+                                Text(
+                                    stringResource(
+                                        R.string.inbox_host_error_line,
+                                        runtime.host.label,
+                                        (runtime.conn as ConnState.Failed).message,
+                                    ),
+                                    style = DsTypography.body,
+                                    color = colors.text,
+                                )
+                                Text(
+                                    stringResource(R.string.inbox_last_synced, formatAgo(runtime.lastSyncAt, now)),
+                                    style = DsTypography.caption,
+                                    color = colors.textSoft,
+                                )
+                                NeoButton(
+                                    label = stringResource(R.string.inbox_reconnect_host, runtime.host.label),
+                                    onClick = { onReconnect(runtime.host.id) },
+                                    tone = NeoButtonTone.Ghost,
+                                    icon = NeoGlyph.Refresh,
+                                    compact = true,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+/**
+ * Empty state used for both "nothing needs you" and "no machines yet".
+ *
+ * The icon and the action slot stay generic because the two situations read very differently:
+ * a calm tray for "all quiet", a server for "you have not told us where anything is".
+ */
 @Composable
-private fun FilterTab(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val tint by androidx.compose.animation.animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = androidx.compose.animation.core.tween(160),
-        label = "filter-tint",
-    )
-    val underline by androidx.compose.animation.core.animateDpAsState(
-        targetValue = if (selected) 18.dp else 0.dp,
-        animationSpec = androidx.compose.animation.core.tween(180),
-        label = "filter-underline",
-    )
-    Column(
-        modifier.selectable(selected = selected, role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
-            .heightIn(min = 48.dp).widthIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun InboxEmpty(
+    icon: NeoGlyph,
+    title: String,
+    body: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = ds()
+    NeoWell(
+        modifier = Modifier.fillMaxWidth().padding(vertical = DsSpace.m),
+        corner = DsRadius.card,
     ) {
-        Text(label, style = MaterialTheme.typography.titleSmall, color = tint, softWrap = false)
-        Spacer(Modifier.height(5.dp))
-        Box(
-            Modifier
-                .width(underline)
-                .height(2.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.dp)),
-        )
+        Column(
+            Modifier.fillMaxWidth().padding(DsSpace.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(DsSpace.s),
+        ) {
+            NeoIcon(
+                glyph = icon,
+                modifier = Modifier.size(32.dp),
+                tint = colors.textSoft,
+                strokeWidth = 1.6.dp,
+            )
+            Text(
+                title,
+                style = DsTypography.bodyStrong,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                body,
+                style = DsTypography.body,
+                color = colors.textSoft,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(DsSpace.xs))
+            content()
+        }
     }
 }
 
 @Composable
-private fun AgentRow(agent: Agent, now: Long, runtime: HostRuntime?, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val p = statusPalette()
-    val color = when (agent.status) {
-        AgentStatus.WAITING -> p.waiting
-        AgentStatus.WORKING -> p.working
-        AgentStatus.REVIEW -> p.review
-        AgentStatus.IDLE -> p.idle
-        AgentStatus.UNKNOWN -> p.unknown
+private fun AgentRow(
+    agent: Agent,
+    now: Long,
+    runtime: HostRuntime?,
+    hostScoped: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = ds()
+    val statusDescription = stringResource(agent.status.labelRes)
+    val lamp = when (agent.status) {
+        AgentStatus.WAITING -> colors.danger
+        AgentStatus.WORKING -> colors.accent
+        AgentStatus.REVIEW -> colors.ok
+        AgentStatus.IDLE -> colors.textFaint
+        AgentStatus.UNKNOWN -> colors.textFaint
     }
     Column(
-        modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClickLabel = "查看 ${agent.name} 的终端", onClick = onClick)
-            .semantics(mergeDescendants = true) { stateDescription = agent.status.label }
-            .background(MaterialTheme.colorScheme.background)
-            .padding(vertical = 10.dp),
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { stateDescription = statusDescription }
+            .padding(horizontal = DsSpace.l, vertical = DsSpace.m),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .width(3.dp)
-                    .height(22.dp)
-                    .background(if (agent.status == AgentStatus.WAITING) color else Color.Transparent, RoundedCornerShape(2.dp)),
-            )
-            Spacer(Modifier.width(10.dp))
-            StatusGlyph(agent.status, modifier = Modifier.clearAndSetSemantics { }, size = 15)
-            Spacer(Modifier.width(10.dp))
+            NeoLamp(color = lamp, pulse = agent.status == AgentStatus.WORKING)
+            Spacer(Modifier.width(DsSpace.m))
             Text(
                 agent.name,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
+                style = DsTypography.bodyStrong,
+                color = colors.text,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-        }
-        Text(
-            "${agent.hostLabel}  /  ${agent.workspaceLabel ?: agent.repo}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 23.dp, top = 3.dp),
-        )
-        Text(
-            listOfNotNull(agent.tabLabel, agent.paneId, agent.kind).distinct().joinToString(" · "),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 23.dp, top = 1.dp),
-        )
-        Row(
-            Modifier.fillMaxWidth().padding(start = 23.dp, top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+            Spacer(Modifier.width(DsSpace.s))
             Text(
-                if (agent.status == AgentStatus.WAITING) "等待 ${formatElapsed(agent.sinceMillis, now)}" else agent.status.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = color,
+                if (agent.status == AgentStatus.WAITING) formatElapsed(agent.sinceMillis, now) else statusDescription,
+                style = DsTypography.caption,
+                color = colors.textSoft,
+                maxLines = 1,
             )
         }
+        // Pane id first: it is the shortest, most stable identifier and must survive a long
+        // English repo name. The tab label is redundant with the pane id, so it is dropped here.
+        val location = listOfNotNull(
+            agent.paneId.takeIf { it.isNotBlank() },
+            agent.workspaceLabel ?: agent.repo,
+            if (hostScoped) null else agent.hostLabel,
+        ).distinct().joinToString("  ·  ")
+        Text(
+            location,
+            style = DsTypography.caption,
+            color = colors.textSoft,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
+        )
         val lastSync = runtime?.lastSyncAt
         val stale = runtime?.conn !is ConnState.Connected || lastSync == null || now - lastSync > 15_000
         if (stale) {
             Text(
-                "${if (runtime?.conn is ConnState.Connected) "快照待更新" else "未连接，显示上次快照"} · ${formatAgo(lastSync, now)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 23.dp, top = 2.dp),
+                if (runtime?.conn is ConnState.Connected)
+                    stringResource(R.string.inbox_stale_snapshot, formatAgo(lastSync, now))
+                else stringResource(R.string.inbox_offline_snapshot, formatAgo(lastSync, now)),
+                style = DsTypography.micro,
+                color = colors.textFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
             )
         }
     }
-    Box(Modifier.fillMaxWidth().height(0.7.dp).background(MaterialTheme.colorScheme.outlineVariant))
 }

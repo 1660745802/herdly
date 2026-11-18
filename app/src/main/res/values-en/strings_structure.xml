@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Host structure page (workspaces / tabs / panes) -->
+    <string name="structure_header_breadcrumb">Workspaces / tabs / panes</string>
+    <string name="structure_empty_title">No workspaces yet</string>
+    <string name="structure_empty_body">In Herdr each project is usually one workspace, grouped by tabs and split into panes. You can create one right here.</string>
+    <string name="structure_new_workspace">New workspace</string>
+    <!-- Quick action in the summary card; distinct from the "New workspace" button in the empty state -->
+    <string name="structure_add_workspace">Workspace</string>
+    <string name="structure_footer_hint">This structure is read straight from Herdr. Creating tabs, splitting panes and starting agents here updates the TUI on the host.</string>
+
+    <!-- %1$s: type name of a workspace / tab / pane -->
+    <string name="structure_rename_title">Rename %1$s</string>
+    <string name="structure_new_name">New name</string>
+    <string name="structure_close_title">Close %1$s?</string>
+    <!-- %1$s: path of the closing target; %2$s: what will actually end -->
+    <string name="structure_close_message">%1$s\n\n%2$s</string>
+    <string name="structure_close_workspace_body">This closes the whole workspace: every tab, pane and process inside it will end.</string>
+    <string name="structure_close_tab_body">This closes the tab: its panes and their processes will end.</string>
+    <string name="structure_close_pane_body">This closes the pane: its agent and other processes will be terminated.</string>
+
+    <string name="structure_type_workspace">workspace</string>
+    <string name="structure_type_tab">tab</string>
+    <string name="structure_type_pane">pane</string>
+
+    <!-- %1$s/%2$s/%3$s: workspace, tab and pane counts -->
+    <string name="structure_summary_line">%1$s · %2$s · %3$s</string>
+    <string name="structure_collapse_shells">Hide non-agent panes</string>
+    <string name="structure_occupancy_unverified">Pane occupancy cannot be verified right now, so starting agents in existing panes is unavailable. Create a new task from the inbox instead.</string>
+    <string name="structure_no_available_shells">No verified free shell panes. Create a new tab and refresh to re-check; panes that already run an agent, or whose state is unknown, are never used for launching.</string>
+    <!-- %1$s: relative time (just now / Ns ago / clock time) -->
+    <string name="structure_last_sync">Last successful sync: %1$s</string>
+    <string name="structure_last_sync_offline">Last successful sync: %1$s · currently disconnected</string>
+
+    <string name="structure_restore_title">Your previous agents are gone</string>
+    <string name="structure_restore_body">After a Herdr restart or an exited session you can resume in the same pane under the same name.</string>
+    <string name="structure_restore_action">Restore</string>
+    <string name="structure_restore_failed">restore failed</string>
+    <string name="structure_start_agent">Start agent</string>
+    <string name="structure_pill_current">current</string>
+
+    <!-- Accessibility descriptions; %1$s: display name of the target -->
+    <string name="structure_rename_workspace_desc">Rename %1$s</string>
+    <string name="structure_rename_tab_desc">Rename %1$s</string>
+    <string name="structure_rename_pane_desc">Rename pane %1$s</string>
+    <string name="structure_workspace_actions_desc">Workspace actions for %1$s</string>
+    <string name="structure_tab_actions_desc">Tab actions for %1$s</string>
+    <string name="structure_pane_actions_desc">Pane actions for %1$s</string>
+    <string name="structure_focus_pane_label">Focus %1$s</string>
+    <string name="structure_state_expanded">expanded</string>
+    <string name="structure_state_collapsed">collapsed</string>
+
+    <!-- Menu items -->
+    <string name="structure_focus">Focus</string>
+    <string name="structure_focus_tab">Focus tab</string>
+    <string name="structure_focus_pane">Focus pane</string>
+    <string name="structure_rename">Rename</string>
+    <string name="structure_new_tab">New tab</string>
+    <string name="structure_new_tab_plus">＋ New tab</string>
+    <string name="structure_close_workspace">Close workspace</string>
+    <string name="structure_close_tab">Close tab</string>
+    <string name="structure_close_pane">Close pane</string>
+    <string name="structure_split_right">Split right</string>
+    <string name="structure_split_down">Split down</string>
+
+    <string name="structure_no_tabs">This workspace has no tabs yet</string>
+    <string name="structure_collapse_panes">Hide panes</string>
+    <string name="structure_show">Show</string>
+    <string name="structure_start_pane">Start</string>
+    <string name="structure_pane_idle_shell">idle shell</string>
+    <string name="structure_pane_unverified">unverified pane</string>
+    <!-- %1$s: pane title; %2$s: pane kind or availability -->
+    <string name="structure_pane_meta">%1$s · %2$s</string>
+    <!-- %1$s: pane count phrase; %2$s: tab status -->
+    <string name="structure_tab_meta">%1$s · %2$s</string>
+
+    <!-- Start agent sheet -->
+    <string name="structure_start_sheet_body">Only panes verified to be idle shells on connected hosts are listed. Check the target before starting.</string>
+    <string name="structure_target_pane">Target pane</string>
+    <string name="structure_no_candidates_no_agents">Pane occupancy cannot be verified. Go back to the inbox and create a new task so a fresh tab is used.</string>
+    <string name="structure_no_candidates_no_shells">No verified free shell panes. Go back to the structure, create a tab and refresh; no start command is ever sent into an existing agent or an unrecognized pane.</string>
+    <!-- %1$s: host; %2$s: workspace; %3$s: tab; %4$s: pane title; %5$s: pane id; %6$s: working directory -->
+    <string name="structure_target_detail">Target: %1$s / %2$s / %3$s / %4$s (%5$s)\nDirectory: %6$s</string>
+    <string name="structure_not_provided">not provided</string>
+    <string name="structure_duplicate_name">An agent with this name already exists on this host, pick another name</string>
+    <string name="structure_unique_name_hint">Use a name that is unique on this host</string>
+    <string name="structure_name_label">Name (unique in Herdr)</string>
+    <string name="structure_resume_label">Resume last session</string>
+    <string name="structure_resume_on_hint">Uses the resume arguments below; the agent looks up its previous session</string>
+    <string name="structure_resume_off_hint">Start a fresh session</string>
+    <string name="structure_args_label">Launch arguments (one per line)</string>
+    <string name="structure_args_hint">Paths with spaces stay on one line, no quotes needed</string>
+    <!-- %1$s: agent name -->
+    <string name="structure_start_named">Start %1$s</string>
+
+    <plurals name="structure_workspace_count">
+        <item quantity="one">%1$d workspace</item>
+        <item quantity="other">%1$d workspaces</item>
+    </plurals>
+    <plurals name="structure_tab_count">
+        <item quantity="one">%1$d tab</item>
+        <item quantity="other">%1$d tabs</item>
+    </plurals>
+    <plurals name="structure_pane_count">
+        <item quantity="one">%1$d pane</item>
+        <item quantity="other">%1$d panes</item>
+    </plurals>
+    <plurals name="structure_other_panes">
+        <item quantity="one">Other pane %1$d</item>
+        <item quantity="other">Other panes %1$d</item>
+    </plurals>
+    <plurals name="structure_hidden_panes">
+        <item quantity="one">%1$d other pane</item>
+        <item quantity="other">%1$d other panes</item>
+    </plurals>
+    <plurals name="structure_collapse_tabs">
+        <item quantity="one">Hide %1$d tab</item>
+        <item quantity="other">Hide %1$d tabs</item>
+    </plurals>
+    <plurals name="structure_expand_tabs">
+        <item quantity="one">Show %1$d tab</item>
+        <item quantity="other">Show %1$d tabs</item>
+    </plurals>
+    <plurals name="structure_expand_panes">
+        <item quantity="one">Show %1$d pane</item>
+        <item quantity="other">Show %1$d panes</item>
+    </plurals>
+</resources>

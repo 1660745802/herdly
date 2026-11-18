@@ -1,5 +1,13 @@
 package dev.herdwatch.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -7,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +25,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -28,26 +38,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,9 +46,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
@@ -66,7 +61,25 @@ import dev.herdwatch.model.HerdStructure
 import dev.herdwatch.model.HerdTab
 import dev.herdwatch.model.HerdWorkspace
 import dev.herdwatch.model.HostRuntime
-import dev.herdwatch.ui.theme.MonoStyle
+import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsRadius
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoChip
+import dev.herdwatch.ui.design.NeoDialog
+import dev.herdwatch.ui.design.NeoDivider
+import dev.herdwatch.ui.design.NeoField
+import dev.herdwatch.ui.design.NeoGlyph
+import dev.herdwatch.ui.design.NeoIcon
+import dev.herdwatch.ui.design.NeoIconButton
+import dev.herdwatch.ui.design.NeoMenu
+import dev.herdwatch.ui.design.NeoMenuItem
+import dev.herdwatch.ui.design.NeoSheet
+import dev.herdwatch.ui.design.NeoToggle
+import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.statusPalette
 
 @Composable
@@ -91,6 +104,7 @@ fun StructureScreen(
     currentAgents: List<Agent>? = null,
 ) {
     val structure = runtime.structure
+    val colors = ds()
     var pendingClose by remember { mutableStateOf<CloseTarget?>(null) }
     var renaming by remember { mutableStateOf<RenameTarget?>(null) }
     var showShells by rememberSaveable(runtime.host.id) { mutableStateOf(false) }
@@ -101,40 +115,45 @@ fun StructureScreen(
         val workspace = structure.workspaces.firstOrNull { it.id == (workspaceId ?: tab?.workspaceId ?: pane?.workspaceId) }
         return listOfNotNull(runtime.host.label, workspace?.label, tab?.label, pane?.let { "${it.title.ifBlank { it.id }} (${it.id})" }, pane?.cwd ?: workspace?.worktreePath).joinToString("\n")
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.fillMaxWidth().padding(start = DsSpace.m, end = DsSpace.m, top = DsSpace.xs, bottom = DsSpace.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-            }
+            NeoIconButton(
+                glyph = NeoGlyph.Back,
+                onClick = onBack,
+                contentDescription = stringResource(R.string.common_back),
+            )
             Column(Modifier.weight(1f)) {
-                Text(runtime.host.label, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(runtime.host.label, style = DsTypography.title, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "工作区 / 标签页 / 分屏",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    stringResource(R.string.structure_header_breadcrumb),
+                    style = DsTypography.micro,
+                    color = colors.textFaint,
                 )
             }
-            IconButton(onClick = onRefresh, enabled = !runtime.conn.isConnecting()) {
-                Icon(Icons.Default.Refresh, contentDescription = "刷新")
-            }
+            NeoIconButton(
+                glyph = NeoGlyph.Refresh,
+                onClick = onRefresh,
+                contentDescription = stringResource(R.string.common_refresh),
+                enabled = !runtime.conn.isConnecting(),
+            )
         }
 
         if (runtime.conn is ConnState.Failed) {
             Text(
                 runtime.conn.message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                style = DsTypography.body,
+                color = colors.danger,
+                modifier = Modifier.padding(horizontal = DsSpace.xl, vertical = DsSpace.xs),
             )
         }
 
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(start = DsSpace.l, end = DsSpace.l, bottom = DsSpace.xxl),
+            verticalArrangement = Arrangement.spacedBy(DsSpace.m),
         ) {
             item {
                 SummaryCard(runtime, showShells, availablePaneIds.size, currentAgents != null, onCreateWorkspace, onStartAgent) { showShells = !showShells }
@@ -144,17 +163,26 @@ fun StructureScreen(
             }
             if (structure.workspaces.isEmpty()) {
                 item {
-                    EmptyBlock(
-                        title = "还没有 workspace",
-                        body = "Herdr 里每个项目通常是一个 workspace，里面按 tab 分组、再拆 pane。手机端可以直接建。",
-                    ) {
-                        Button(onClick = onCreateWorkspace, enabled = runtime.conn is ConnState.Connected, shape = RoundedCornerShape(10.dp)) { Text("新建 workspace") }
+                    // 空状态也是一张卡片：标题、说明、主行动按钮复用同一套材质。
+                    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
+                        Column(Modifier.padding(DsSpace.xxl), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
+                            Text(stringResource(R.string.structure_empty_title), style = DsTypography.title, color = colors.text)
+                            Text(stringResource(R.string.structure_empty_body), style = DsTypography.body, color = colors.textSoft)
+                            NeoButton(
+                                label = stringResource(R.string.structure_new_workspace),
+                                onClick = onCreateWorkspace,
+                                tone = NeoButtonTone.Primary,
+                                icon = NeoGlyph.Plus,
+                                enabled = runtime.conn is ConnState.Connected,
+                            )
+                        }
                     }
                 }
             }
             items(structure.workspaces, key = { it.id }) { workspace ->
                 WorkspaceCard(
                     workspace = workspace,
+                    modifier = animateItemMotion(),
                     structure = structure,
                     onFocusWorkspace = { onFocusWorkspace(workspace.id) },
                     onCreateTab = { onCreateTab(workspace.id) },
@@ -175,10 +203,10 @@ fun StructureScreen(
             }
             item {
                 Text(
-                    "结构直接读自 Herdr；在这里建 tab、拆 pane、启动 agent，主机上的 TUI 会同步变化。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    stringResource(R.string.structure_footer_hint),
+                    style = DsTypography.caption,
+                    color = colors.textFaint,
+                    modifier = Modifier.padding(top = DsSpace.xs),
                 )
             }
         }
@@ -186,60 +214,51 @@ fun StructureScreen(
 
     renaming?.let { target ->
         var value by remember(target.id) { mutableStateOf(target.label) }
-        AlertDialog(
+        NeoDialog(
             onDismissRequest = { renaming = null },
-            title = { Text("重命名 ${typeName(target.type)}") },
-            text = {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it.take(40) },
-                    singleLine = true,
-                    label = { Text("新名字") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            title = stringResource(R.string.structure_rename_title, typeName(target.type)),
+            confirmLabel = stringResource(R.string.common_save),
+            onConfirm = {
+                val name = value.trim()
+                when (target.type) {
+                    "workspace" -> onRenameWorkspace(target.id, name)
+                    "tab" -> onRenameTab(target.id, name)
+                    else -> onRenamePane(target.id, name)
+                }
+                renaming = null
             },
-            confirmButton = {
-                TextButton(
-                    enabled = value.isNotBlank(),
-                    onClick = {
-                        val name = value.trim()
-                        when (target.type) {
-                            "workspace" -> onRenameWorkspace(target.id, name)
-                            "tab" -> onRenameTab(target.id, name)
-                            else -> onRenamePane(target.id, name)
-                        }
-                        renaming = null
-                    },
-                ) { Text("保存") }
-            },
-            dismissButton = { TextButton(onClick = { renaming = null }) { Text("取消") } },
-        )
+            dismissLabel = stringResource(R.string.common_cancel),
+            confirmEnabled = value.isNotBlank(),
+        ) {
+            NeoField(
+                value = value,
+                onValueChange = { value = it.take(40) },
+                label = stringResource(R.string.structure_new_name),
+            )
+        }
     }
 
     pendingClose?.let { target ->
-        AlertDialog(
+        val closeBody = when (target.type) {
+            "workspace" -> stringResource(R.string.structure_close_workspace_body)
+            "tab" -> stringResource(R.string.structure_close_tab_body)
+            else -> stringResource(R.string.structure_close_pane_body)
+        }
+        NeoDialog(
             onDismissRequest = { pendingClose = null },
-            title = { Text("关闭${typeName(target.type)}？") },
-            text = {
-                Text(
-                    target.label + "\n\n" + when (target.type) {
-                        "workspace" -> "会关闭整个工作区，里面所有标签页、分屏和进程都会结束。"
-                        "tab" -> "会关闭这个标签页，里面的分屏和进程都会结束。"
-                        else -> "会关闭这个分屏，其中的 agent 和其他进程都会被终止。"
-                    },
-                )
+            title = stringResource(R.string.structure_close_title, typeName(target.type)),
+            subtitle = stringResource(R.string.structure_close_message, target.label, closeBody),
+            confirmLabel = stringResource(R.string.common_close),
+            onConfirm = {
+                when (target.type) {
+                    "workspace" -> onCloseWorkspace(target.id)
+                    "tab" -> onCloseTab(target.id)
+                    else -> onClosePane(target.id)
+                }
+                pendingClose = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    when (target.type) {
-                        "workspace" -> onCloseWorkspace(target.id)
-                        "tab" -> onCloseTab(target.id)
-                        else -> onClosePane(target.id)
-                    }
-                    pendingClose = null
-                }) { Text("关闭", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { pendingClose = null }) { Text("取消") } },
+            dismissLabel = stringResource(R.string.common_cancel),
+            destructive = true,
         )
     }
 }
@@ -248,10 +267,11 @@ private data class CloseTarget(val type: String, val id: String, val label: Stri
 
 private data class RenameTarget(val type: String, val id: String, val label: String)
 
-private fun typeName(type: String) = when (type) {
-    "workspace" -> "工作区"
-    "tab" -> "标签页"
-    else -> "分屏"
+@Composable
+private fun typeName(type: String): String = when (type) {
+    "workspace" -> stringResource(R.string.structure_type_workspace)
+    "tab" -> stringResource(R.string.structure_type_tab)
+    else -> stringResource(R.string.structure_type_pane)
 }
 
 private fun ConnState.isConnecting() = this == ConnState.Connecting
@@ -273,82 +293,112 @@ private fun SummaryCard(
     onStartAgent: (String?) -> Unit,
     onToggleShells: () -> Unit,
 ) {
-    val p = statusPalette()
     val s = runtime.structure
-    Column(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).background(if (runtime.conn is ConnState.Connected) p.review else p.working, CircleShape))
-            Spacer(Modifier.width(9.dp))
-            Text(
-                "${s.workspaces.size} 工作区 · ${s.tabs.size} 标签页 · ${s.panes.size} 分屏",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
-            )
-            val shells = s.panes.count { it.agentKind == null }
-            if (shells > 0) {
-                TextButton(onClick = onToggleShells) {
-                    Text(if (showShells) "收起非 agent 分屏" else "其他分屏 $shells", style = MaterialTheme.typography.labelMedium)
+    val colors = ds()
+    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.rest) {
+        Column(Modifier.padding(DsSpace.l)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AnimatedConnDot(runtime.conn)
+                Spacer(Modifier.width(DsSpace.s))
+                Text(
+                    stringResource(
+                        R.string.structure_summary_line,
+                        pluralStringResource(R.plurals.structure_workspace_count, s.workspaces.size, s.workspaces.size),
+                        pluralStringResource(R.plurals.structure_tab_count, s.tabs.size, s.tabs.size),
+                        pluralStringResource(R.plurals.structure_pane_count, s.panes.size, s.panes.size),
+                    ),
+                    style = DsTypography.headline,
+                    color = colors.text,
+                    modifier = Modifier.weight(1f),
+                )
+                val shells = s.panes.count { it.agentKind == null }
+                if (shells > 0) {
+                    NeoButton(
+                        label = if (showShells) {
+                            stringResource(R.string.structure_collapse_shells)
+                        } else {
+                            pluralStringResource(R.plurals.structure_other_panes, shells, shells)
+                        },
+                        onClick = onToggleShells,
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
                 }
             }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onCreateWorkspace, enabled = runtime.conn is ConnState.Connected, shape = RoundedCornerShape(10.dp)) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("工作区")
+            Spacer(Modifier.height(DsSpace.m))
+            Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                NeoButton(
+                    label = stringResource(R.string.structure_add_workspace),
+                    onClick = onCreateWorkspace,
+                    tone = NeoButtonTone.Primary,
+                    icon = NeoGlyph.Plus,
+                    enabled = runtime.conn is ConnState.Connected,
+                    compact = true,
+                )
+                NeoButton(
+                    label = stringResource(R.string.structure_start_agent),
+                    onClick = { onStartAgent(null) },
+                    tone = NeoButtonTone.Quiet,
+                    enabled = availableShellCount > 0,
+                    compact = true,
+                )
             }
-            OutlinedButton(onClick = { onStartAgent(null) }, enabled = availableShellCount > 0, shape = RoundedCornerShape(10.dp)) {
-                Text("启动 agent")
+            if (availableShellCount == 0) {
+                Text(
+                    if (!occupancyAvailable) stringResource(R.string.structure_occupancy_unverified)
+                    else stringResource(R.string.structure_no_available_shells),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                    modifier = Modifier.padding(top = DsSpace.s),
+                )
             }
-        }
-        if (availableShellCount == 0) {
+            val lastSync = formatAgo(runtime.lastSyncAt)
             Text(
-                if (!occupancyAvailable) "暂无法核实分屏占用情况，已有分屏的启动入口不可用。可从收件箱创建新任务。"
-                else "没有已核实可用的空 shell 分屏。可新建标签页，刷新后再检查；已有 agent 或状态未识别的分屏不会用于启动。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
+                if (runtime.conn !is ConnState.Connected) {
+                    stringResource(R.string.structure_last_sync_offline, lastSync)
+                } else {
+                    stringResource(R.string.structure_last_sync, lastSync)
+                },
+                style = DsTypography.caption,
+                color = colors.textSoft,
+                modifier = Modifier.padding(top = DsSpace.s),
             )
         }
-        Text(
-            "最后成功同步：${formatAgo(runtime.lastSyncAt)}${if (runtime.conn !is ConnState.Connected) " · 当前未连接" else ""}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
-        )
     }
 }
 
 @Composable
 private fun RestoreCard(agents: List<Agent>, onRestore: (Agent) -> Unit) {
     val p = statusPalette()
-    Column(
-        Modifier.fillMaxWidth().background(p.waitingWash, RoundedCornerShape(14.dp)).padding(14.dp),
-    ) {
-        Text("上次的 agent 不在了", style = MaterialTheme.typography.titleSmall, color = p.waiting)
-        Text(
-            "Herdr 重启或会话退出后，可以按原 pane、原名字接着跑。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        agents.forEach { agent ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(agent.name, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        listOfNotNull(agent.hostLabel, agent.workspaceLabel, agent.tabLabel, agent.paneId, agent.cwd).joinToString(" / "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val colors = ds()
+    // 等待色的浅底仍然走状态调色板（语义色），形制交给卡片材质。
+    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft, fill = p.waitingWash) {
+        Column(Modifier.padding(DsSpace.l)) {
+            Text(stringResource(R.string.structure_restore_title), style = DsTypography.headline, color = p.waiting)
+            Text(
+                stringResource(R.string.structure_restore_body),
+                style = DsTypography.caption,
+                color = colors.textSoft,
+            )
+            Spacer(Modifier.height(DsSpace.s))
+            agents.forEach { agent ->
+                Row(Modifier.fillMaxWidth().padding(vertical = DsSpace.xxs), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(agent.name, style = DsTypography.body, color = colors.text)
+                        Text(
+                            listOfNotNull(agent.hostLabel, agent.workspaceLabel, agent.tabLabel, agent.paneId, agent.cwd).joinToString(" / "),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                        )
+                    }
+                    Text(agent.kind, style = DsTypography.mono.copy(fontSize = 11.sp), color = colors.textFaint)
+                    Spacer(Modifier.width(DsSpace.s))
+                    NeoButton(
+                        label = stringResource(R.string.structure_restore_action),
+                        onClick = { onRestore(agent) },
+                        tone = NeoButtonTone.Quiet,
+                        compact = true,
                     )
-                }
-                Text(agent.kind, style = MonoStyle.copy(fontSize = 11.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { onRestore(agent) }, shape = RoundedCornerShape(8.dp)) {
-                    Text("恢复", color = p.waiting)
                 }
             }
         }
@@ -359,6 +409,7 @@ private fun RestoreCard(agents: List<Agent>, onRestore: (Agent) -> Unit) {
 private fun WorkspaceCard(
     workspace: HerdWorkspace,
     structure: HerdStructure,
+    modifier: Modifier = Modifier,
     onFocusWorkspace: () -> Unit,
     onCreateTab: () -> Unit,
     onCloseWorkspace: () -> Unit,
@@ -377,74 +428,103 @@ private fun WorkspaceCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     var expanded by rememberSaveable(workspace.id) { mutableStateOf(true) }
+    val expandedState = stringResource(R.string.structure_state_expanded)
+    val collapsedState = stringResource(R.string.structure_state_collapsed)
     val tabs = structure.tabsOf(workspace.id)
-    Column(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "W${workspace.number}",
-                style = MonoStyle.copy(fontSize = 11.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                workspace.label,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (workspace.linkedWorktree) FocusPill("worktree")
-            if (workspace.focused) FocusPill("当前")
-            Box {
-                IconButton(onClick = { menu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "${workspace.label} 工作区操作")
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("聚焦") }, onClick = { menu = false; onFocusWorkspace() })
-                    DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; onRenameWorkspace() })
-                    DropdownMenuItem(text = { Text("新建标签页") }, onClick = { menu = false; onCreateTab() })
-                    DropdownMenuItem(text = { Text("关闭工作区") }, onClick = { menu = false; onCloseWorkspace() })
+    val colors = ds()
+    NeoCard(modifier = modifier.fillMaxWidth(), depth = DsElev.soft) {
+        Column(Modifier.padding(DsSpace.l)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "W${workspace.number}",
+                    style = DsTypography.mono.copy(fontSize = 11.sp),
+                    color = colors.textFaint,
+                )
+                Spacer(Modifier.width(DsSpace.s))
+                Text(
+                    workspace.label,
+                    style = DsTypography.headline,
+                    color = colors.text,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                NeoIconButton(
+                    glyph = NeoGlyph.Edit,
+                    onClick = onRenameWorkspace,
+                    contentDescription = stringResource(R.string.structure_rename_workspace_desc, workspace.label),
+                )
+                if (workspace.linkedWorktree) FocusPill("worktree")
+                AnimatedVisibility(
+                    visible = workspace.focused,
+                    enter = fadeIn(tween(motionMillis(160))) + expandHorizontally(tween(motionMillis(200))),
+                    exit = fadeOut(tween(motionMillis(120))) + shrinkHorizontally(tween(motionMillis(160))),
+                ) { FocusPill(stringResource(R.string.structure_pill_current), active = workspace.focused) }
+                Box {
+                    NeoIconButton(
+                        glyph = NeoGlyph.More,
+                        onClick = { menu = true },
+                        contentDescription = stringResource(R.string.structure_workspace_actions_desc, workspace.label),
+                    )
+                    NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        NeoMenuItem(label = stringResource(R.string.structure_focus), onClick = { menu = false; onFocusWorkspace() })
+                        NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenameWorkspace() })
+                        NeoMenuItem(label = stringResource(R.string.structure_new_tab), onClick = { menu = false; onCreateTab() })
+                        NeoMenuItem(label = stringResource(R.string.structure_close_workspace), onClick = { menu = false; onCloseWorkspace() })
+                    }
                 }
             }
-        }
-        workspace.repoName?.let { repo ->
-            Text(
-                buildString {
-                    append(repo)
-                    workspace.worktreePath?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
-                },
-                style = MonoStyle.copy(fontSize = 10.5.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        TextButton(
-            onClick = { expanded = !expanded },
-            modifier = Modifier.semantics { stateDescription = if (expanded) "已展开" else "已收起" },
-        ) { Text(if (expanded) "收起 ${tabs.size} 个标签页" else "展开 ${tabs.size} 个标签页") }
-        if (expanded) tabs.forEach { tab ->
-            TabBlock(
-                tab = tab,
-                panes = structure.panesOf(tab.id),
-                onFocusTab = { onFocusTab(tab.id) },
-                onCloseTab = { onCloseTab(tab.id) },
-                onFocusPane = onFocusPane,
-                onSplit = onSplit,
-                onClosePane = onClosePane,
-                onStartAgent = onStartAgent,
-                showShells = showShells,
-                onShowShells = onShowShells,
-                onRenameTab = { onRenameTab(tab) },
-                onRenamePane = onRenamePane,
-                availablePaneIds = availablePaneIds,
-            )
-        }
-        if (expanded && tabs.isEmpty()) {
-            TextButtonRow("这个工作区还没有标签页") { onCreateTab() }
-        } else if (expanded) {
-            TextButtonRow("＋ 新建标签页") { onCreateTab() }
+            workspace.repoName?.let { repo ->
+                Text(
+                    buildString {
+                        append(repo)
+                        workspace.worktreePath?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
+                    },
+                    style = DsTypography.mono.copy(fontSize = 10.5.sp),
+                    color = colors.textFaint,
+                    modifier = Modifier.padding(top = DsSpace.xxs),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NeoButton(
+                    label = if (expanded) {
+                        pluralStringResource(R.plurals.structure_collapse_tabs, tabs.size, tabs.size)
+                    } else {
+                        pluralStringResource(R.plurals.structure_expand_tabs, tabs.size, tabs.size)
+                    },
+                    onClick = { expanded = !expanded },
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                    modifier = Modifier.semantics { stateDescription = if (expanded) expandedState else collapsedState },
+                )
+                ExpandChevron(expanded = expanded)
+            }
+            ExpandableSection(expanded) {
+                tabs.forEach { tab ->
+                    TabBlock(
+                        tab = tab,
+                        panes = structure.panesOf(tab.id),
+                        onFocusTab = { onFocusTab(tab.id) },
+                        onCloseTab = { onCloseTab(tab.id) },
+                        onFocusPane = onFocusPane,
+                        onSplit = onSplit,
+                        onClosePane = onClosePane,
+                        onStartAgent = onStartAgent,
+                        showShells = showShells,
+                        onShowShells = onShowShells,
+                        onRenameTab = { onRenameTab(tab) },
+                        onRenamePane = onRenamePane,
+                        availablePaneIds = availablePaneIds,
+                    )
+                }
+                NeoButton(
+                    label = if (tabs.isEmpty()) stringResource(R.string.structure_no_tabs) else stringResource(R.string.structure_new_tab_plus),
+                    onClick = onCreateTab,
+                    tone = NeoButtonTone.Ghost,
+                    icon = NeoGlyph.Plus,
+                    compact = true,
+                )
+            }
         }
     }
 }
@@ -467,57 +547,86 @@ private fun TabBlock(
 ) {
     var menu by remember { mutableStateOf(false) }
     var expanded by rememberSaveable(tab.id) { mutableStateOf(true) }
-    val p = statusPalette()
+    val expandedState = stringResource(R.string.structure_state_expanded)
+    val collapsedState = stringResource(R.string.structure_state_collapsed)
+    val colors = ds()
     Column(
-        Modifier.fillMaxWidth().padding(top = 8.dp),
+        Modifier.fillMaxWidth().padding(top = DsSpace.s),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(statusColor(tab.status, p), CircleShape))
-            Spacer(Modifier.width(7.dp))
+            AnimatedStatusDot(tab.status, 6.dp)
+            Spacer(Modifier.width(DsSpace.s))
             Text(
                 "T${tab.number} ${tab.label}",
-                style = MaterialTheme.typography.titleSmall,
+                style = DsTypography.headline,
+                color = colors.text,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text("${panes.size} 分屏 · ${tab.status.label}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            NeoIconButton(
+                    glyph = NeoGlyph.Edit,
+                onClick = onRenameTab,
+                contentDescription = stringResource(R.string.structure_rename_tab_desc, tab.label),
+            )
+            Text(
+                stringResource(
+                    R.string.structure_tab_meta,
+                    pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
+                    stringResource(tab.status.labelRes),
+                ),
+                style = DsTypography.micro,
+                color = colors.textFaint,
+            )
             Box {
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "${tab.label} 标签页操作", modifier = Modifier.size(18.dp))
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("聚焦 tab") }, onClick = { menu = false; onFocusTab() })
-                    DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; onRenameTab() })
-                    DropdownMenuItem(text = { Text("关闭 tab") }, onClick = { menu = false; onCloseTab() })
+                NeoIconButton(
+                    glyph = NeoGlyph.More,
+                    onClick = { menu = true },
+                    contentDescription = stringResource(R.string.structure_tab_actions_desc, tab.label),
+                )
+                NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    NeoMenuItem(label = stringResource(R.string.structure_focus_tab), onClick = { menu = false; onFocusTab() })
+                    NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenameTab() })
+                    NeoMenuItem(label = stringResource(R.string.structure_close_tab), onClick = { menu = false; onCloseTab() })
                 }
             }
         }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp, bottom = 1.dp)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        )
-        TextButton(
-            onClick = { expanded = !expanded },
-            modifier = Modifier.semantics { stateDescription = if (expanded) "已展开" else "已收起" },
-        ) { Text(if (expanded) "收起分屏" else "展开 ${panes.size} 个分屏") }
+        NeoDivider(Modifier.padding(top = DsSpace.xxs, bottom = DsSpace.xxs))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NeoButton(
+                label = if (expanded) {
+                    stringResource(R.string.structure_collapse_panes)
+                } else {
+                    pluralStringResource(R.plurals.structure_expand_panes, panes.size, panes.size)
+                },
+                onClick = { expanded = !expanded },
+                tone = NeoButtonTone.Ghost,
+                compact = true,
+                modifier = Modifier.semantics { stateDescription = if (expanded) expandedState else collapsedState },
+            )
+            ExpandChevron(expanded = expanded)
+        }
         val visible = if (showShells) panes else panes.filter { it.agentKind != null || it.status == AgentStatus.UNKNOWN || it.sessionKind != null || it.sessionValue != null }
         val hiddenShells = panes.size - visible.size
-        if (expanded) visible.forEach { pane ->
-            PaneRow(pane, onFocusPane, onSplit, onClosePane, onStartAgent, onRenamePane, pane.id in availablePaneIds)
-        }
-        if (expanded && !showShells && hiddenShells > 0) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "$hiddenShells 个其他分屏",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onShowShells) { Text("显示", style = MaterialTheme.typography.labelMedium) }
+        ExpandableSection(expanded) {
+            visible.forEach { pane ->
+                PaneRow(pane, onFocusPane, onSplit, onClosePane, onStartAgent, onRenamePane, pane.id in availablePaneIds)
+            }
+            if (!showShells && hiddenShells > 0) {
+                Row(Modifier.fillMaxWidth().padding(vertical = DsSpace.xs), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        pluralStringResource(R.plurals.structure_hidden_panes, hiddenShells, hiddenShells),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                        modifier = Modifier.weight(1f),
+                    )
+                    NeoButton(
+                        label = stringResource(R.string.structure_show),
+                        onClick = onShowShells,
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
+                }
             }
         }
     }
@@ -534,78 +643,120 @@ private fun PaneRow(
     availableShell: Boolean,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val p = statusPalette()
+    val paneLabel = pane.title.ifBlank { pane.id }
+    val paneKindLabel = pane.agentKind ?: if (availableShell) {
+        stringResource(R.string.structure_pane_idle_shell)
+    } else {
+        stringResource(R.string.structure_pane_unverified)
+    }
+    val restoreFailedLabel = stringResource(R.string.structure_restore_failed)
+    val paneStatusLabel = stringResource(pane.status.labelRes)
+    val colors = ds()
     Row(
-        Modifier.fillMaxWidth().clickable(onClickLabel = "聚焦 ${pane.title.ifBlank { pane.id }}") { onFocusPane(pane.id) }
-            .semantics { stateDescription = pane.status.label }.heightIn(min = 48.dp).padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().clickable(onClickLabel = stringResource(R.string.structure_focus_pane_label, paneLabel)) { onFocusPane(pane.id) }
+            .semantics { stateDescription = paneStatusLabel }.heightIn(min = 48.dp).padding(vertical = DsSpace.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(7.dp).background(statusColor(pane.status, p), CircleShape))
-        Spacer(Modifier.width(8.dp))
+        AnimatedStatusDot(pane.status, 7.dp)
+        Spacer(Modifier.width(DsSpace.s))
         Column(Modifier.weight(1f)) {
             Text(
-                "${pane.title.ifBlank { pane.id }} · ${pane.agentKind ?: if (availableShell) "空闲 shell" else "未核实分屏"}",
-                style = MaterialTheme.typography.bodyMedium,
+                stringResource(R.string.structure_pane_meta, paneLabel, paneKindLabel),
+                style = DsTypography.body,
+                color = colors.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 listOfNotNull(
                     pane.id,
-                    pane.status.label,
+                    paneStatusLabel,
                     pane.cwd,
-                    pane.restoreError?.let { "恢复失败" },
+                    pane.restoreError?.let { restoreFailedLabel },
                 ).joinToString(" · "),
-                style = MonoStyle.copy(fontSize = 10.5.sp),
-                color = if (pane.restoreError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = DsTypography.mono.copy(fontSize = 10.5.sp),
+                color = if (pane.restoreError != null) colors.danger else colors.textSoft,
             )
         }
+        NeoIconButton(
+                    glyph = NeoGlyph.Edit,
+            onClick = { onRenamePane(pane) },
+            contentDescription = stringResource(R.string.structure_rename_pane_desc, paneLabel),
+        )
         if (availableShell) {
-            TextButton(
+            NeoButton(
+                label = stringResource(R.string.structure_start_pane),
                 onClick = { onStartAgent(pane.id) },
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text("启动", style = MaterialTheme.typography.labelMedium) }
+                tone = NeoButtonTone.Quiet,
+                compact = true,
+            )
         }
         Box {
-            IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Default.MoreVert, contentDescription = "${pane.title.ifBlank { pane.id }} 分屏操作", modifier = Modifier.size(18.dp))
-            }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("聚焦 pane") }, onClick = { menu = false; onFocusPane(pane.id) })
-                DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; onRenamePane(pane) })
-                DropdownMenuItem(text = { Text("向右拆分") }, onClick = { menu = false; onSplit(pane.id, "right") })
-                DropdownMenuItem(text = { Text("向下拆分") }, onClick = { menu = false; onSplit(pane.id, "down") })
-                DropdownMenuItem(text = { Text("关闭 pane") }, onClick = { menu = false; onClosePane(pane.id) })
+            NeoIconButton(
+                glyph = NeoGlyph.More,
+                onClick = { menu = true },
+                contentDescription = stringResource(R.string.structure_pane_actions_desc, paneLabel),
+            )
+            NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                NeoMenuItem(label = stringResource(R.string.structure_focus_pane), onClick = { menu = false; onFocusPane(pane.id) })
+                NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenamePane(pane) })
+                NeoMenuItem(label = stringResource(R.string.structure_split_right), onClick = { menu = false; onSplit(pane.id, "right") })
+                NeoMenuItem(label = stringResource(R.string.structure_split_down), onClick = { menu = false; onSplit(pane.id, "down") })
+                NeoMenuItem(label = stringResource(R.string.structure_close_pane), onClick = { menu = false; onClosePane(pane.id) })
             }
         }
     }
 }
 
 @Composable
-private fun FocusPill(text: String) {
+private fun FocusPill(text: String, active: Boolean = true) {
+    val colors = ds()
+    val tint by animateColorAsState(
+        targetValue = if (active) colors.accent else colors.textSoft,
+        animationSpec = tween(motionMillis(180)),
+        label = "focus-pill-tint",
+    )
+    val wash by animateColorAsState(
+        targetValue = if (active) colors.accentWash else colors.well,
+        animationSpec = tween(motionMillis(180)),
+        label = "focus-pill-wash",
+    )
     Text(
         text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        style = DsTypography.micro,
+        color = tint,
         modifier = Modifier
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .background(wash, RoundedCornerShape(DsRadius.key))
+            .padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
     )
 }
 
+/** 展开/折叠的旋转三角：同一字形与同一运动时长，但用设计系统的描边图标。 */
 @Composable
-private fun TextButtonRow(text: String, onClick: () -> Unit) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
-            .heightIn(min = 48.dp)
-            .padding(vertical = 14.dp),
+private fun ExpandChevron(expanded: Boolean) {
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(motionMillis(200)),
+        label = "expand-chevron",
     )
+    NeoIcon(
+        NeoGlyph.ChevronDown,
+        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
+        tint = ds().textSoft,
+        contentDescription = null,
+    )
+}
+
+/** Tab/pane status dot: fades between status colors instead of snapping. */
+@Composable
+private fun AnimatedStatusDot(status: AgentStatus, size: Dp) {
+    val target = statusColor(status, statusPalette())
+    val color by animateColorAsState(
+        targetValue = target,
+        animationSpec = tween(motionMillis(220)),
+        label = "status-dot",
+    )
+    Box(Modifier.size(size).background(color, CircleShape))
 }
 
 private fun statusColor(status: AgentStatus, p: dev.herdwatch.ui.theme.StatusPalette) = when (status) {
@@ -616,7 +767,6 @@ private fun statusColor(status: AgentStatus, p: dev.herdwatch.ui.theme.StatusPal
     AgentStatus.UNKNOWN -> p.unknown
 }
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun StartAgentSheet(
     host: HostRuntime,
@@ -635,6 +785,9 @@ fun StartAgentSheet(
     var resume by rememberSaveable(host.host.id) { mutableStateOf(false) }
     var argsText by rememberSaveable(host.host.id) { mutableStateOf("") }
     val duplicateName = currentAgents.orEmpty().any { it.hostId == host.host.id && it.name == name.trim() }
+    val resumeLabel = stringResource(R.string.structure_resume_label)
+    val colors = ds()
+    val invalidName = duplicateName || name.isBlank()
 
     fun applyResume(on: Boolean) {
         resume = on
@@ -647,101 +800,116 @@ fun StartAgentSheet(
         if (resume) argsText = AppViewModel.resumeArgs(next).joinToString("\n")
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
+    NeoSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                .padding(start = DsSpace.xl, end = DsSpace.xl, bottom = DsSpace.xxl),
         ) {
-            Text("启动 agent", style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.structure_start_agent), style = DsTypography.title, color = colors.text)
             Text(
-                "仅列出已连接主机中可核实为空闲 shell 的分屏。请核对目标后启动。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                stringResource(R.string.structure_start_sheet_body),
+                style = DsTypography.body,
+                color = colors.textSoft,
             )
-            Spacer(Modifier.height(14.dp))
-            Text("目标分屏", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+            Spacer(Modifier.height(DsSpace.l))
+            Text(stringResource(R.string.structure_target_pane), style = DsTypography.caption, color = colors.textSoft)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s), modifier = Modifier.padding(vertical = DsSpace.xs)) {
                 items(candidates, key = { it.id }) { pane ->
-                    FilterChip(
+                    NeoChip(
+                        label = "${pane.title.ifBlank { pane.id }} · ${pane.id}",
                         selected = paneId == pane.id,
-                        modifier = Modifier.heightIn(min = 48.dp),
                         onClick = { paneId = pane.id },
-                        label = {
-                            Text(
-                                "${pane.title.ifBlank { pane.id }} · ${pane.id}",
-                                style = MonoStyle.copy(fontSize = 11.sp),
-                            )
-                        },
                     )
                 }
             }
             if (candidates.isEmpty()) {
                 Text(
-                    if (currentAgents == null) "暂无法核实分屏占用情况。请返回收件箱创建新任务，以使用新标签页。"
-                    else "没有已核实可用的空 shell 分屏。返回会话结构，新建标签页并刷新；不会向已有 agent 或未识别分屏发送启动命令。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (currentAgents == null) stringResource(R.string.structure_no_candidates_no_agents)
+                    else stringResource(R.string.structure_no_candidates_no_shells),
+                    style = DsTypography.body,
+                    color = colors.textSoft,
                 )
             }
             if (selectedPane != null) {
-                Text("目标：${host.host.label} / ${workspace?.label ?: selectedPane.workspaceId} / ${tab?.label ?: selectedPane.tabId} / ${selectedPane.title.ifBlank { selectedPane.id }} (${selectedPane.id})\n目录：${selectedPane.cwd ?: "未提供"}", style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text("Agent", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
-                items(dev.herdwatch.domain.AgentKinds.common) { k ->
-                    FilterChip(selected = kind == k, onClick = { applyKind(k) }, label = { Text(k) }, modifier = Modifier.heightIn(min = 48.dp))
-                }
-            }
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                isError = duplicateName || name.isBlank(),
-                supportingText = { Text(if (duplicateName) "此主机上已有同名 agent，请换一个名字" else "使用主机内唯一的 agent 名称") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                label = { Text("名字（Herdr 里的唯一名）") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("接着上次会话", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        if (resume) "使用下方续接参数；由 agent 查找历史会话" else "新开一个会话",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = resume, onCheckedChange = { applyResume(it) }, modifier = Modifier.semantics { contentDescription = "接着上次会话" })
-            }
-            if (resume) {
-                OutlinedTextField(
-                    value = argsText,
-                    onValueChange = { argsText = it },
-                    label = { Text("启动参数（每行一个）") },
-                    supportingText = { Text("含空格的路径也放在同一行，无需添加引号") },
-                    minLines = 2,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                Text(
+                    stringResource(
+                        R.string.structure_target_detail,
+                        host.host.label,
+                        workspace?.label ?: selectedPane.workspaceId,
+                        tab?.label ?: selectedPane.tabId,
+                        selectedPane.title.ifBlank { selectedPane.id },
+                        selectedPane.id,
+                        selectedPane.cwd ?: stringResource(R.string.structure_not_provided),
+                    ),
+                    style = DsTypography.body,
+                    color = colors.textSoft,
                 )
             }
-            Spacer(Modifier.height(14.dp))
-            Button(
+            Spacer(Modifier.height(DsSpace.s))
+            Text("Agent", style = DsTypography.caption, color = colors.textSoft)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s), modifier = Modifier.padding(vertical = DsSpace.xs)) {
+                items(dev.herdwatch.domain.AgentKinds.common) { k ->
+                    NeoChip(label = k, selected = kind == k, onClick = { applyKind(k) })
+                }
+            }
+            NeoField(
+                value = name,
+                onValueChange = { name = it },
+                label = stringResource(R.string.structure_name_label),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            // NeoField 没有 isError 态：校验文案放在字段下方，错误时用 danger 色。
+            Text(
+                if (duplicateName) stringResource(R.string.structure_duplicate_name)
+                else stringResource(R.string.structure_unique_name_hint),
+                style = DsTypography.caption,
+                color = if (invalidName) colors.danger else colors.textFaint,
+                modifier = Modifier.padding(top = DsSpace.xs),
+            )
+            Spacer(Modifier.height(DsSpace.s))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.structure_resume_label), style = DsTypography.body, color = colors.text)
+                    Text(
+                        if (resume) stringResource(R.string.structure_resume_on_hint)
+                        else stringResource(R.string.structure_resume_off_hint),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                    )
+                }
+                NeoToggle(
+                    checked = resume,
+                    onCheckedChange = { applyResume(it) },
+                    modifier = Modifier.semantics { contentDescription = resumeLabel },
+                )
+            }
+            if (resume) {
+                NeoField(
+                    value = argsText,
+                    onValueChange = { argsText = it },
+                    label = stringResource(R.string.structure_args_label),
+                    hint = stringResource(R.string.structure_args_hint),
+                    singleLine = false,
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth().padding(top = DsSpace.s),
+                )
+            }
+            Spacer(Modifier.height(DsSpace.l))
+            NeoButton(
+                label = stringResource(R.string.structure_start_named, name.ifBlank { kind }),
                 onClick = {
-                    val pane = host.structure.panes.firstOrNull { it.id == paneId && it.isAvailableShell(host, currentAgents) } ?: return@Button
-                    if (name.isBlank() || duplicateName) return@Button
+                    val pane = host.structure.panes.firstOrNull { it.id == paneId && it.isAvailableShell(host, currentAgents) } ?: return@NeoButton
+                    if (name.isBlank() || duplicateName) return@NeoButton
                     onStart(pane.id, kind, name.trim(), if (resume) argsText.lines().filter { it.isNotBlank() } else emptyList())
                 },
+                tone = NeoButtonTone.Primary,
                 enabled = selectedPane != null && name.isNotBlank() && !duplicateName,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-            ) { Text("启动 ${name.ifBlank { kind }}") }
+            )
         }
     }
 }

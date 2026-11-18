@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全屏阅读器 -->
+    <string name="reader_title">屏幕原文</string>
+    <string name="reader_copy_all">复制全部</string>
+    <string name="reader_cd_close">关闭全屏阅读</string>
+    <string name="reader_frozen">已冻结 · %1$s 的快照</string>
+    <string name="reader_frozen_truncated">已冻结 · %1$s 的快照 · 内容不完整</string>
+    <string name="reader_cd_search">搜索屏幕原文</string>
+    <string name="reader_search_placeholder">在这份快照中查找</string>
+    <string name="reader_cd_clear_search">清空查找</string>
+    <string name="reader_no_matches">没有匹配行</string>
+    <plurals name="reader_match_position">
+        <item quantity="other">%1$d / %2$d 个匹配行</item>
+    </plurals>
+    <string name="reader_cd_prev_match">上一个匹配行</string>
+    <string name="reader_cd_next_match">下一个匹配行</string>
+    <string name="reader_cd_font_smaller">缩小原文字号</string>
+    <string name="reader_cd_font_larger">放大原文字号</string>
+    <string name="reader_state_wrap_on">自动换行已开启</string>
+    <string name="reader_state_wrap_off">自动换行已关闭</string>
+    <string name="reader_wrap">自动换行</string>
+    <string name="reader_unwrap">横向查看</string>
+</resources>

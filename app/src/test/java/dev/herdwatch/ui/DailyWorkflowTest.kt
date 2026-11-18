@@ -3,6 +3,7 @@ package dev.herdwatch.ui
 import androidx.lifecycle.ViewModelStore
 import dev.herdwatch.data.FakeHostConnection
 import dev.herdwatch.data.HerdRepository
+import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepositoryPreferences
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
@@ -55,7 +56,10 @@ class DailyWorkflowTest {
     }
 
     private fun TestScope.viewModel(prefs: RepositoryPreferences, client: HostConnection): AppViewModel =
-        AppViewModel(HerdRepository(prefs.store, { client }, backgroundScope, StandardTestDispatcher(testScheduler)))
+        AppViewModel(
+            HerdRepository(prefs.store, { client }, backgroundScope, StandardTestDispatcher(testScheduler)),
+            PreferencesStore.inMemory(),
+        )
 
     @Test fun `inbox queue orders attention statuses and searches pane ids`() {
         val waiting = agent("p-wait", "waiting", AgentStatus.WAITING, seq = 3, since = 10)

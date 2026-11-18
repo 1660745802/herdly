@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- New task sheet -->
+    <string name="newtask_title">New task</string>
+    <string name="newtask_body">Create a new tab on a connected host and start an agent. Open the session afterwards to confirm the result.</string>
+    <string name="newtask_host_label">Host</string>
+    <!-- %1$s: host label; %2$s: connection state -->
+    <string name="newtask_host_chip">%1$s · %2$s</string>
+    <string name="newtask_connected">connected</string>
+    <string name="newtask_disconnected">offline</string>
+    <string name="newtask_no_connected">No connected host. Add a host config under Hosts or retry the connection, then create a task.</string>
+    <string name="newtask_project_label">Project</string>
+    <string name="newtask_new_workspace">+ New workspace</string>
+
+    <!-- %1$s: host label; %2$s: workspace label; %3$s: working directory -->
+    <string name="newtask_target_existing">Target: %1$s / %2$s\nDirectory: %3$s\nThe new tab will be created in this workspace.</string>
+    <string name="newtask_host_unconnected">host offline</string>
+    <string name="newtask_workspace_unavailable">workspace no longer available, choose again</string>
+    <string name="newtask_cwd_by_workspace">determined by the host workspace</string>
+    <!-- %1$s: host label -->
+    <string name="newtask_target_new">Target: %1$s / new workspace / new tab\nThe working directory is determined by the host defaults.</string>
+    <string name="newtask_select_host">select a connected host</string>
+
+    <string name="newtask_name_label">Agent name</string>
+    <string name="newtask_duplicate_name">This host already has an agent or pane with that name, pick another</string>
+    <string name="newtask_name_hint">Use a name that is unique on this host</string>
+    <string name="newtask_resume_label">Resume last session</string>
+    <string name="newtask_resume_on_hint">Uses the resume args below; the agent looks up its history</string>
+    <string name="newtask_resume_off_hint">Start a fresh session</string>
+    <string name="newtask_args_label">Launch args (one per line)</string>
+    <string name="newtask_args_hint">Paths with spaces can stay on one line, no quotes needed</string>
+    <!-- %1$s: agent name -->
+    <string name="newtask_start_action">Create and start %1$s</string>
+</resources>

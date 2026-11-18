@@ -36,7 +36,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r tools/requirements.txt
 export HERDR_TEST_PYTHON="$PWD/.venv/bin/python"
 ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleUxTest :app:lintDebug
-.venv/bin/python -m unittest discover -s tools -p 'test_dev_fake_ssh.py' -v
+.venv/bin/python -m unittest discover -s tools -p 'test_*.py' -v
 ```
 
 Windows PowerShell：
@@ -46,7 +46,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r tools/requirements.txt
 $env:HERDR_TEST_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
 .\gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleUxTest :app:lintDebug
-.\.venv\Scripts\python.exe -m unittest discover -s tools -p 'test_dev_fake_ssh.py' -v
+.\.venv\Scripts\python.exe -m unittest discover -s tools -p 'test_*.py' -v
 ```
 
 JVM 测试覆盖解析、协议、审批证据、操作状态、存储、仓库生命周期、阅读与连续使用流程。`HerdrClientTransportTest` 使用真实 JSch 连接本地 Paramiko 子进程，测试超时、取消、丢失回包、认证与主机指纹。
@@ -55,20 +55,15 @@ JVM 测试覆盖解析、协议、审批证据、操作状态、存储、仓库�
 
 ## 本地模拟主机
 
+两个 fixture，都只绑定 loopback、默认不执行本机命令：
+
 ```sh
-.venv/bin/python tools/dev_fake_ssh.py --canned
+.venv/bin/python tools/dev_fake_ssh.py --canned      # Herdr 桥：状态、审批、故障场景
+.venv/bin/python tools/dev_shell_fixture.py          # 交互式 shell：VT、按键、输入模式
 adb reverse tcp:2222 tcp:2222
 ```
 
-Windows 使用 `.\.venv\Scripts\python.exe`。在独立测试版添加 `127.0.0.1:2222`，用户名 `root`，密码 `secret`。这些仅为本地 fixture 凭据。默认模式只提供模拟数据，不执行界面上的命令；端口仅绑定 loopback。
-
-结束后停止脚本并移除转发：
-
-```sh
-adb reverse --remove tcp:2222
-```
-
-故障模式、主机密钥和支持的 API 见 [tools/README.md](../tools/README.md)。
+Windows 用 `.\.venv\Scripts\python.exe`。在独立测试版里添加对应端口的主机，凭据见 [tools/README.md](../tools/README.md)。结束后停止脚本并 `adb reverse --remove tcp:<port>`。
 
 ## 代码布局
 
@@ -79,13 +74,27 @@ app/src/main/java/dev/herdwatch/
   ssh/      连接接口、JSch 实现、JSON-RPC 编解码
   data/     多主机仓库、加密配置和缓存
   ui/       ViewModel、Compose 页面、队列与主题
+  ui/design/ 自绘设计系统：token、材质、图标、组件、样式页
+  term/     VT 解析器（终端网格与滚动回放）
+  i18n/     非 Compose 层的文案 provider 与测试替身
 app/src/test/  JVM 单元及回环 SSH 测试
 assets/        品牌素材和界面截图
 
-docs/         当前产品、工程、开发说明与 API schema
+docs/         产品、工程、开发说明、视觉规范与 API schema
 tools/        本地 SSH fixture 与 Python 测试
 ```
 
 变更保持以下约束：UI 不直接操作 SSH；写入不自动重试；异步结果发布前校验页面或连接代次；原文与展示加工分开；未知结果应明确告知用户。修改审批、并发或存储时运行对应回归；布局修改检查小屏、大字体、键盘和深色模式。
 
 提交前检查 `git diff --check` 和暂存内容。构建产物、本机 SDK 路径、虚拟环境、凭据、私钥与发布签名不入库。不要将真实终端输出或主机配置写进测试、截图和日志。
+
+## 文案与资源
+
+界面文案禁止硬编码在 Kotlin 里：
+
+- Compose：`stringResource(R.string.x)`、`pluralStringResource(R.plurals.x, count, count)`。
+- 非 Compose（Repository、SSH 层、解析器、ViewModel）：`dev.herdwatch.i18n.Str.get(R.string.x, args)` / `Str.quantity(...)`，provider 由 `HerdwatchApp.onCreate` 安装。
+- 资源按模块拆文件：`res/values/strings_<module>.xml` 与 `res/values-en/strings_<module>.xml`，键名带模块前缀，中英键集合必须一致。当前模块：core、ssh、repo、store、vm、ask、policy、agent、inbox、reader、terminal、structure、newtask、hosts、settings、addhost、components、gallery、app。
+- 数字 + 单位一律用 `plurals`；含变量的句子整句进资源，不做字符串拼接。
+- 新增语言只需加 `res/values-<lang>/` 并在 `res/xml/locales_config.xml` 登记，系统「应用语言」与设置页分段控件会一起生效。
+- 单元测试断言用 `dev.herdwatch.i18n.TestStrings.text("键名")`（它解析 `res/values/*.xml` 并反射映射 `R` id），不要硬编码译文。`Str` 未安装 provider 时返回 `#<id>`，所以带文案断言的测试类要在 `@Before` 调 `TestStrings.install()`。

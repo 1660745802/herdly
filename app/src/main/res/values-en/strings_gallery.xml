@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gallery_title">Matte instrument</string>
+    <string name="gallery_subtitle">Light fixed top-left · one accent color · no outlines</string>
+    <string name="gallery_section_material">Material</string>
+    <string name="gallery_section_actions">Actions</string>
+    <string name="gallery_section_selection">Selection</string>
+    <string name="gallery_section_input">Input</string>
+    <string name="gallery_section_keys">Terminal key bar</string>
+    <string name="gallery_section_status">Status</string>
+    <string name="gallery_section_icons">Icons</string>
+    <string name="gallery_section_type">Type</string>
+    <string name="gallery_section_density">Density</string>
+    <string name="gallery_raised_title">Raised · chassis</string>
+    <string name="gallery_raised_body">Cards, buttons, and keys all rise off the panel; the shadow is two concentric rounded rectangles, dark at bottom-right and highlighted at top-left.</string>
+    <string name="gallery_well_title">Recessed · milled</string>
+    <string name="gallery_well_body">Inputs, segmented control tracks, terminal windows. Light falls into the groove, so edges darken at top-left and brighten at bottom-right.</string>
+    <string name="gallery_btn_primary">Primary</string>
+    <string name="gallery_btn_secondary">Secondary</string>
+    <string name="gallery_btn_danger">Danger</string>
+    <string name="gallery_btn_disabled">Disabled</string>
+    <string name="gallery_btn_ghost">Text only</string>
+    <string name="gallery_press_note">No scaling on press: the surface sinks into the panel and the shadow flips within 120ms.</string>
+    <string name="gallery_seg_needs_attention">Needs you</string>
+    <string name="gallery_seg_all_agents">All agents</string>
+    <string name="gallery_chip_local">This machine</string>
+    <string name="gallery_chip_build">Build machine</string>
+    <string name="gallery_chip_all">All</string>
+    <string name="gallery_toggle_follow_system">Follow system dark mode</string>
+    <string name="gallery_toggle_disabled_example">Disabled example</string>
+    <string name="gallery_field_label">Send to p1</string>
+    <string name="gallery_field_hint">Enter a command or note</string>
+    <string name="gallery_status_waiting_you">Waiting on you</string>
+    <string name="gallery_status_working">Working</string>
+    <string name="gallery_status_idle">Idle</string>
+    <string name="gallery_status_unknown">Unknown</string>
+    <string name="gallery_type_display">Display 28</string>
+    <string name="gallery_type_title">Title 20</string>
+    <string name="gallery_type_headline">Headline 16</string>
+    <string name="gallery_type_body">Body 14 · hierarchy from weight and color, not borders</string>
+    <string name="gallery_type_body_strong">Body strong 14</string>
+    <string name="gallery_type_caption">Caption 12</string>
+    <plurals name="gallery_meta_waiting_minutes">
+        <item quantity="one">Waiting for approval · %1$d min</item>
+        <item quantity="other">Waiting for approval · %1$d min</item>
+    </plurals>
+    <string name="gallery_action_view">View</string>
+    <string name="gallery_meta_host_panel">Build machine · panel · w1:p1</string>
+</resources>

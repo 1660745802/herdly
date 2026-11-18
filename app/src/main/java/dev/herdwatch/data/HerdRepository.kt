@@ -1,6 +1,8 @@
 package dev.herdwatch.data
 
 import com.jcraft.jsch.JSchException
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
@@ -131,7 +133,7 @@ class HerdRepository internal constructor(
         withContext(dispatcher) {
             synchronized(configGate) {
                 val updated = synchronized(gate) {
-                    require(storedHosts.none { it.id == config.id }) { "主机已存在" }
+                    require(storedHosts.none { it.id == config.id }) { Str.get(R.string.repo_host_exists) }
                     storedHosts + config
                 }
                 store.save(updated)
@@ -148,7 +150,7 @@ class HerdRepository internal constructor(
     fun updateHost(config: HostConfig) {
         synchronized(configGate) {
             val updated = synchronized(gate) {
-                require(storedHosts.any { it.id == config.id }) { "主机已删除" }
+                require(storedHosts.any { it.id == config.id }) { Str.get(R.string.repo_host_deleted) }
                 storedHosts.map { if (it.id == config.id) config else it }
             }
             store.save(updated)
@@ -241,7 +243,7 @@ class HerdRepository internal constructor(
                 }
                 try {
                     lease.client.connect()
-                    val actual = lease.client.fingerprint ?: error("无法读取主机指纹")
+                    val actual = lease.client.fingerprint ?: error(Str.get(R.string.repo_fingerprint_unreadable))
                     persistFingerprint(lease, actual)
                     lease.client.ping()
                     val snapshot = lease.client.snapshot()
@@ -256,7 +258,7 @@ class HerdRepository internal constructor(
                     synchronized(configGate) {
                         if (synchronized(gate) { current(lease) }) {
                             try { store.saveAgents(hostId, cache) }
-                            catch (t: Exception) { _state.update { it.copy(error = "缓存保存失败：${humanize(t)}") } }
+                            catch (t: Exception) { _state.update { it.copy(error = Str.get(R.string.repo_cache_save_failed, humanize(t))) } }
                         }
                     }
                 } catch (e: TimeoutCancellationException) {
@@ -278,7 +280,7 @@ class HerdRepository internal constructor(
         }
         if (finished == null) synchronized(gate) {
             if (generation == epoch && versions[hostId].orZero() == version && _state.value.foreground) _state.update { s -> s.copy(hosts = s.hosts.map {
-                if (it.host.id == hostId && it.conn != ConnState.Connected) it.copy(conn = ConnState.Failed("操作超时")) else it
+                if (it.host.id == hostId && it.conn != ConnState.Connected) it.copy(conn = ConnState.Failed(Str.get(R.string.repo_operation_timeout))) else it
             }) }
         }
     }
@@ -309,13 +311,13 @@ class HerdRepository internal constructor(
         val lock = synchronized(gate) { hostLocks.getOrPut(hostId) { Mutex() } }
         return lock.withLock {
             val lease = synchronized(gate) {
-                check(generation == epoch && versions[hostId].orZero() == version && isHostReady(hostId)) { "连接已失效，请先重连主机" }
+                check(generation == epoch && versions[hostId].orZero() == version && isHostReady(hostId)) { Str.get(R.string.repo_connection_stale_reconnect) }
                 Lease(hostId, generation, versions[hostId].orZero(), clients.getValue(hostId))
             }
             try {
                 val result = block(lease.client)
                 // An accepted mutation keeps its result; its caller must not retry it.
-                if (!acceptedMutation) synchronized(gate) { check(current(lease)) { "连接已失效" } }
+                if (!acceptedMutation) synchronized(gate) { check(current(lease)) { Str.get(R.string.repo_connection_stale) } }
                 result
             }
             catch (e: CancellationException) { fail(lease, null); throw e }
@@ -365,7 +367,7 @@ class HerdRepository internal constructor(
     suspend fun startInNewTab(hostId: String, workspaceId: String?, kind: String, name: String, args: List<String>): Result<Unit> = accepted {
         mutate(hostId) { client ->
             val paneId = (if (workspaceId == null) client.createWorkspace(null) else client.createTab(workspaceId, null))
-                ?: throw IllegalStateException("Herdr 没有返回新 pane")
+                ?: throw IllegalStateException(Str.get(R.string.repo_no_new_pane))
             client.startAgent(paneId, kind, name, args)
         }
     }
@@ -386,7 +388,7 @@ class HerdRepository internal constructor(
     private fun persistFingerprint(lease: Lease, fingerprint: String) {
         synchronized(configGate) {
             val host = synchronized(gate) {
-                check(current(lease)) { "连接已失效" }
+                check(current(lease)) { Str.get(R.string.repo_connection_stale) }
                 storedHosts.first { it.id == lease.hostId }
             }
             if (!host.fingerprint.isNullOrBlank()) {
@@ -408,14 +410,41 @@ class HerdRepository internal constructor(
     }
 
     fun updateFingerprint(hostId: String, fingerprint: String) = synchronized(configGate) {
-        require(fingerprint.isNotBlank()) { "不能清除主机指纹，请核对新的指纹" }
+        require(fingerprint.isNotBlank()) { Str.get(R.string.repo_fingerprint_not_clearable) }
         val host = synchronized(gate) { storedHosts.firstOrNull { it.id == hostId } } ?: return@synchronized
         updateHost(host.copy(fingerprint = fingerprint))
     }
 
+    /**
+     * Deliberate user action ("我只在确实换了机器时用"): forget every pinned host key so the next
+     * handshake asks again. The pin is cleared durably *before* anything is forgotten in memory, so a
+     * failed write never leaves the app trusting an unpinned host it silently forgot about.
+     */
+    suspend fun resetFingerprints() = withContext(dispatcher) {
+        synchronized(configGate) {
+            val pinned = synchronized(gate) { storedHosts.filter { !it.fingerprint.isNullOrBlank() } }
+            if (pinned.isEmpty()) return@withContext
+            val ids = pinned.map { it.id }.toSet()
+            val updated = synchronized(gate) {
+                storedHosts.map { if (it.id in ids) it.copy(fingerprint = null) else it }
+            }
+            store.save(updated)
+            val closes = synchronized(gate) {
+                storedHosts = updated
+                _state.update { s -> s.copy(hosts = s.hosts.map { runtime ->
+                    if (runtime.host.id in ids) {
+                        runtime.copy(host = runtime.host.copy(fingerprint = null), conn = ConnState.Idle)
+                    } else runtime
+                }) }
+                ids.mapNotNull { invalidate(it) }
+            }
+            closes.forEach { it.close() }
+        }
+    }
+
     fun trustNewFingerprint(hostId: String) {
         val fingerprint = synchronized(gate) { mismatches[hostId]?.actual }
-            ?: throw IllegalStateException("没有可核对的新主机指纹")
+            ?: throw IllegalStateException(Str.get(R.string.repo_no_new_fingerprint))
         updateFingerprint(hostId, fingerprint)
         scope.launch { connectHost(hostId) }
     }
@@ -479,18 +508,18 @@ class HerdRepository internal constructor(
 }
 
 fun humanize(t: Throwable): String = when (t) {
-    is HostKeyMismatchException -> t.message ?: "主机密钥不匹配"
-    is HerdrRpcException -> "Herdr 返回错误：${t.message}"
+    is HostKeyMismatchException -> t.message ?: Str.get(R.string.repo_host_key_mismatch)
+    is HerdrRpcException -> Str.get(R.string.repo_rpc_error, t.message ?: "")
     is JSchException -> when {
-        t.message?.contains("Auth fail", true) == true || t.message?.contains("auth cancel", true) == true -> "认证失败：检查用户名、密码或私钥"
-        t.message?.contains("Connection refused", true) == true -> "连接被拒绝：SSH 端口没开？"
-        t.message?.contains("UnknownHost", true) == true -> "找不到主机：检查地址或网络"
-        t.message?.contains("timeout", true) == true -> "连接超时：检查网络，或主机是否可达"
-        t.message?.contains("session is down", true) == true -> "SSH 连接已断开"
-        t.message?.contains("reject HostKey", true) == true -> "主机密钥被拒绝"
-        else -> "SSH 失败：${t.message ?: "未知错误"}"
+        t.message?.contains("Auth fail", true) == true || t.message?.contains("auth cancel", true) == true -> Str.get(R.string.repo_auth_failed)
+        t.message?.contains("Connection refused", true) == true -> Str.get(R.string.repo_connection_refused)
+        t.message?.contains("UnknownHost", true) == true -> Str.get(R.string.repo_unknown_host)
+        t.message?.contains("timeout", true) == true -> Str.get(R.string.repo_connect_timeout)
+        t.message?.contains("session is down", true) == true -> Str.get(R.string.repo_ssh_session_down)
+        t.message?.contains("reject HostKey", true) == true -> Str.get(R.string.repo_host_key_rejected)
+        else -> Str.get(R.string.repo_ssh_failed, t.message ?: Str.get(R.string.repo_unknown_error))
     }
-    is java.net.SocketTimeoutException -> "请求超时"
-    is kotlinx.coroutines.TimeoutCancellationException -> "操作超时"
+    is java.net.SocketTimeoutException -> Str.get(R.string.repo_request_timeout)
+    is kotlinx.coroutines.TimeoutCancellationException -> Str.get(R.string.repo_operation_timeout)
     else -> t.message ?: t.javaClass.simpleName
 }

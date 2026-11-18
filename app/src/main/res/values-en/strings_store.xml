@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="store_cache_save_failed">Could not persist the host cache</string>
+    <string name="store_cache_delete_failed">Could not delete the host cache</string>
+    <string name="store_config_undecryptable">Host settings cannot be decrypted; refusing to overwrite existing data</string>
+    <string name="store_config_save_failed">Could not persist host settings</string>
+</resources>

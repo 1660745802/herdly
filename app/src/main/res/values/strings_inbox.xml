@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 收件箱：顶部标题栏 -->
+    <string name="inbox_subtitle_pocket">手机上的 Herdr 收件箱</string>
+    <plurals name="inbox_subtitle_connecting">
+        <item quantity="other">连接中 · %1$d 个 agent</item>
+    </plurals>
+    <plurals name="inbox_summary_hosts_online">
+        <item quantity="other">%1$d/%2$d 台在线</item>
+    </plurals>
+    <plurals name="inbox_count_agents">
+        <item quantity="other">%1$d 个 agent</item>
+    </plurals>
+    <string name="inbox_summary_hosts_and_agents">%1$s · %2$s</string>
+
+    <!-- 收件箱：搜索 -->
+    <string name="inbox_cd_search">搜索</string>
+    <string name="inbox_cd_search_collapse">收起搜索</string>
+    <string name="inbox_search_placeholder">名称、机器、项目、工作区、标签页、分屏或目录</string>
+    <string name="inbox_search_label">搜索收件箱</string>
+    <string name="inbox_cd_clear_search">清空</string>
+    <string name="inbox_search_active">搜索：%1$s</string>
+    <string name="inbox_list_separator">、</string>
+    <string name="inbox_clear">清除</string>
+    <string name="inbox_clear_search">清除搜索</string>
+
+    <!-- 收件箱：刷新状态 -->
+    <string name="inbox_state_syncing">同步中</string>
+    <string name="inbox_cd_refresh">刷新收件箱</string>
+
+    <!-- 收件箱：连接中提示 -->
+    <string name="inbox_connecting_hosts">正在连接 %1$s…</string>
+
+    <!-- 收件箱：机器条 -->
+    <string name="inbox_host_all">全部</string>
+    <plurals name="inbox_host_waiting">
+        <item quantity="other">%1$d 等待</item>
+    </plurals>
+    <string name="inbox_host_online">在线</string>
+    <string name="inbox_host_connecting">连接中</string>
+    <string name="inbox_host_offline">离线</string>
+    <string name="inbox_host_disconnected">未连接</string>
+
+    <!-- 收件箱：值守摘要 -->
+    <string name="inbox_filter_attention">需要处理</string>
+    <string name="inbox_filter_all">全部 Agent</string>
+    <string name="inbox_view">查看</string>
+    <string name="inbox_longest_waiting">最久 %1$s</string>
+    <string name="inbox_longest_waiting_snapshot">最久 %1$s · 快照</string>
+    <string name="inbox_some_hosts_offline">部分机器未连接</string>
+    <string name="inbox_nothing_pending">暂无待处理</string>
+    <plurals name="inbox_count_unverified">
+        <item quantity="other">%1$d 待核实</item>
+    </plurals>
+    <plurals name="inbox_count_review">
+        <item quantity="other">%1$d 待查看</item>
+    </plurals>
+    <plurals name="inbox_count_working">
+        <item quantity="other">%1$d 进行中</item>
+    </plurals>
+    <plurals name="inbox_count_idle">
+        <item quantity="other">%1$d 空闲</item>
+    </plurals>
+    <string name="inbox_state_expanded">已展开</string>
+    <string name="inbox_state_collapsed">已收起</string>
+    <plurals name="inbox_failures_show">
+        <item quantity="other">%1$d 台连接失败 · 查看详情</item>
+    </plurals>
+    <plurals name="inbox_failures_hide">
+        <item quantity="other">%1$d 台连接失败 · 收起</item>
+    </plurals>
+    <string name="inbox_host_error_line">%1$s：%2$s</string>
+    <string name="inbox_last_synced">最后成功同步：%1$s</string>
+    <string name="inbox_reconnect_host">重连 %1$s</string>
+
+    <!-- 收件箱：列表计数与空态 -->
+    <plurals name="inbox_count_items">
+        <item quantity="other">%1$d 项</item>
+    </plurals>
+    <plurals name="inbox_count_items_matched">
+        <item quantity="other">%1$d 项匹配</item>
+    </plurals>
+    <string name="inbox_empty_none_title">现在没有 Agent</string>
+    <string name="inbox_empty_host_title">这台机器没有 Agent</string>
+    <string name="inbox_empty_none_body">可以创建新任务，或检查主机里的工作区和分屏。</string>
+    <string name="inbox_empty_host_body">换一台机器，或查看全部 Agent。</string>
+    <string name="inbox_show_all_hosts">查看全部机器</string>
+    <string name="inbox_start_new_task">启动新任务</string>
+    <string name="inbox_new_task_hint">点右下角「派新任务」创建并启动 Agent。</string>
+    <string name="inbox_check_host_sessions">检查 %1$s 的会话</string>
+    <string name="inbox_recheck_agents">重新检查 agent</string>
+    <string name="inbox_no_match_title">没有匹配的 Agent</string>
+    <string name="inbox_no_match_search_body">搜索了名称、机器、项目、工作区、标签页、分屏和目录。</string>
+    <string name="inbox_no_match_attention_body">现在没有需要处理的项。</string>
+    <string name="inbox_no_match_host_body">这台机器当前没有匹配的 Agent。</string>
+    <string name="inbox_no_match_none_body">当前没有 Agent。</string>
+    <string name="inbox_show_all_agents">查看全部 Agent</string>
+
+    <!-- 收件箱：首次使用引导 -->
+    <string name="inbox_setup_title">把 Herdr 装进口袋</string>
+    <string name="inbox_setup_body">Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，值守页会列出每个 Agent</string>
+    <string name="inbox_add_host">添加机器</string>
+    <string name="inbox_copy_check_command">复制检查命令</string>
+    <string name="inbox_check_command_hint">在主机上运行上面那条命令，应输出 herdr-api-bridge-v1。</string>
+
+    <!-- 收件箱：Agent 行 -->
+    <string name="inbox_cd_open_terminal">查看 %1$s 的终端</string>
+    <string name="inbox_stale_snapshot">快照待更新 · %1$s</string>
+    <string name="inbox_offline_snapshot">未连接，显示上次快照 · %1$s</string>
+    <plurals name="inbox_attention_count">
+        <item quantity="other">%1$d需要处理</item>
+    </plurals>
+    <plurals name="inbox_failures_short">
+        <item quantity="other">%1$d 台连接失败</item>
+    </plurals>
+</resources>

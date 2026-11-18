@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="policy_unavailable_truncated">屏幕内容不完整，请展开核对；辅助审批已停用，可核对原文后手动操作。</string>
+    <string name="policy_unavailable_unrecognized">尚未识别可核对的问题。</string>
+    <string name="policy_option_expired">选项已过期，请重新核对当前问题。</string>
+    <string name="policy_option_no_keys">选项没有有效按键，没有发送。</string>
+    <string name="policy_revision_changed">屏幕版本已变化，没有发送。请核对新内容。</string>
+    <string name="policy_context_changed">问题或上下文已变化，没有发送。请核对新内容。</string>
+    <string name="policy_verified_notice">已由你核对远端状态；后续操作仍会重新读取证据。</string>
+    <string name="codec_unknown_error">未知错误</string>
+    <string name="codec_id_mismatch">响应 id 不匹配：期望 %1$s，收到 %2$s</string>
+    <string name="codec_no_result">响应里没有 result</string>
+    <string name="codec_no_read">pane.read 响应缺少 read</string>
+    <string name="store_bad_cipher_length">密文长度不正确</string>
+</resources>

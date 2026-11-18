@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ask_default_question">Confirmation needed</string>
+    <string name="ask_risk_standing">Includes a standing permission option</string>
+    <string name="ask_yes">Yes</string>
+    <string name="ask_no">No</string>
+    <string name="ask_confirm">Confirm</string>
+</resources>

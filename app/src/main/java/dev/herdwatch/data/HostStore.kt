@@ -2,6 +2,8 @@ package dev.herdwatch.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.HostConfig
 import kotlinx.serialization.builtins.ListSerializer
@@ -46,13 +48,13 @@ class HostStore internal constructor(
     fun saveAgents(hostId: String, agents: List<Agent>) {
         val plain = json.encodeToString(agentSerializer, agents)
         check(prefs.edit().putString(agentsKey(hostId), encrypt(plain)).commit()) {
-            "无法持久化主机缓存"
+            Str.get(R.string.store_cache_save_failed)
         }
     }
 
     /** Remove a cache durably; used when a host is deleted. */
     fun deleteAgents(hostId: String) {
-        check(prefs.edit().remove(agentsKey(hostId)).commit()) { "无法删除主机缓存" }
+        check(prefs.edit().remove(agentsKey(hostId)).commit()) { Str.get(R.string.store_cache_delete_failed) }
     }
 
     /**
@@ -66,11 +68,11 @@ class HostStore internal constructor(
         val primary = prefs.getString(KEY_HOSTS, null)
         val backup = prefs.getString(KEY_BACKUP, null)
         check((primary == null && backup == null) || primary?.let(::decode) != null || backup?.let(::decode) != null) {
-            "主机配置无法解密，拒绝覆盖现有数据"
+            Str.get(R.string.store_config_undecryptable)
         }
         val edit = prefs.edit().putString(KEY_HOSTS, ciphertext).putString(KEY_BACKUP, ciphertext)
         removedHostIds.forEach { edit.remove(agentsKey(it)) }
-        check(edit.commit()) { "无法持久化主机配置" }
+        check(edit.commit()) { Str.get(R.string.store_config_save_failed) }
     }
 
     private fun agentsKey(hostId: String) = "agents.v1.$hostId"

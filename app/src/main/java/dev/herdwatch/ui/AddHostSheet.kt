@@ -1,6 +1,5 @@
 package dev.herdwatch.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -12,8 +11,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.padding
@@ -22,16 +19,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,12 +29,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.AuthType
 import dev.herdwatch.model.HostConfig
+import dev.herdwatch.ui.design.DsRadius
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoChip
+import dev.herdwatch.ui.design.NeoField
+import dev.herdwatch.ui.design.NeoSheet
+import dev.herdwatch.ui.design.NeoSkeleton
+import dev.herdwatch.ui.design.NeoWell
+import dev.herdwatch.ui.design.ds
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddHostSheet(
     adding: Boolean,
@@ -77,12 +83,14 @@ fun AddHostSheet(
     var herdrCommand by remember(initial) { mutableStateOf(initial?.herdrCommand ?: "herdr") }
     var advanced by rememberSaveable(initial?.id) { mutableStateOf(initial?.session?.isNotBlank() == true || (initial != null && initial.herdrCommand != "herdr")) }
     var validation by remember { mutableStateOf<String?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Hoisted out of the semantics block: that lambda is not composable.
+    val expandedLabel = stringResource(R.string.addhost_expanded)
+    val collapsedLabel = stringResource(R.string.addhost_collapsed)
+    val colors = ds()
 
-    ModalBottomSheet(
+    // NeoSheet 用 ds().base 作底（与页面同一块底盘），而不是 Material 的 colorScheme.background。
+    NeoSheet(
         onDismissRequest = { if (!adding) onDismiss() },
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.background,
     ) {
         Column(
             Modifier
@@ -91,153 +99,180 @@ fun AddHostSheet(
                 .imePadding()
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
         ) {
-            Text(if (initial == null) "添加机器" else "编辑机器", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(4.dp))
             Text(
-                "SSH 直连，凭据在本机加密保存。保存配置后尝试连接，连接结果请在机器列表中查看。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (initial == null) stringResource(R.string.addhost_title_add) else stringResource(R.string.addhost_title_edit),
+                style = DsTypography.title,
+                color = colors.text,
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(DsSpace.xs))
+            Text(
+                stringResource(R.string.addhost_subtitle),
+                style = DsTypography.body,
+                color = colors.textSoft,
+            )
+            Spacer(Modifier.height(DsSpace.l))
 
-            OutlinedTextField(
+            NeoField(
                 value = label,
                 onValueChange = { label = it },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                label = { Text("名字（可选）") },
-                placeholder = { Text("build-01") },
+                label = stringResource(R.string.addhost_label_optional),
+                hint = "build-01",
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
             )
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
+                NeoField(
                     value = host,
                     onValueChange = { host = it },
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
-                    label = { Text("主机") },
-                    placeholder = { Text("192.168.1.10 或 build.example.com") },
+                    label = stringResource(R.string.addhost_host),
+                    hint = stringResource(R.string.addhost_host_placeholder),
                     singleLine = true,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
                 )
-                OutlinedTextField(
+                NeoField(
                     value = port,
                     onValueChange = { port = it.filter { c -> c.isDigit() }.take(5) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
-                    label = { Text("端口") },
+                    label = stringResource(R.string.addhost_port),
                     singleLine = true,
                     modifier = Modifier.width(92.dp),
-                    shape = RoundedCornerShape(10.dp),
                 )
             }
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            NeoField(
                 value = user,
                 onValueChange = { user = it },
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Next),
-                label = { Text("用户名") },
+                label = stringResource(R.string.addhost_user),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
             )
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
+            Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                NeoChip(
+                    label = stringResource(R.string.addhost_password),
                     selected = authType == AuthType.PASSWORD,
-                    modifier = Modifier.heightIn(min = 48.dp),
                     onClick = { authType = AuthType.PASSWORD },
-                    label = { Text("密码") },
-                    shape = RoundedCornerShape(8.dp),
-                )
-                FilterChip(
-                    selected = authType == AuthType.KEY,
                     modifier = Modifier.heightIn(min = 48.dp),
+                )
+                NeoChip(
+                    label = stringResource(R.string.addhost_key),
+                    selected = authType == AuthType.KEY,
                     onClick = { authType = AuthType.KEY },
-                    label = { Text("私钥") },
-                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.heightIn(min = 48.dp),
                 )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(DsSpace.s))
             if (authType == AuthType.PASSWORD) {
-                OutlinedTextField(
+                NeoField(
                     value = password,
                     onValueChange = { password = it },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    label = { Text("密码") },
+                    label = stringResource(R.string.addhost_password),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
                 )
             } else {
-                OutlinedTextField(
-                    value = privateKey,
-                    onValueChange = { privateKey = it },
-                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
-                    label = { Text("私钥（OpenSSH / PEM 全文）") },
-                    placeholder = { Text("-----BEGIN OPENSSH PRIVATE KEY-----") },
-                    minLines = 3,
-                    maxLines = 6,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
+                // NeoField 没有 maxLines：私钥需要 minLines=3 / maxLines=6 的内部滚动，
+                // 所以这里在调用点组合 NeoWell + 去边框的 OutlinedTextField（颜色/字体/圆角仍走 ds()）。
+                Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    Text(
+                        stringResource(R.string.addhost_key_full),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                    )
+                    NeoWell(corner = DsRadius.control) {
+                        OutlinedTextField(
+                            value = privateKey,
+                            onValueChange = { privateKey = it },
+                            keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
+                            placeholder = {
+                                Text(
+                                    "-----BEGIN OPENSSH PRIVATE KEY-----",
+                                    style = DsTypography.body,
+                                    color = colors.textFaint,
+                                )
+                            },
+                            minLines = 3,
+                            maxLines = 6,
+                            textStyle = DsTypography.body.copy(color = colors.text),
+                            shape = RoundedCornerShape(DsRadius.control),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                cursorColor = colors.accent,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(DsSpace.s))
+                NeoField(
                     value = passphrase,
                     onValueChange = { passphrase = it },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                    label = { Text("私钥口令（可空）") },
+                    label = stringResource(R.string.addhost_passphrase_optional),
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
                 )
             }
             Spacer(Modifier.height(10.dp))
-            TextButton(
+            NeoButton(
+                label = if (advanced) stringResource(R.string.addhost_advanced_hide) else stringResource(R.string.addhost_advanced_show),
                 onClick = { advanced = !advanced },
-                modifier = Modifier.semantics { stateDescription = if (advanced) "已展开" else "已收起" },
-            ) { Text(if (advanced) "收起高级设置" else "高级：session 与命令路径") }
+                tone = NeoButtonTone.Ghost,
+                compact = true,
+                modifier = Modifier.semantics { stateDescription = if (advanced) expandedLabel else collapsedLabel },
+            )
             if (advanced) {
-                OutlinedTextField(
+                NeoField(
                     value = session,
                     onValueChange = { session = it },
-                    label = { Text("Herdr session（可空）") },
-                    placeholder = { Text("默认 session") },
+                    label = stringResource(R.string.addhost_session_optional),
+                    hint = stringResource(R.string.addhost_session_placeholder),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Next),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
                 )
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
+                NeoField(
                     value = herdrCommand,
                     onValueChange = { herdrCommand = it },
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-                    label = { Text("herdr 命令") },
-                    supportingText = { Text("非交互 SSH 的 PATH 可能很短；可填绝对路径") },
+                    label = stringResource(R.string.addhost_herdr_command),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                )
+                // NeoField 没有 supportingText：说明文字紧贴字段下方，样式与字段标签同一 token。
+                Spacer(Modifier.height(DsSpace.xs))
+                Text(
+                    stringResource(R.string.addhost_herdr_command_hint),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
                 )
             }
 
             validation?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(DsSpace.s))
+                Text(it, color = colors.danger, style = DsTypography.caption)
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(DsSpace.l))
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stackedActions = maxWidth < 420.dp
                 if (stackedActions) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
                         Text(
-                            "首次连接自动记录指纹；已保存的指纹变化时停止连接。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            stringResource(R.string.addhost_fingerprint_note),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
                         )
                         SaveHostButton(
                             adding = adding,
@@ -253,12 +288,12 @@ fun AddHostSheet(
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "首次连接自动记录指纹；已保存的指纹变化时停止连接。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            stringResource(R.string.addhost_fingerprint_note),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
                             modifier = Modifier.weight(1f),
                         )
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(DsSpace.l))
                         SaveHostButton(
                             adding = adding,
                             modifier = Modifier.widthIn(min = 112.dp),
@@ -272,11 +307,11 @@ fun AddHostSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(DsSpace.s))
             Text(
-                "提示：主机上先运行 herdr remote-api-bridge --check，确认输出 herdr-api-bridge-v1。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                stringResource(R.string.addhost_check_hint),
+                style = DsTypography.caption,
+                color = colors.textSoft,
             )
         }
     }
@@ -284,19 +319,21 @@ fun AddHostSheet(
 
 @Composable
 private fun SaveHostButton(adding: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = !adding,
-        shape = RoundedCornerShape(10.dp),
-        modifier = modifier.heightIn(min = 48.dp),
+    // NeoButton 没有内容插槽，忙碌指示只能放在按钮左侧；modifier 仍落在按钮上以保持原有宽度行为。
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
     ) {
         if (adding) {
-            CircularProgressIndicator(Modifier.height(18.dp).width(18.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(8.dp))
-            Text("保存中…")
-        } else {
-            Text("保存配置")
+            NeoSkeleton(Modifier.width(14.dp), height = 14.dp, corner = 7.dp)
         }
+        NeoButton(
+            label = stringResource(if (adding) R.string.addhost_saving else R.string.common_save),
+            onClick = onClick,
+            tone = NeoButtonTone.Primary,
+            enabled = !adding,
+            modifier = modifier.heightIn(min = 48.dp),
+        )
     }
 }
 
@@ -308,10 +345,10 @@ private fun validateHost(
     port: String,
     herdrCommand: String,
 ): String? = when {
-    host.isBlank() -> "主机不能为空"
-    user.isBlank() -> "用户名不能为空"
-    secret.isBlank() -> if (authType == AuthType.PASSWORD) "密码不能为空" else "私钥不能为空"
-    (port.toIntOrNull() ?: 0) !in 1..65535 -> "端口须为 1–65535"
-    herdrCommand.isBlank() -> "请填写 herdr 命令或绝对路径"
+    host.isBlank() -> Str.get(R.string.addhost_err_host_required)
+    user.isBlank() -> Str.get(R.string.addhost_err_user_required)
+    secret.isBlank() -> if (authType == AuthType.PASSWORD) Str.get(R.string.addhost_err_password_required) else Str.get(R.string.addhost_err_key_required)
+    (port.toIntOrNull() ?: 0) !in 1..65535 -> Str.get(R.string.addhost_err_port_range)
+    herdrCommand.isBlank() -> Str.get(R.string.addhost_err_herdr_required)
     else -> null
 }

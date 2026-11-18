@@ -2,15 +2,22 @@ package dev.herdwatch
 
 import dev.herdwatch.domain.AskParser
 import dev.herdwatch.domain.requiresStandingConfirmation
+import dev.herdwatch.i18n.TestStrings
 import dev.herdwatch.model.AskKind
 import dev.herdwatch.model.AskOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class AskParserTest {
+
+    @Before
+    fun installStrings() {
+        TestStrings.install()
+    }
 
     @Test
     fun `parses claude permission menu`() {
@@ -29,13 +36,13 @@ class AskParserTest {
         assertEquals(listOf("1"), ask?.allow?.keys)
         assertEquals(listOf("3"), ask?.deny?.keys)
         assertEquals(AskKind.ALLOW, ask?.allow?.kind)
-        assertEquals("含长期授权选项", ask?.risk)
+        assertEquals(TestStrings.text("ask_risk_standing"), ask?.risk)
     }
 
     @Test
     fun `parses yes no prompt and appends enter`() {
         val ask = AskParser.parse("Delete build/? This cannot be undone. [y/N]")
-        assertEquals("是", ask?.allow?.label)
+        assertEquals(TestStrings.text("ask_yes"), ask?.allow?.label)
         assertEquals(listOf("y"), ask?.allow?.keys)
         assertEquals(listOf("n"), ask?.deny?.keys)
     }

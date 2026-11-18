@@ -1,5 +1,8 @@
 package dev.herdwatch.ssh
 
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
+
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.HerdPane
 import dev.herdwatch.model.HerdStructure
@@ -36,7 +39,7 @@ object BridgeCodec {
         val root = json.parseToJsonElement(line).jsonObject
         val err = root["error"]?.jsonObject ?: return null
         val code = err["code"]?.jsonPrimitive?.contentOrNull
-        val msg = err["message"]?.jsonPrimitive?.contentOrNull ?: "未知错误"
+        val msg = err["message"]?.jsonPrimitive?.contentOrNull ?: Str.get(R.string.codec_unknown_error)
         if (code.isNullOrBlank()) msg else "$msg ($code)"
     }.getOrNull()
 
@@ -45,15 +48,15 @@ object BridgeCodec {
         val root = json.parseToJsonElement(line).jsonObject
         val id = root["id"]?.jsonPrimitive?.contentOrNull
         if (expectedId != null && id != null && id != expectedId) {
-            throw HerdrRpcException(null, "响应 id 不匹配：期望 $expectedId，收到 $id")
+            throw HerdrRpcException(null, Str.get(R.string.codec_id_mismatch, expectedId, id))
         }
         root["error"]?.jsonObject?.let { err ->
             val code = err["code"]?.jsonPrimitive?.contentOrNull
-            val msg = err["message"]?.jsonPrimitive?.contentOrNull ?: "未知错误"
+            val msg = err["message"]?.jsonPrimitive?.contentOrNull ?: Str.get(R.string.codec_unknown_error)
             throw HerdrRpcException(code, msg)
         }
         return root["result"]?.jsonObject
-            ?: throw HerdrRpcException(null, "响应里没有 result")
+            ?: throw HerdrRpcException(null, Str.get(R.string.codec_no_result))
     }
 
     fun parsePing(result: JsonObject): Pair<String?, Int?> {
@@ -185,7 +188,7 @@ object BridgeCodec {
 
     fun parsePaneRead(result: JsonObject): PaneText {
         val read = result["read"]?.jsonObject
-            ?: throw HerdrRpcException(null, "pane.read 响应缺少 read")
+            ?: throw HerdrRpcException(null, Str.get(R.string.codec_no_read))
         val text = read.string("text").orEmpty()
         return PaneText(
             text = text,

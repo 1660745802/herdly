@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 仓库层校验/失败说明 -->
+    <string name="repo_host_exists">主机已存在</string>
+    <string name="repo_host_deleted">主机已删除</string>
+    <string name="repo_fingerprint_unreadable">无法读取主机指纹</string>
+    <string name="repo_cache_save_failed">缓存保存失败：%1$s</string>
+    <string name="repo_connection_stale_reconnect">连接已失效，请先重连主机</string>
+    <string name="repo_connection_stale">连接已失效</string>
+    <string name="repo_no_new_pane">Herdr 没有返回新 pane</string>
+    <string name="repo_fingerprint_not_clearable">不能清除主机指纹，请核对新的指纹</string>
+    <string name="repo_no_new_fingerprint">没有可核对的新主机指纹</string>
+
+    <!-- humanize()：把底层异常翻成一句可核对的话 -->
+    <string name="repo_host_key_mismatch">主机密钥不匹配</string>
+    <string name="repo_rpc_error">Herdr 返回错误：%1$s</string>
+    <string name="repo_auth_failed">认证失败：检查用户名、密码或私钥</string>
+    <string name="repo_connection_refused">连接被拒绝：SSH 端口没开？</string>
+    <string name="repo_unknown_host">找不到主机：检查地址或网络</string>
+    <string name="repo_connect_timeout">连接超时：检查网络，或主机是否可达</string>
+    <string name="repo_ssh_session_down">SSH 连接已断开</string>
+    <string name="repo_host_key_rejected">主机密钥被拒绝</string>
+    <string name="repo_ssh_failed">SSH 失败：%1$s</string>
+    <string name="repo_unknown_error">未知错误</string>
+    <string name="repo_request_timeout">请求超时</string>
+    <string name="repo_operation_timeout">操作超时</string>
+</resources>

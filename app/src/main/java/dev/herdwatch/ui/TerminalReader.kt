@@ -10,19 +10,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -34,12 +33,33 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import dev.herdwatch.ui.theme.MonoStyle
+import dev.herdwatch.R
+import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsRadius
+import dev.herdwatch.ui.design.DsSpace
+import dev.herdwatch.ui.design.DsTypography
+import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoButtonTone
+import dev.herdwatch.ui.design.NeoGlyph
+import dev.herdwatch.ui.design.NeoIconButton
+import dev.herdwatch.ui.design.NeoWell
+import dev.herdwatch.ui.theme.LocalTerminalTokens
 
-private val ReaderBackground = Color(0xFF13151A)
-private val ReaderForeground = Color(0xFFE4E7EE)
-private val ReaderMuted = Color(0xFFA8B0C0)
-private val ReaderAccent = Color(0xFFB6C3FF)
+/**
+ * Search-hit colours, kept as literals on purpose.
+ *
+ * The pair is tuned for contrast against the *frozen terminal* background, not against the app
+ * chassis: amber-on-olive has to stay readable inside a block of coloured VT output, where an
+ * accent wash (semi-transparent, chassis-tinted) would either vanish or fight the ANSI colours
+ * already on the line. Do not tokenize these without re-checking that contrast.
+ */
+private val SearchHighlightBackground = Color(0xFF4D431F)
+private val SearchHighlightForeground = Color(0xFFFFE7A0)
+
+private val ReaderBackground: Color @Composable get() = LocalTerminalTokens.current.background
+private val ReaderForeground: Color @Composable get() = LocalTerminalTokens.current.text
+private val ReaderMuted: Color @Composable get() = LocalTerminalTokens.current.muted
+private val ReaderAccent: Color @Composable get() = LocalTerminalTokens.current.accent
 
 /** A frozen snapshot: neither polling nor remote controls can change the text being read. */
 @Composable
@@ -65,6 +85,10 @@ internal fun TerminalReader(
     val keyboard = LocalSoftwareKeyboardController.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     var copied by remember { mutableStateOf(false) }
+    val wrapStateLabel = stringResource(if (wrap) R.string.reader_state_wrap_on else R.string.reader_state_wrap_off)
+    val searchDescription = stringResource(R.string.reader_cd_search)
+    val fontSmallerDescription = stringResource(R.string.reader_cd_font_smaller)
+    val fontLargerDescription = stringResource(R.string.reader_cd_font_larger)
     LaunchedEffect(query) { matchIndex = 0 }
     LaunchedEffect(matchingLines, matchIndex) {
         matchingLines.getOrNull(matchIndex)?.let { listState.scrollToItem(it) }
@@ -79,61 +103,120 @@ internal fun TerminalReader(
         Column(Modifier.fillMaxWidth().height(configuration.screenHeightDp.dp).background(ReaderBackground).systemBarsPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("屏幕原文", color = ReaderForeground, style = MaterialTheme.typography.titleMedium)
-                    Text(identity, color = ReaderMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                    Text(stringResource(R.string.reader_title), color = ReaderForeground, style = DsTypography.headline)
+                    Text(identity, color = ReaderMuted, style = DsTypography.caption, maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
-                TextButton(onClick = { clipboard.setText(AnnotatedString(text)); copied = true }, enabled = text.isNotBlank()) {
-                    Text(if (copied) "已复制" else "复制全部", color = ReaderAccent)
-                }
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "关闭全屏阅读", tint = ReaderForeground) }
+                NeoButton(
+                    label = if (copied) stringResource(R.string.common_copied) else stringResource(R.string.reader_copy_all),
+                    onClick = { clipboard.setText(AnnotatedString(text)); copied = true },
+                    enabled = text.isNotBlank(),
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                )
+                NeoIconButton(
+                    glyph = NeoGlyph.Close,
+                    onClick = onDismiss,
+                    contentDescription = stringResource(R.string.reader_cd_close),
+                    tint = ReaderForeground,
+                )
             }
-            Text("已冻结 · ${formatClock(loadedAt)} 的快照${if (truncated) " · 内容不完整" else ""}",
-                color = ReaderMuted, style = MaterialTheme.typography.bodySmall,
+            Text(
+                stringResource(
+                    if (truncated) R.string.reader_frozen_truncated else R.string.reader_frozen,
+                    formatClock(loadedAt),
+                ),
+                color = ReaderMuted, style = DsTypography.caption,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).background(Color.White.copy(alpha = 0.07f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
-                verticalAlignment = Alignment.CenterVertically) {
+            NeoWell(
+                Modifier.fillMaxWidth().padding(horizontal = DsSpace.m, vertical = DsSpace.xs),
+                corner = DsRadius.control,
+                fill = ReaderMuted.copy(alpha = 0.12f),
+                depth = DsElev.flat,
+            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 12.dp)
-                        .semantics { contentDescription = "搜索屏幕原文" },
+                        .semantics { contentDescription = searchDescription },
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = ReaderForeground),
+                    textStyle = DsTypography.body.copy(color = ReaderForeground),
                     cursorBrush = SolidColor(ReaderAccent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                     decorationBox = { inner ->
-                        if (query.isEmpty()) Text("在这份快照中查找", color = ReaderMuted, style = MaterialTheme.typography.bodyMedium)
+                        if (query.isEmpty()) Text(stringResource(R.string.reader_search_placeholder), color = ReaderMuted, style = DsTypography.body)
                         inner()
                     },
                 )
-                if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "清空查找", tint = ReaderMuted, modifier = Modifier.size(18.dp)) }
+                if (query.isNotEmpty()) NeoIconButton(
+                    glyph = NeoGlyph.Close,
+                    onClick = { query = "" },
+                    contentDescription = stringResource(R.string.reader_cd_clear_search),
+                    tint = ReaderMuted,
+                )
+            }
             }
             androidx.compose.animation.AnimatedVisibility(visible = query.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (matchingLines.isEmpty()) "没有匹配行" else "${matchIndex + 1} / ${matchingLines.size} 个匹配行",
-                        color = ReaderMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { matchIndex = (matchIndex - 1 + matchingLines.size) % matchingLines.size }, enabled = matchingLines.isNotEmpty()) {
-                        Icon(Icons.Default.KeyboardArrowUp, "上一个匹配行", tint = if (matchingLines.isEmpty()) ReaderMuted else ReaderAccent)
-                    }
-                    IconButton(onClick = { matchIndex = (matchIndex + 1) % matchingLines.size }, enabled = matchingLines.isNotEmpty()) {
-                        Icon(Icons.Default.KeyboardArrowDown, "下一个匹配行", tint = if (matchingLines.isEmpty()) ReaderMuted else ReaderAccent)
-                    }
+                    Text(
+                        if (matchingLines.isEmpty()) stringResource(R.string.reader_no_matches)
+                        else pluralStringResource(R.plurals.reader_match_position, matchingLines.size, matchIndex + 1, matchingLines.size),
+                        color = ReaderMuted, style = DsTypography.caption, modifier = Modifier.weight(1f))
+                    NeoIconButton(
+                        glyph = NeoGlyph.ChevronRight,
+                        onClick = { matchIndex = (matchIndex - 1 + matchingLines.size) % matchingLines.size },
+                        contentDescription = stringResource(R.string.reader_cd_prev_match),
+                        tint = if (matchingLines.isEmpty()) ReaderMuted else ReaderAccent,
+                        enabled = matchingLines.isNotEmpty(),
+                        modifier = Modifier.rotate(-90f),
+                    )
+                    NeoIconButton(
+                        glyph = NeoGlyph.ChevronRight,
+                        onClick = { matchIndex = (matchIndex + 1) % matchingLines.size },
+                        contentDescription = stringResource(R.string.reader_cd_next_match),
+                        tint = if (matchingLines.isEmpty()) ReaderMuted else ReaderAccent,
+                        enabled = matchingLines.isNotEmpty(),
+                        modifier = Modifier.rotate(90f),
+                    )
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onFontSize((fontSize - 1).coerceAtLeast(11)) }, enabled = fontSize > 11,
-                    modifier = Modifier.semantics { contentDescription = "缩小原文字号" }) { Text("A−", color = ReaderMuted) }
-                Text("$fontSize", color = ReaderMuted, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { onFontSize((fontSize + 1).coerceAtMost(20)) }, enabled = fontSize < 20,
-                    modifier = Modifier.semantics { contentDescription = "放大原文字号" }) { Text("A+", color = ReaderAccent) }
+                NeoButton(
+                    label = "A−",
+                    onClick = { onFontSize((fontSize - 1).coerceAtLeast(11)) },
+                    enabled = fontSize > 11,
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                    modifier = Modifier.semantics { contentDescription = fontSmallerDescription },
+                )
+                Text("$fontSize", color = ReaderMuted, style = DsTypography.mono)
+                NeoButton(
+                    label = "A+",
+                    onClick = { onFontSize((fontSize + 1).coerceAtMost(20)) },
+                    enabled = fontSize < 20,
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                    modifier = Modifier.semantics { contentDescription = fontLargerDescription },
+                )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { wrap = !wrap }, modifier = Modifier.semantics { stateDescription = if (wrap) "自动换行已开启" else "自动换行已关闭" }) {
-                    Text(if (wrap) "自动换行" else "横向查看", color = ReaderAccent)
-                }
+                NeoButton(
+                    label = if (wrap) stringResource(R.string.reader_wrap) else stringResource(R.string.reader_unwrap),
+                    onClick = { wrap = !wrap },
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                    modifier = Modifier.semantics { stateDescription = wrapStateLabel },
+                )
             }
-            HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
+            // NeoDivider paints colors.shadowDark (a near-black hairline) — invisible on the frozen
+            // terminal panel. Reproduce the original faint light rule from the terminal token instead.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(LocalTerminalTokens.current.muted.copy(alpha = 0.12f)),
+            )
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val outputModifier = if (wrap) Modifier.fillMaxWidth() else Modifier.horizontalScroll(horizontal).widthIn(min = 280.dp)
                 SelectionContainer {
@@ -146,14 +229,14 @@ internal fun TerminalReader(
                                     if (query.isNotBlank()) {
                                         var start = line.indexOf(query, ignoreCase = true)
                                         while (start >= 0) {
-                                            addStyle(SpanStyle(background = Color(0xFF4D431F), color = Color(0xFFFFE7A0)), start, start + query.length)
+                                            addStyle(SpanStyle(background = SearchHighlightBackground, color = SearchHighlightForeground), start, start + query.length)
                                             start = line.indexOf(query, start + query.length, ignoreCase = true)
                                         }
                                     }
                                 }
                             }
                             Text(highlighted, color = ReaderForeground, softWrap = wrap,
-                                style = MonoStyle.copy(fontSize = fontSize.sp, lineHeight = (fontSize * 1.55f).sp),
+                                style = DsTypography.mono.copy(fontSize = fontSize.sp, lineHeight = (fontSize * 1.55f).sp),
                                 modifier = Modifier.fillMaxWidth())
                         }
                     }

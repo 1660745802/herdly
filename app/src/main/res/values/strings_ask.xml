@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 屏幕解析出的提问：这些文案会直接显示在审批面板上 -->
+    <string name="ask_default_question">需要你的确认</string>
+    <string name="ask_risk_standing">含长期授权选项</string>
+    <string name="ask_yes">是</string>
+    <string name="ask_no">否</string>
+    <string name="ask_confirm">确认</string>
+</resources>

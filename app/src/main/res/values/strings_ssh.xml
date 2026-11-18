@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ssh_host_key_mismatch">主机密钥变了。\n期望 %1$s\n实际 %2$s\n可能是重装系统，也可能有人在中间。</string>
+    <string name="ssh_request_timeout">Herdr 请求超时；若为写入请求，是否已接受仍需核对</string>
+    <string name="ssh_client_closed">SSH 客户端已关闭</string>
+    <string name="ssh_not_connected">还没有连上 %1$s</string>
+    <string name="ssh_write_failed">写入终端失败：%1$s</string>
+    <string name="ssh_read_failed">读取终端数据失败：%1$s</string>
+    <string name="ssh_connect_failed">连接 %1$s 失败：%2$s</string>
+    <string name="ssh_open_shell_failed">打开 shell 通道失败：%1$s</string>
+    <string name="ssh_session_closed">SSH 会话已关闭</string>
+    <string name="ssh_no_host_key">SSH 没有返回主机密钥</string>
+    <string name="ssh_auth_failed">认证失败，请检查用户名、密码或密钥</string>
+    <string name="ssh_connect_timeout">连接超时（%1$d 秒），主机不可达或端口不对</string>
+    <string name="ssh_refused">连接被拒绝，主机或端口不对</string>
+    <string name="ssh_unknown_host">找不到主机 %1$s</string>
+    <string name="ssh_bridge_no_reply">bridge 没有返回（%1$s）：%2$s</string>
+    <string name="ssh_unknown_host_key">首次连接，需要确认主机指纹：%1$s</string>
+</resources>

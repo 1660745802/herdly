@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Interactive SSH terminal page -->
+    <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_connection_lost">Connection lost</string>
+    <string name="terminal_back_desc">Back to host list</string>
+    <!-- %1$s: user@host target; the subtitle gains a suffix inside full-screen programs -->
+    <string name="terminal_subtitle_alt_screen">%1$s · full-screen app</string>
+    <string name="terminal_reconnect_short">Reconnect</string>
+    <string name="terminal_options_desc">Terminal options</string>
+    <string name="terminal_font_larger">Larger text</string>
+    <string name="terminal_font_smaller">Smaller text</string>
+    <!-- %1$d: current font size -->
+    <string name="terminal_font_size">Size %1$d</string>
+    <string name="terminal_keys_show_always">Always show key bar</string>
+    <string name="terminal_keys_hide_always">Hide key bar</string>
+    <string name="terminal_state_connecting">Connecting</string>
+    <string name="terminal_state_connected">Connected</string>
+    <string name="terminal_state_disconnected">Disconnected</string>
+    <string name="terminal_ssh_starting">Opening SSH session…</string>
+    <string name="terminal_no_output">No output yet.</string>
+    <string name="terminal_scroll_to_bottom">Jump to bottom</string>
+    <string name="terminal_keys_expand">Terminal keys</string>
+    <string name="terminal_keys_collapse">Hide keys</string>
+    <string name="terminal_keys_expand_desc">Show terminal keys</string>
+    <string name="terminal_keys_collapse_desc">Hide terminal keys</string>
+    <string name="terminal_input_desc">Terminal command input</string>
+    <string name="terminal_input_placeholder">Type a command, press enter to run</string>
+    <string name="terminal_send">Send</string>
+    <string name="terminal_paste">Paste</string>
+    <string name="terminal_input_line">Line input</string>
+    <string name="terminal_input_direct">Direct input</string>
+    <string name="terminal_direct_hint">Direct: each character is sent immediately (good for vim/tmux)</string>
+    <!-- Key labels stay in English; only their accessibility descriptions are localized -->
+    <string name="terminal_key_escape">Esc key</string>
+    <string name="terminal_key_tab">Tab key</string>
+    <string name="terminal_key_shift_tab">⇧Tab</string>
+    <string name="terminal_key_shift_tab_a11y">Shift+Tab key (reverse focus)</string>
+    <string name="terminal_key_ctrl">Ctrl modifier</string>
+    <string name="terminal_key_up">Arrow up</string>
+    <string name="terminal_key_down">Arrow down</string>
+    <string name="terminal_key_right">Arrow right</string>
+    <string name="terminal_key_left">Arrow left</string>
+    <string name="terminal_key_ctrl_c">Ctrl+C, interrupt the running command</string>
+    <string name="terminal_key_ctrl_d">Ctrl+D, end input</string>
+    <string name="terminal_key_ctrl_z">Ctrl+Z, suspend the running process</string>
+    <!-- Host key confirmation for the first connection -->
+    <string name="terminal_fingerprint_title">Verify host fingerprint</string>
+    <!-- %1$s: host name or target address -->
+    <string name="terminal_fingerprint_body">This is the first connection to %1$s. Once you trust it, the host key fingerprint is saved and checked automatically on later connections.</string>
+    <string name="terminal_fingerprint_security">Your password and other credentials are not sent to this host until you confirm the fingerprint, so cancelling now leaks nothing. Continue only if the fingerprint matches the one your host administrator published; a mismatch may mean someone is intercepting the connection.</string>
+    <string name="terminal_fingerprint_fingerprint_label">Host key fingerprint</string>
+    <string name="terminal_fingerprint_cancel">Cancel connection</string>
+    <string name="terminal_fingerprint_trust">Trust and connect</string>
+    <string name="terminal_key_page_up">Page up</string>
+    <string name="terminal_key_page_down">Page down</string>
+    <string name="terminal_key_backspace">Backspace</string>
+</resources>

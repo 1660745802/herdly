@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="components_status_a11y">Status: %1$s</string>
+    <string name="components_just_now">Just now</string>
+    <string name="components_not_synced">Not synced</string>
+    <plurals name="components_seconds_ago">
+        <item quantity="one">%1$d s ago</item>
+        <item quantity="other">%1$d s ago</item>
+    </plurals>
+    <plurals name="components_minutes_ago">
+        <item quantity="one">%1$d min ago</item>
+        <item quantity="other">%1$d min ago</item>
+    </plurals>
+    <plurals name="components_elapsed_hours">
+        <item quantity="one">%1$dh %2$dm</item>
+        <item quantity="other">%1$dh %2$dm</item>
+    </plurals>
+    <plurals name="components_elapsed_days">
+        <item quantity="one">%1$dd</item>
+        <item quantity="other">%1$dd</item>
+    </plurals>
+</resources>

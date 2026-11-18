@@ -1,5 +1,8 @@
 package dev.herdwatch.data
 
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
+
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -28,7 +31,7 @@ object SecretBox {
 
     fun decrypt(packed: String): String {
         val bytes = Base64.decode(packed, Base64.NO_WRAP)
-        require(bytes.size > IV_BYTES) { "密文长度不正确" }
+        require(bytes.size > IV_BYTES) { Str.get(R.string.store_bad_cipher_length) }
         val iv = bytes.copyOfRange(0, IV_BYTES)
         val body = bytes.copyOfRange(IV_BYTES, bytes.size)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")

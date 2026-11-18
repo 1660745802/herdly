@@ -35,13 +35,15 @@ import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 
 class HostKeyMismatchException(val expected: String, val actual: String) : Exception(
-    "主机密钥变了。\n期望 $expected\n实际 $actual\n可能是重装系统，也可能有人在中间。"
+    Str.get(R.string.ssh_host_key_mismatch, expected, actual)
 )
 
 /** A request deadline, distinct from cancellation by the caller or lifecycle. */
-class HerdrRequestTimeoutException : Exception("Herdr 请求超时；若为写入请求，是否已接受仍需核对")
+class HerdrRequestTimeoutException : Exception(Str.get(R.string.ssh_request_timeout))
 
 /**
  * One SSH connection to a Herdr host.
@@ -79,7 +81,7 @@ class HerdrClient internal constructor(
 
     override suspend fun connect() = mutex.withLock {
         blockingIo {
-            check(!closed) { "SSH 客户端已关闭" }
+            check(!closed) { Str.get(R.string.ssh_client_closed) }
             if (session?.isConnected == true) return@blockingIo
             val pinned = config.fingerprint?.takeIf { it.isNotBlank() }
             // With a pin, strict checking runs *inside* the handshake: the password is never
@@ -124,7 +126,7 @@ class HerdrClient internal constructor(
             // Publish the connecting session too, so backgrounding/cancellation can abort
             // a handshake instead of waiting for the socket timeout.
             synchronized(sessionGate) {
-                check(!closed) { "SSH 客户端已关闭" }
+                check(!closed) { Str.get(R.string.ssh_client_closed) }
                 session = s
             }
             try {
@@ -141,7 +143,7 @@ class HerdrClient internal constructor(
             }
             if (closed) {
                 s.disconnect()
-                throw IllegalStateException("SSH 客户端已关闭")
+                throw IllegalStateException(Str.get(R.string.ssh_client_closed))
             }
             val actual = fingerprintOf(s)
             if (pinned != null && pinned != actual) {
@@ -260,7 +262,7 @@ class HerdrClient internal constructor(
             mutex.withLock {
                 blockingIo {
                 val s = session?.takeIf { !closed && it.isConnected }
-                    ?: throw IllegalStateException("还没有连上 ${config.label}")
+                    ?: throw IllegalStateException(Str.get(R.string.ssh_not_connected, config.label))
                 val id = ids.incrementAndGet().toString()
                 val payload = buildJsonObject {
                     put("id", id)
@@ -289,7 +291,11 @@ class HerdrClient internal constructor(
                     }
                     throw HerdrRpcException(
                         null,
-                        "bridge 没有返回（${config.label}）：${stderr.toString("UTF-8").trim().take(300)}",
+                        Str.get(
+                            R.string.ssh_bridge_no_reply,
+                            config.label,
+                            stderr.toString("UTF-8").trim().take(300),
+                        ),
                     )
                 } finally {
                     runCatching { channel?.disconnect() }
@@ -336,7 +342,7 @@ class HerdrClient internal constructor(
     }
 
     private fun fingerprintOf(s: Session): String {
-        val encoded = s.hostKey?.key ?: error("SSH 没有返回主机密钥")
+        val encoded = s.hostKey?.key ?: error(Str.get(R.string.ssh_no_host_key))
         return fingerprintOf(Base64.getDecoder().decode(encoded))
     }
 

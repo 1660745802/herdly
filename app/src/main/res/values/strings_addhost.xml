@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="addhost_title_add">添加机器</string>
+    <string name="addhost_title_edit">编辑机器</string>
+    <string name="addhost_subtitle">SSH 直连，凭据在本机加密保存。保存配置后尝试连接，连接结果请在机器列表中查看。</string>
+    <string name="addhost_label_optional">名字（可选）</string>
+    <string name="addhost_host">主机</string>
+    <string name="addhost_host_placeholder">192.168.1.10 或 build.example.com</string>
+    <string name="addhost_port">端口</string>
+    <string name="addhost_user">用户名</string>
+    <string name="addhost_password">密码</string>
+    <string name="addhost_key">私钥</string>
+    <string name="addhost_key_full">私钥（OpenSSH / PEM 全文）</string>
+    <string name="addhost_passphrase_optional">私钥口令（可空）</string>
+    <string name="addhost_expanded">已展开</string>
+    <string name="addhost_collapsed">已收起</string>
+    <string name="addhost_advanced_hide">收起高级设置</string>
+    <string name="addhost_advanced_show">高级：session 与命令路径</string>
+    <string name="addhost_session_optional">Herdr session（可空）</string>
+    <string name="addhost_session_placeholder">默认 session</string>
+    <string name="addhost_herdr_command">herdr 命令</string>
+    <string name="addhost_herdr_command_hint">非交互 SSH 的 PATH 可能很短；可填绝对路径</string>
+    <string name="addhost_fingerprint_note">首次连接自动记录指纹；已保存的指纹变化时停止连接。</string>
+    <string name="addhost_check_hint">提示：主机上先运行 herdr remote-api-bridge --check，确认输出 herdr-api-bridge-v1。</string>
+    <string name="addhost_saving">保存中…</string>
+    <string name="addhost_err_host_required">主机不能为空</string>
+    <string name="addhost_err_user_required">用户名不能为空</string>
+    <string name="addhost_err_password_required">密码不能为空</string>
+    <string name="addhost_err_key_required">私钥不能为空</string>
+    <string name="addhost_err_port_range">端口须为 1–65535</string>
+    <string name="addhost_err_herdr_required">请填写 herdr 命令或绝对路径</string>
+</resources>

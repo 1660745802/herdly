@@ -1,4 +1,26 @@
-# Development SSH fixture
+# Development SSH fixtures
+
+Two loopback-only fixtures live here:
+
+| Script | Purpose | Default port | Credentials |
+| --- | --- | --- | --- |
+| `dev_fake_ssh.py` | Herdr JSON-RPC bridge: agent states, approvals, fault scenarios | 2222 | `root` / `secret` |
+| `dev_shell_fixture.py` | Interactive shell PTY: VT rendering, key bar, input modes | 2223 | `1234` / `1234` |
+
+`dev_shell_fixture.py` serves a canned shell (banner with 16/256/truecolour samples,
+`help`/`ls`/`color`/`wrap`/`alt`/`clear`/`exit`, backspace, Ctrl-C, Ctrl-D, history
+via arrow keys, window-change reporting). It never executes local commands. Use
+`--key PATH` to reuse an existing host key so a stored fingerprint still matches,
+and `--ready-file PATH` to have it write `{"port":…,"fingerprint":…}` once listening.
+
+```sh
+.venv/bin/python tools/dev_shell_fixture.py --port 2223 --key /tmp/herdly.key
+adb reverse tcp:2223 tcp:2223
+```
+
+The rest of this document describes `dev_fake_ssh.py`.
+
+## Bridge transport
 
 `dev_fake_ssh.py` provides one JSON request per SSH exec channel, matching the
 mobile client's bridge transport. All clients and channels connected to one
@@ -152,7 +174,7 @@ the child if graceful termination does not finish promptly.
 Tests use the standard-library `unittest` runner and require no listening server:
 
 ```sh
-.venv/bin/python -m unittest discover -s tools -p 'test_dev_fake_ssh.py' -v
+.venv/bin/python -m unittest discover -s tools -p 'test_*.py' -v
 ```
 
 The scenario API works even if Paramiko is unavailable (SSH-specific tests skip).

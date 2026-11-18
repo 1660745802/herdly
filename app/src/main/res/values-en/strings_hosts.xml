@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hosts_title">Machines</string>
+    <plurals name="hosts_subtitle_count">
+        <item quantity="one">%1$d machine · %2$d connected</item>
+        <item quantity="other">%1$d machines · %2$d connected</item>
+    </plurals>
+    <string name="hosts_subtitle_short">%1$d/%2$d online</string>
+    <string name="hosts_usage_security">Usage and security</string>
+    <string name="hosts_empty_title">Add your first machine</string>
+    <string name="hosts_empty_body">All it needs is SSH. The terminal always works; live sessions are an extra that needs herdr remote-api-bridge on the host.</string>
+    <string name="hosts_empty_action">Add a machine</string>
+    <string name="hosts_footer">No notifications, no background daemon: leaving the app disconnects. Coming back shows the last snapshot, then refreshes.</string>
+    <string name="hosts_open_terminal">Open terminal</string>
+    <string name="hosts_check_sessions">Sessions</string>
+    <string name="hosts_connect_bridge">Connect sessions</string>
+    <string name="hosts_connecting">Connecting</string>
+    <string name="hosts_details">Details</string>
+    <string name="hosts_state_connected">Connected</string>
+    <string name="hosts_state_connecting">Connecting</string>
+    <string name="hosts_state_failed">Connection failed</string>
+    <string name="hosts_state_idle">Not connected</string>
+    <plurals name="hosts_connected_agents">
+        <item quantity="one">Connected · %1$d agent</item>
+        <item quantity="other">Connected · %1$d agents</item>
+    </plurals>
+    <string name="hosts_connecting_ellipsis">Connecting…</string>
+    <string name="hosts_failed_short">Connection failed · see Details</string>
+    <string name="hosts_failed_reason">Connection failed: %1$s</string>
+    <string name="hosts_last_sync">Last successful sync: %1$s</string>
+    <string name="hosts_failure_hint">Check the network and SSH credentials. If SSH is fine, check the Herdr command on the host.</string>
+    <string name="hosts_manage">Manage %1$s</string>
+    <string name="hosts_menu_edit">Edit connection</string>
+    <string name="hosts_menu_delete">Remove machine</string>
+    <string name="hosts_delete_title">Remove %1$s?</string>
+    <string name="hosts_delete_body">This only deletes the connection stored on the phone. The host and any running agents are untouched.</string>
+    <string name="hosts_detail_session">Session: %1$s\nCommand: %2$s</string>
+    <string name="hosts_detail_fingerprint_saved">Saved host key</string>
+    <string name="hosts_detail_fingerprint_observed">Host key from this connection</string>
+    <string name="hosts_detail_fingerprint_none">No host key yet; connect to see it</string>
+    <string name="hosts_detail_fingerprint_line">%1$s\n%2$s</string>
+    <string name="hosts_detail_copy">Copy diagnostics</string>
+    <string name="hosts_session_default">default</string>
+</resources>

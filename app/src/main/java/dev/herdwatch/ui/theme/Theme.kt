@@ -1,17 +1,22 @@
 package dev.herdwatch.ui.theme
 
+import android.animation.ValueAnimator
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import dev.herdwatch.ui.design.DsLight
+import dev.herdwatch.ui.design.DsDark
+import dev.herdwatch.ui.design.LocalDs
 
 data class StatusPalette(
     val waiting: Color,
@@ -23,6 +28,52 @@ data class StatusPalette(
     val danger: Color,
 )
 
+data class TerminalTokens(val background: Color, val text: Color, val muted: Color, val accent: Color, val risk: Color)
+
+/**
+ * Motion durations in milliseconds. Kept restrained on purpose: nothing exceeds [slow],
+ * and there are no bouncing specs, so state changes read as "settled" rather than playful.
+ */
+data class MotionTokens(val quick: Int = 120, val medium: Int = 200, val slow: Int = 280)
+
+val LocalMotion = staticCompositionLocalOf { MotionTokens() }
+
+/**
+ * True when the platform reports animations as disabled ("Remove animations" accessibility
+ * setting, developer option, or an animator duration scale of 0). Components read this to
+ * snap instead of animate.
+ */
+val LocalReducedMotion = staticCompositionLocalOf { false }
+
+@Composable
+private fun rememberReducedMotion(): Boolean = remember {
+    runCatching { !ValueAnimator.areAnimatorsEnabled() }.getOrDefault(false)
+}
+
+val LocalTerminalTokens = staticCompositionLocalOf {
+    TerminalTokens(Color(0xFF13151A), Color(0xFFE4E7EE), Color(0xFFA8B0C0), Color(0xFFB6C3FF), Color(0xFFFF9A8B))
+}
+
+data class GlassTokens(
+    val canvas: Color,
+    val panel: Color,
+    val panelStrong: Color,
+    val border: Color,
+    val highlight: Color,
+    val accentWash: Color,
+)
+
+val LocalGlassTokens = staticCompositionLocalOf {
+    GlassTokens(
+        canvas = Color(0xFFF4F6FB),
+        panel = Color.White.copy(alpha = 0.68f),
+        panelStrong = Color.White.copy(alpha = 0.84f),
+        border = Color.White.copy(alpha = 0.82f),
+        highlight = Color.White.copy(alpha = 0.92f),
+        accentWash = Color(0xFFE9EDFF).copy(alpha = 0.72f),
+    )
+}
+
 val LocalStatusPalette = staticCompositionLocalOf {
     StatusPalette(
         waiting = Color(0xFFC2410C),
@@ -31,49 +82,67 @@ val LocalStatusPalette = staticCompositionLocalOf {
         idle = Color(0xFF626773),
         unknown = Color(0xFF626773),
         waitingWash = Color(0xFFFBEFE7),
-        danger = Color(0xFFB42318),
+        danger = Color(0xFFB23A37),
     )
 }
 
+private val LightGlass = GlassTokens(
+    canvas = Color(0xFFF3F5FA),
+    panel = Color(0xFFE7EDF9).copy(alpha = 0.72f),
+    panelStrong = Color(0xFFF7F9FD).copy(alpha = 0.88f),
+    border = Color(0xFFB9C7E2).copy(alpha = 0.56f),
+    highlight = Color.White.copy(alpha = 0.94f),
+    accentWash = Color(0xFFDEE6F7).copy(alpha = 0.74f),
+)
+
+private val DarkGlass = GlassTokens(
+    canvas = Color(0xFF0D111A),
+    panel = Color(0xFF202734).copy(alpha = 0.78f),
+    panelStrong = Color(0xFF252D3C).copy(alpha = 0.92f),
+    border = Color.White.copy(alpha = 0.14f),
+    highlight = Color.White.copy(alpha = 0.18f),
+    accentWash = Color(0xFF243A63).copy(alpha = 0.72f),
+)
+
 private val Light = lightColorScheme(
-    primary = Color(0xFF2F4BE0),
+    primary = Color(0xFF2E5AAC),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE7EAFF),
-    onPrimaryContainer = Color(0xFF1B2A8F),
-    secondary = Color(0xFF2F4BE0),
+    primaryContainer = Color(0xFFDEE6F7),
+    onPrimaryContainer = Color(0xFF17315F),
+    secondary = Color(0xFF2E5AAC),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE7EAFF),
-    onSecondaryContainer = Color(0xFF1B2A8F),
-    tertiary = Color(0xFF2F4BE0),
+    secondaryContainer = Color(0xFFDEE6F7),
+    onSecondaryContainer = Color(0xFF17315F),
+    tertiary = Color(0xFF2E5AAC),
     onTertiary = Color.White,
-    background = Color(0xFFF7F7F4),
+    background = Color(0xFFF3F5FA),
     onBackground = Color(0xFF16181D),
-    surface = Color(0xFFFFFFFF),
+    surface = Color(0xFFFDFEFF),
     onSurface = Color(0xFF16181D),
-    surfaceVariant = Color(0xFFEFEFEA),
-    onSurfaceVariant = Color(0xFF5B5F68),
-    outline = Color(0xFFCFCFC7),
-    outlineVariant = Color(0xFFE3E3DC),
-    error = Color(0xFFB42318),
+    surfaceVariant = Color(0xFFE1E5EC),
+    onSurfaceVariant = Color(0xFF5C6572),
+    outline = Color(0xFFB9C0CC),
+    outlineVariant = Color(0xFFC9D0DA),
+    error = Color(0xFFB23A37),
     onError = Color.White,
-    errorContainer = Color(0xFFFCEAE8),
-    onErrorContainer = Color(0xFF781B14),
+    errorContainer = Color(0xFFFBE7E6),
+    onErrorContainer = Color(0xFF6E1F1D),
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF93A4FF),
-    onPrimary = Color(0xFF0B1230),
-    primaryContainer = Color(0xFF26315C),
-    onPrimaryContainer = Color(0xFFDDE2FF),
-    secondary = Color(0xFF93A4FF),
-    onSecondary = Color(0xFF0B1230),
-    secondaryContainer = Color(0xFF26315C),
-    onSecondaryContainer = Color(0xFFDDE2FF),
-    tertiary = Color(0xFF93A4FF),
-    onTertiary = Color(0xFF0B1230),
-    background = Color(0xFF0F1115),
+    primary = Color(0xFF7B9BEA),
+    onPrimary = Color(0xFF0F1116),
+    primaryContainer = Color(0xFF1F2C48),
+    onPrimaryContainer = Color(0xFFDCE5F8),
+    secondary = Color(0xFF7B9BEA),
+    onSecondary = Color(0xFF0F1116),
+    secondaryContainer = Color(0xFF1F2C48),
+    onSecondaryContainer = Color(0xFFDCE5F8),
+    tertiary = Color(0xFF7B9BEA),
+    onTertiary = Color(0xFF0F1116),
+    background = Color(0xFF0D111A),
     onBackground = Color(0xFFE9EAEE),
-    surface = Color(0xFF161920),
+    surface = Color(0xFF161C28),
     onSurface = Color(0xFFE9EAEE),
     surfaceVariant = Color(0xFF1D2129),
     onSurfaceVariant = Color(0xFFA5AAB6),
@@ -87,19 +156,26 @@ private val Dark = darkColorScheme(
 
 private val AppTypography = androidx.compose.material3.Typography(
     headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 34.sp),
+    headlineSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, lineHeight = 30.sp),
     titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp),
     titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
+    titleSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
     bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 23.sp),
     bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
     labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
     labelMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 12.5.sp, lineHeight = 18.sp),
+    labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp),
     bodySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp),
 )
 
 val MonoStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, lineHeight = 18.sp)
 
 @Composable
-fun HerdwatchTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun HerdwatchTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    reduceMotion: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     val status = if (darkTheme) {
         StatusPalette(
             waiting = Color(0xFFFB923C),
@@ -113,7 +189,19 @@ fun HerdwatchTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composa
     } else {
         LocalStatusPalette.current
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalStatusPalette provides status) {
+    val reducedMotion = reduceMotion || rememberReducedMotion()
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalStatusPalette provides status,
+        LocalMotion provides MotionTokens(),
+        LocalReducedMotion provides reducedMotion,
+        LocalDs provides if (darkTheme) DsDark else DsLight,
+        LocalGlassTokens provides if (darkTheme) DarkGlass else LightGlass,
+        LocalTerminalTokens provides if (darkTheme) {
+            TerminalTokens(Color(0xFF090B0F), Color(0xFFE8EBF2), Color(0xFFA8B0C0), Color(0xFFB6C3FF), Color(0xFFFF9A8B))
+        } else {
+            TerminalTokens(Color(0xFF13151A), Color(0xFFE4E7EE), Color(0xFFA8B0C0), Color(0xFFB6C3FF), Color(0xFFFF9A8B))
+        },
+    ) {
         MaterialTheme(
             colorScheme = if (darkTheme) Dark else Light,
             typography = AppTypography,

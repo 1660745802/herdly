@@ -1,5 +1,8 @@
 package dev.herdwatch.domain
 
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
+
 /** Page tickets protect A -> B -> A, where agent identity alone is insufficient. */
 data class PageTicket(val agentKey: String, val generation: Long)
 
@@ -66,7 +69,7 @@ class OperationState {
         val old = operations[key] ?: return
         if (!old.inFlight) operations[key] = old.copy(
             uncertain = false, verificationRequired = false, blockedApproval = null,
-            notice = "已由你核对远端状态；后续操作仍会重新读取证据。",
+            notice = Str.get(R.string.policy_verified_notice),
         )
     }
 }

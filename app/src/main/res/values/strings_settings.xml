@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 设置页：标题与分组 -->
+    <string name="settings_back_a11y">返回</string>
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">外观、终端行为与本机安全</string>
+    <string name="settings_group_appearance">外观</string>
+    <string name="settings_group_terminal">终端</string>
+    <string name="settings_group_connection">连接与安全</string>
+    <string name="settings_group_about">关于与诊断</string>
+
+    <!-- 组 1 外观 -->
+    <string name="settings_language_title">语言</string>
+    <string name="settings_language_summary">界面语言</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_zh">简体中文</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_language_legacy">这台设备是 Android 12 及以下：语言跟随系统设置，升级到 Android 13 后可以在这里单独切换。</string>
+    <string name="settings_theme_title">主题</string>
+    <string name="settings_theme_summary">跟随系统，或固定明暗</string>
+    <string name="settings_theme_system">跟随系统</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_motion_title">动效</string>
+    <string name="settings_motion_summary">减弱后取消位移与缩放过渡</string>
+    <string name="settings_motion_full">完整</string>
+    <string name="settings_motion_reduced">减弱</string>
+    <string name="settings_density_title">密度</string>
+    <string name="settings_density_summary">紧凑能在一屏里放下更多内容</string>
+    <string name="settings_density_comfortable">舒适</string>
+    <string name="settings_density_compact">紧凑</string>
+
+    <!-- 组 2 终端 -->
+    <string name="settings_font_title">字号</string>
+    <string name="settings_font_summary">终端与按键帽的文字大小</string>
+    <string name="settings_font_decrease">减小字号</string>
+    <string name="settings_font_increase">增大字号</string>
+    <string name="settings_snapshot_title">默认快照行数</string>
+    <string name="settings_snapshot_summary">每次读取终端的行数</string>
+    <string name="settings_snapshot_400">400 行</string>
+    <string name="settings_snapshot_1200">1200 行</string>
+    <string name="settings_keyrows_title">按键栏</string>
+    <string name="settings_keyrows_summary">终端下方快捷键的行数</string>
+    <string name="settings_keyrows_one">1 行</string>
+    <string name="settings_keyrows_two">2 行</string>
+    <string name="settings_longpress_title">长按连发</string>
+    <string name="settings_longpress_summary">长按按键时持续发送</string>
+    <string name="settings_input_title">输入模式</string>
+    <string name="settings_input_summary">直通模式适合 vim、tmux 等全屏程序</string>
+    <string name="settings_input_line">行输入</string>
+    <string name="settings_input_direct">直通</string>
+
+    <!-- 组 3 连接与安全 -->
+    <plurals name="settings_connected_summary">
+        <item quantity="other">%1$d / %2$d 台机器已连接</item>
+    </plurals>
+    <string name="settings_foreground_title">仅在前台连接</string>
+    <string name="settings_foreground_row_body">离开 App 即断开，没有后台监控与通知。</string>
+    <string name="settings_credentials_title">凭据仅存本机</string>
+    <string name="settings_credentials_body">密码与私钥加密保存在本机，不上传。</string>
+    <string name="settings_reset_fp_title">重置主机指纹</string>
+    <string name="settings_reset_fp_summary">清空所有机器已保存的指纹。</string>
+    <string name="settings_reset_fp_action">重置指纹</string>
+    <string name="settings_reset_fp_confirm_title">重置所有主机指纹？</string>
+    <string name="settings_reset_fp_confirm_body">仅在确认对方重装系统或换了机器时使用。重置后下次连接需要重新确认指纹。</string>
+
+    <!-- 组 4 关于与诊断 -->
+    <string name="settings_hostprep_title">主机准备与诊断</string>
+    <string name="settings_hostprep_summary">检查 Herdr、SSH 路径与 session</string>
+    <string name="settings_row_hostprep">主机准备</string>
+    <string name="settings_row_hostprep_body">安装 Herdr 0.9+，确保 SSH 登录后可以执行 herdr。</string>
+    <string name="settings_check_block">herdr remote-api-bridge --check\n预期输出：herdr-api-bridge-v1</string>
+    <string name="settings_copy_check">复制检查命令</string>
+    <string name="settings_row_missing">找不到命令或会话</string>
+    <string name="settings_row_missing_body">非交互 SSH 的 PATH 可能不同。在添加或编辑机器的高级设置中填写 herdr 绝对路径；使用非默认 session 时填写 session 名。</string>
+    <string name="settings_row_connfail">连接失败</string>
+    <string name="settings_row_connfail_body">先检查网络、地址与 SSH 凭据，再检查 Herdr。机器的连接详情可复制诊断，不包含保存的密码或私钥。</string>
+    <string name="settings_style_title">设计系统预览</string>
+    <string name="settings_style_body">哑光仪器的材质、深度与控件</string>
+    <string name="settings_about">版本与操作边界</string>
+    <string name="settings_about_summary">版本、用途与操作反馈</string>
+    <string name="settings_row_version">版本</string>
+    <string name="settings_version_value">Herdly 0.1.0 · Herdr protocol 22</string>
+    <string name="settings_row_purpose">用途</string>
+    <string name="settings_row_purpose_body">发现需要介入的 agent、阅读终端证据、发送操作。手机端不提供文件管理、端口转发或完整终端。</string>
+    <string name="settings_row_feedback">操作反馈</string>
+    <string name="settings_row_feedback_body">远端接受请求不代表 agent 已执行完成。以重新读取的终端和后续快照核实；结果不确定时先检查，避免重复发送。</string>
+    <string name="settings_row_connection">连接</string>
+    <string name="settings_row_connection_body">前台定期尝试刷新，单次同步可能因网络或主机状态延迟。SSH 直连，一请求一通道。</string>
+    <string name="settings_row_privacy">隐私</string>
+    <string name="settings_row_privacy_body">无遥测、无中继、无云端账号。连接诊断只在你主动复制时进入剪贴板，请按需分享。</string>
+    <string name="settings_expanded">已展开</string>
+    <string name="settings_collapsed">已收起</string>
+    <string name="settings_version_title">Herdly %1$s</string>
+    <string name="settings_version_summary">当前安装的正式版本</string>
+    <string name="settings_privacy_title">隐私</string>
+    <string name="settings_update_action">检查更新</string>
+    <string name="settings_update_checking_short">检查中</string>
+    <string name="settings_update_checking">正在向 GitHub 查询最新版本…</string>
+    <string name="settings_update_current">已是最新版本（%1$s）</string>
+    <string name="settings_update_available">发现新版本 %1$s</string>
+    <string name="settings_update_failed">检查失败：%1$s</string>
+    <string name="settings_update_failed_rate">GitHub 暂时限流，过一会儿再试</string>
+    <string name="settings_update_failed_none">这个仓库还没有发布版本</string>
+    <string name="settings_update_failed_http">服务返回 %1$s</string>
+    <string name="settings_update_failed_network">网络不可用</string>
+    <string name="settings_update_open">打开发布页</string>
+    <string name="settings_update_download">下载 APK</string>
+    <string name="settings_update_later">稍后</string>
+    <string name="settings_update_dialog_title">发现新版本 %1$s</string>
+    <string name="settings_update_no_notes">这个版本没有附更新说明。</string>
+    <string name="settings_group_security">本机安全</string>
+    <string name="settings_boundaries_foreground">离开 App 即断开，没有后台监控与通知</string>
+    <string name="settings_boundaries_credentials">凭据加密存在本机，不上传</string>
+    <string name="settings_rows_privacy_short">无遥测、无中继、无云端账号</string>
+</resources>

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Inbox: header -->
+    <string name="inbox_subtitle_pocket">Herdr inbox on your phone</string>
+    <plurals name="inbox_subtitle_connecting">
+        <item quantity="one">Connecting · %1$d agent</item>
+        <item quantity="other">Connecting · %1$d agents</item>
+    </plurals>
+    <plurals name="inbox_summary_hosts_online">
+        <item quantity="one">%1$d/%2$d host online</item>
+        <item quantity="other">%1$d/%2$d hosts online</item>
+    </plurals>
+    <plurals name="inbox_count_agents">
+        <item quantity="one">%1$d agent</item>
+        <item quantity="other">%1$d agents</item>
+    </plurals>
+    <string name="inbox_summary_hosts_and_agents">%1$s · %2$s</string>
+
+    <!-- Inbox: search -->
+    <string name="inbox_cd_search">Search</string>
+    <string name="inbox_cd_search_collapse">Close search</string>
+    <string name="inbox_search_placeholder">Name, machine, project, workspace, tab, split or directory</string>
+    <string name="inbox_search_label">Search inbox</string>
+    <string name="inbox_cd_clear_search">Clear</string>
+    <string name="inbox_search_active">Search: %1$s</string>
+    <string name="inbox_list_separator">", "</string>
+    <string name="inbox_clear">Clear</string>
+    <string name="inbox_clear_search">Clear search</string>
+
+    <!-- Inbox: refresh state -->
+    <string name="inbox_state_syncing">Syncing</string>
+    <string name="inbox_cd_refresh">Refresh inbox</string>
+
+    <!-- Inbox: connecting notice -->
+    <string name="inbox_connecting_hosts">Connecting to %1$s…</string>
+
+    <!-- Inbox: host strip -->
+    <string name="inbox_host_all">All</string>
+    <plurals name="inbox_host_waiting">
+        <item quantity="one">%1$d waiting</item>
+        <item quantity="other">%1$d waiting</item>
+    </plurals>
+    <string name="inbox_host_online">Online</string>
+    <string name="inbox_host_connecting">Connecting</string>
+    <string name="inbox_host_offline">Offline</string>
+    <string name="inbox_host_disconnected">Not connected</string>
+
+    <!-- Inbox: duty summary -->
+    <string name="inbox_filter_attention">Needs attention</string>
+    <string name="inbox_filter_all">All agents</string>
+    <string name="inbox_view">View</string>
+    <string name="inbox_longest_waiting">wait %1$s</string>
+    <string name="inbox_longest_waiting_snapshot">wait %1$s · snapshot</string>
+    <string name="inbox_some_hosts_offline">Some machines are not connected</string>
+    <string name="inbox_nothing_pending">Nothing pending</string>
+    <plurals name="inbox_count_unverified">
+        <item quantity="one">%1$d unverified</item>
+        <item quantity="other">%1$d unverified</item>
+    </plurals>
+    <plurals name="inbox_count_review">
+        <item quantity="one">%1$d to review</item>
+        <item quantity="other">%1$d to review</item>
+    </plurals>
+    <plurals name="inbox_count_working">
+        <item quantity="one">%1$d working</item>
+        <item quantity="other">%1$d working</item>
+    </plurals>
+    <plurals name="inbox_count_idle">
+        <item quantity="one">%1$d idle</item>
+        <item quantity="other">%1$d idle</item>
+    </plurals>
+    <string name="inbox_state_expanded">Expanded</string>
+    <string name="inbox_state_collapsed">Collapsed</string>
+    <plurals name="inbox_failures_show">
+        <item quantity="one">%1$d host failed to connect · Show details</item>
+        <item quantity="other">%1$d hosts failed to connect · Show details</item>
+    </plurals>
+    <plurals name="inbox_failures_hide">
+        <item quantity="one">%1$d host failed to connect · Collapse</item>
+        <item quantity="other">%1$d hosts failed to connect · Collapse</item>
+    </plurals>
+    <string name="inbox_host_error_line">%1$s: %2$s</string>
+    <string name="inbox_last_synced">Last successful sync: %1$s</string>
+    <string name="inbox_reconnect_host">Reconnect %1$s</string>
+
+    <!-- Inbox: list count and empty states -->
+    <plurals name="inbox_count_items">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <plurals name="inbox_count_items_matched">
+        <item quantity="one">%1$d matching item</item>
+        <item quantity="other">%1$d matching items</item>
+    </plurals>
+    <string name="inbox_empty_none_title">No agents right now</string>
+    <string name="inbox_empty_host_title">No agents on this machine</string>
+    <string name="inbox_empty_none_body">Create a new task, or check the workspaces and splits on the host.</string>
+    <string name="inbox_empty_host_body">Switch to another machine, or view all agents.</string>
+    <string name="inbox_show_all_hosts">View all machines</string>
+    <string name="inbox_start_new_task">Start a new task</string>
+    <string name="inbox_new_task_hint">Tap New task at the bottom right to create and start an agent.</string>
+    <string name="inbox_check_host_sessions">Check sessions on %1$s</string>
+    <string name="inbox_recheck_agents">Recheck agents</string>
+    <string name="inbox_no_match_title">No matching agents</string>
+    <string name="inbox_no_match_search_body">Searched names, machines, projects, workspaces, tabs, splits and directories.</string>
+    <string name="inbox_no_match_attention_body">Nothing needs attention right now.</string>
+    <string name="inbox_no_match_host_body">No matching agents on this machine.</string>
+    <string name="inbox_no_match_none_body">There are no agents right now.</string>
+    <string name="inbox_show_all_agents">View all agents</string>
+
+    <!-- Inbox: first-run setup -->
+    <string name="inbox_setup_title">Herdr in your pocket</string>
+    <string name="inbox_setup_body">Herdly does not run agents for you; it only lets you view and approve.\n\n1. Install Herdr on the host and make sure the phone can log in over SSH\n2. Check that the bridge is reachable\n3. Add a machine — the duty page lists every agent</string>
+    <string name="inbox_add_host">Add machine</string>
+    <string name="inbox_copy_check_command">Copy check command</string>
+    <string name="inbox_check_command_hint">Run that command on the host; it should print herdr-api-bridge-v1.</string>
+
+    <!-- Inbox: agent row -->
+    <string name="inbox_cd_open_terminal">View terminal for %1$s</string>
+    <string name="inbox_stale_snapshot">Snapshot stale · %1$s</string>
+    <string name="inbox_offline_snapshot">Offline snapshot · %1$s</string>
+    <plurals name="inbox_attention_count">
+        <item quantity="one">%1$d needs attention</item>
+        <item quantity="other">%1$d need attention</item>
+    </plurals>
+    <!-- Summary row: the chevron carries the expand affordance, so the text stays a noun phrase. -->
+    <plurals name="inbox_failures_short">
+        <item quantity="one">%1$d host offline</item>
+        <item quantity="other">%1$d hosts offline</item>
+    </plurals>
+</resources>

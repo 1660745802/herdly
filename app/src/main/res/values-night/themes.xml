@@ -1,8 +1,9 @@
 <resources>
     <style name="Theme.Herdwatch" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#0F1115</item>
+        <item name="android:windowBackground">#15171C</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDisablePreview">false</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

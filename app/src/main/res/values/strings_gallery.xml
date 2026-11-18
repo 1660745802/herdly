@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gallery_title">哑光仪器</string>
+    <string name="gallery_subtitle">光源固定左上 · 一个强调色 · 界面无描边</string>
+    <string name="gallery_section_material">材质</string>
+    <string name="gallery_section_actions">操作</string>
+    <string name="gallery_section_selection">选择</string>
+    <string name="gallery_section_input">输入</string>
+    <string name="gallery_section_keys">终端按键栏</string>
+    <string name="gallery_section_status">状态</string>
+    <string name="gallery_section_icons">图标</string>
+    <string name="gallery_section_type">字体</string>
+    <string name="gallery_section_density">信息密度</string>
+    <string name="gallery_raised_title">抬起 · chassis</string>
+    <string name="gallery_raised_body">卡片、按钮、按键都从面板抬起；阴影由两层同心圆角矩形合成，深色在右下、高光在左上。</string>
+    <string name="gallery_well_title">凹陷 · milled</string>
+    <string name="gallery_well_body">输入区、分段控件轨道、终端窗口。光落进凹槽，所以边缘在左上变暗、右下变亮。</string>
+    <string name="gallery_btn_primary">主要操作</string>
+    <string name="gallery_btn_secondary">次要</string>
+    <string name="gallery_btn_danger">危险</string>
+    <string name="gallery_btn_disabled">禁用</string>
+    <string name="gallery_btn_ghost">文字按钮</string>
+    <string name="gallery_press_note">按下不缩放：表面沉入面板，阴影在 120ms 内翻转。</string>
+    <string name="gallery_seg_needs_attention">需要处理</string>
+    <string name="gallery_seg_all_agents">全部 Agent</string>
+    <string name="gallery_chip_local">本机</string>
+    <string name="gallery_chip_build">构建机</string>
+    <string name="gallery_chip_all">全部</string>
+    <string name="gallery_toggle_follow_system">跟随系统深色模式</string>
+    <string name="gallery_toggle_disabled_example">禁用示例</string>
+    <string name="gallery_field_label">发送到 p1</string>
+    <string name="gallery_field_hint">输入命令或说明</string>
+    <string name="gallery_status_waiting_you">等待你</string>
+    <string name="gallery_status_working">进行中</string>
+    <string name="gallery_status_idle">空闲</string>
+    <string name="gallery_status_unknown">未知</string>
+    <string name="gallery_type_display">显示 28</string>
+    <string name="gallery_type_title">标题 20</string>
+    <string name="gallery_type_headline">小标题 16</string>
+    <string name="gallery_type_body">正文 14 · 层级靠字重和颜色，不靠边框</string>
+    <string name="gallery_type_body_strong">强调正文 14</string>
+    <string name="gallery_type_caption">说明 12</string>
+    <plurals name="gallery_meta_waiting_minutes">
+        <item quantity="other">等待审批 · %1$d 分钟</item>
+    </plurals>
+    <string name="gallery_action_view">查看</string>
+    <string name="gallery_meta_host_panel">构建机 · panel · w1:p1</string>
+</resources>

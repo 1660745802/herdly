@@ -4,7 +4,7 @@
 
 | 项 | 选择 |
 | --- | --- |
-| 语言 / UI | Kotlin 2.1.0，Jetpack Compose Material 3 |
+| 语言 / UI | Kotlin 2.1.0，Jetpack Compose + 自绘设计系统 `ui/design`（Material 3 仅剩添加主机表单的密码输入框） |
 | 构建 | AGP 8.7.3，Gradle 8.14，JDK 21 |
 | SDK | compileSdk / targetSdk 35，minSdk 26 |
 | SSH | JSch 0.2.20，纯 JVM |
@@ -66,7 +66,11 @@ BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REV
 
 ## 6. 审批和发送
 
-`pane.read(recent, 400)` 提供原始证据；AskParser 去 ANSI / 控制字符后，仅解析末尾的连续编号菜单、y/n、Enter/Esc。编号必须从 1 连续开始；菜单后出现新的业务输出时不复用旧选项。英文意图按词匹配，避免把 token 等文本当作 ok。问题与所有选项完整展示。
+`pane.read(recent, 400)` 默认提供原始证据；可在详情设为 1200 行并恢复 400 行，请求范围在 ViewModel 内按 agent 记忆（至多 80 个）。刷新、重进和审批前后读屏均使用当前范围；它不代表实际返回行数。`ReadSource` 没有历史游标或 scrollback 分页，扩展最近快照不等于加载完整历史。读取失败保留旧原文并标注错误、过期状态。
+
+终端使用独立权重视口，状态提示压缩成一行（错误 > 操作结果 > 陈旧 > 读取时间），底部回复与审批入口固定；小高度时收起面包屑和前后导航。页面骨架契约见 [design/style-direction.md](design/style-direction.md) 第 11 节。审批面板暂停轮询；发送启动后关闭，校验拒绝则保留并展示原因。恢复阅读时若正在发送，不触发竞争读请求。
+
+AskParser 去 ANSI / 控制字符后，仅解析末尾的连续编号菜单、y/n、Enter/Esc。编号必须从 1 连续开始；菜单后出现新的业务输出时不复用旧选项。英文意图按词匹配，避免把 token 等文本当作 ok。问题与所有选项完整展示。
 
 辅助审批的条件：
 
@@ -82,6 +86,8 @@ BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REV
 
 **剩余限制**：读屏与发送是两次 RPC，无法消除其中的远端状态变化窗口。严格原子审批需要 Herdr 提供带 expected revision / evidence 的条件写入 API。解析器仍是启发式，无法识别时提供原文、手动按键和回复。
 
+界面材质由 `ui/design` 的 `DsTokens` + `neoRaised` / `neoInset` / `neoState` 统一实现：单一光源的同心圆角矩形合成阴影，兼容 API 26，不使用系统 backdrop blur。`GlassBackdrop` 只画底盘色与左上角极淡提亮。终端与全屏阅读器共用 `LocalTerminalTokens`，保持不透明和高对比。
+
 ## 7. 结构与任务
 
 结构按 workspace / tab / pane 展示。进入结构时记录来源页，返回回到该来源（收件箱或机器页等）；重复打开结构不会把来源改写成结构页本身。新建工作区、标签页、agent.start、分屏、聚焦、重命名、关闭均对应 Herdr API。关闭先确认。启动或恢复只提供已连接主机中可保守判定为空 shell 的 pane，并结合当前 agents 排除占用；模型不能证明时不给危险默认值。名称做基本冲突检查，额外参数每行一个，保留参数内空格。
@@ -90,13 +96,13 @@ resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 使用 `--con
 
 ## 8. 信任与存储
 
-- 首次连接 TOFU。已有指纹在握手阶段校验，`StrictHostKeyChecking=yes`；JSch 认证与校验配置按 session 设置。
+- 首次连接不再静默 TOFU：没有已保存指纹时，SSH 层在握手阶段中止并抛出 `UnknownHostKeyException`（携带观察到的 SHA-256 指纹），凭证不会发给未确认的主机；界面必须展示指纹、由用户显式确认后才以 `allowUnknownKey=true` 重连，成功后再把指纹持久化。已有指纹在握手阶段校验，`StrictHostKeyChecking=yes`；JSch 认证与校验配置按 session 设置。
 - 首次指纹必须同步持久化成功，再发布连接就绪。保存失败会暴露错误，不能只在内存中信任。
 - 密钥变化展示保存值与本次观察值，显式确认后更新；认证错误不会伪装成密钥变化。
 - 主机列表、密码 / 私钥 / passphrase 加密保存。配置使用 `commit()`，主副恢复副本保存同一代信任状态，防止回退旧副本复活已删凭据或旧 pin。
 - 主副副本均无法解密时拒绝覆盖；删除主机与清理其缓存在同一 preferences 事务完成。
 - 缓存按主机单独加密。屏幕文本仅在内存中，复制由用户触发。Android 云备份和设备迁移均显式排除应用数据。
-- 无账号、遥测、中继。未做生物识别、截图保护、证书、跳板机。
+- 无账号、遥测、中继。唯一的非 SSH 网络请求是用户手动触发的更新检查（`data/UpdateChecker.kt` 读取 GitHub Release，12 秒超时，不上传任何数据）。未做生物识别、截图保护、证书、跳板机。
 
 同步配置保存 / 加解密的主线程耗时仍需测量。Repository 通过 `HostConnection` 接口与 internal 构造函数注入传输、协程 scope / dispatcher 和时间参数。刷新合并按生命周期 generation 进行，避免旧批次挡住返回前台的立即刷新。受控协程回归覆盖关键竞争，仍不等同真实网络压力测试。
 
@@ -104,10 +110,16 @@ resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 使用 `--con
 
 构建、安装与测试命令见 [development.md](development.md)。
 
-JVM 单元测试覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ReadingPause 与 DailyWorkflow。DailyWorkflow 覆盖队列顺序与 pane ID 搜索、收起搜索保留查询与导航队列、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接尝试挂起期间重复重连合并。Repository 测试覆盖编辑后迟到连接、后台迟到快照、返回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败，使用虚拟时间与 `runTest` 的 `backgroundScope`。
+JVM 单元测试共 92 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ReadingPause、DailyWorkflow、VtScreen（VT 解析器）与 UpdateChecker（Release 解析与版本比较）。DailyWorkflow 覆盖队列顺序与 pane ID 搜索、收起搜索保留查询与导航队列、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接尝试挂起期间重复重连合并。Repository 测试覆盖编辑后迟到连接、后台迟到快照、返回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败，使用虚拟时间与 `runTest` 的 `backgroundScope`。
 
 Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性、方法级延迟、聚合状态发布，以及无回复 / 不执行 shell 就关闭传输；其中包含真实 Paramiko socket-pair 传输。JVM 传输测试直接运行 JSch → 回环 Paramiko SSH，验证自身请求超时与外部取消的区别、取消关闭 socket 与新连接恢复、写入已提交但回包丢失且不自动重发、认证失败和 pin 不匹配。无 Python / Paramiko 时相关传输测试明确跳过；使用 `HERDR_TEST_PYTHON` 指定可用解释器，详见 [tools/README.md](../tools/README.md)。
 
 模拟主机只绑定 loopback，共享状态可重现命令变化、输出不变、接受后读失败、RPC 错误、延迟及多种审批表单；本地 shell 执行必须显式 opt-in，默认 canned 不执行命令。详见 [tools/README.md](../tools/README.md)。
 
 尚未覆盖：真实审批端到端、多主机复杂网络竞争、完整 TalkBack、平板 / 横屏、API 26 设备运行、弱网耗电。Lint 已检查 minSdk 兼容性，不能替代旧系统运行测试。
+
+## 10. 国际化与偏好
+
+- 简体中文（`res/values/`）与英文（`res/values-en/`）；`res/xml/locales_config.xml` 声明支持语言。Android 13+ 用 `LocaleManager` 应用级语言，切换时通过 `configChanges=locale|layoutDirection` + `key(localeRevision)` 原地重组，不重建 Activity（避免黑屏闪烁）；Android 12 及以下明确提示跟随系统。
+- 非界面层（Repository、SSH、解析器、ViewModel）用 `dev.herdwatch.i18n.Str.get(R.string.x, args)`，provider 在 `HerdwatchApp.onCreate` 安装一次。资源与文案规则见 [development.md](development.md)。
+- 用户偏好集中在 `data/Preferences.kt` 的 `PreferencesStore`（独立 SharedPreferences 文件 `herdwatch.prefs`，`commit()` 写入，`StateFlow` 暴露）；`HostStore` 只存主机与凭据。`PreferencesStore.inMemory()` 供单元测试注入，避免依赖 Android Context。

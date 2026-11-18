@@ -1,5 +1,7 @@
 package dev.herdwatch.domain
 
+import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Ask
 import dev.herdwatch.model.AskConfidence
 import dev.herdwatch.model.AskKind
@@ -81,10 +83,10 @@ object AskParser {
         if (allow == null && deny == null) return null
 
         val question = above.lastOrNull { !it.startsWith("─") && !it.startsWith("╭") && !it.startsWith("│") }
-            ?: "需要你的确认"
+            ?: Str.get(R.string.ask_default_question)
         val risk = when {
             block.any { it.second.contains("don't ask again", true) || it.second.contains("always", true) } ->
-                "含长期授权选项"
+                Str.get(R.string.ask_risk_standing)
             else -> null
         }
         return Ask(
@@ -104,16 +106,15 @@ object AskParser {
         if (idx < 0 || last.drop(idx + 1).any { !isNavigationHint(it) }) return null
         val line = last[idx]
         val question = if (yesNo.replace(line, "").trim().isBlank()) {
-            last.take(idx).lastOrNull() ?: "需要你的确认"
+            last.take(idx).lastOrNull() ?: Str.get(R.string.ask_default_question)
         } else line
+        val yes = AskOption(Str.get(R.string.ask_yes), listOf("y"), AskKind.ALLOW)
+        val no = AskOption(Str.get(R.string.ask_no), listOf("n"), AskKind.DENY)
         return Ask(
             question = question,
-            options = listOf(
-                AskOption("是", listOf("y"), AskKind.ALLOW),
-                AskOption("否", listOf("n"), AskKind.DENY),
-            ),
-            allow = AskOption("是", listOf("y"), AskKind.ALLOW),
-            deny = AskOption("否", listOf("n"), AskKind.DENY),
+            options = listOf(yes, no),
+            allow = yes,
+            deny = no,
             risk = null,
             confidence = AskConfidence.MEDIUM,
             source = "yes-no",
@@ -124,10 +125,10 @@ object AskParser {
         val last = lines.takeLast(6)
         val idx = last.indexOfLast { pressEnter.containsMatchIn(it) }
         if (idx < 0 || last.drop(idx + 1).any { !isNavigationHint(it) }) return null
-        val allow = AskOption("确认", listOf("enter"), AskKind.ALLOW)
-        val deny = AskOption("取消", listOf("esc"), AskKind.DENY)
+        val allow = AskOption(Str.get(R.string.ask_confirm), listOf("enter"), AskKind.ALLOW)
+        val deny = AskOption(Str.get(R.string.common_cancel), listOf("esc"), AskKind.DENY)
         return Ask(
-            question = last.take(idx).lastOrNull() ?: "需要你的确认",
+            question = last.take(idx).lastOrNull() ?: Str.get(R.string.ask_default_question),
             options = listOf(allow, deny),
             allow = allow,
             deny = deny,

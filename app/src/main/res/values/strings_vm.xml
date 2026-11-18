@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 结构操作：成功文案本身会被 vm_mutation_accepted 包一层 -->
+    <string name="vm_created_workspace">已新建 workspace</string>
+    <string name="vm_created_tab">已新建 tab</string>
+    <string name="vm_split_right">已向右拆分</string>
+    <string name="vm_split_down">已向下拆分</string>
+    <string name="vm_closed_pane">已关闭 pane</string>
+    <string name="vm_closed_tab">已关闭 tab</string>
+    <string name="vm_closed_workspace">已关闭 workspace</string>
+    <string name="vm_focused_pane">已在主机上聚焦</string>
+    <string name="vm_focused_tab">已切换到 tab</string>
+    <string name="vm_focused_workspace">已切换到 workspace</string>
+    <string name="vm_renamed_workspace">已重命名工作区</string>
+    <string name="vm_renamed_tab">已重命名标签页</string>
+    <string name="vm_renamed_pane">已重命名分屏</string>
+    <string name="vm_mutation_accepted">%1$s（请求已接受，请核对同步状态）</string>
+
+    <!-- 启动 / 恢复 agent -->
+    <string name="vm_start_accepted">启动请求已接受；请核对新任务。</string>
+    <string name="vm_start_accepted_named">启动请求已接受：%1$s；请核对远端状态。</string>
+    <string name="vm_restore_accepted">恢复请求已接受：%1$s；请核对远端状态。</string>
+
+    <!-- 页面 / 主机 -->
+    <string name="vm_host_not_found">找不到这台机器。</string>
+    <string name="vm_host_added">已添加 %1$s</string>
+    <string name="vm_host_updated">已更新 %1$s</string>
+    <string name="vm_save_failed">保存失败：%1$s</string>
+    <string name="vm_host_removed">已移除主机</string>
+
+    <!-- 结构操作的失败/中断 -->
+    <string name="vm_request_interrupted">请求已中断，结果可能不确定；请核对远端状态，勿直接重复操作。</string>
+    <string name="vm_operation_check_remote">操作结果待核实，请检查远端状态：%1$s</string>
+
+    <!-- 重命名 agent -->
+    <string name="vm_rename_accepted">重命名请求已接受。</string>
+    <string name="vm_rename_uncertain">重命名结果不确定，请核对远端状态。</string>
+
+    <!-- explain：把 Herdr 的解释翻成几句话 -->
+    <string name="vm_explain_loading">Herdr 正在解释这个状态…</string>
+    <string name="vm_explain_failed">读不到解释：%1$s</string>
+    <string name="vm_explain_state">Herdr 判定：%1$s</string>
+    <string name="vm_explain_matched_rule">命中规则：%1$s</string>
+    <string name="vm_explain_detect_skipped_hook">屏幕识别已跳过：状态直接来自 agent 的生命周期钩子，不靠猜屏幕。</string>
+    <string name="vm_explain_detect_skipped_reason">屏幕识别已跳过：%1$s</string>
+    <string name="vm_explain_detect_skipped">屏幕识别已跳过。</string>
+    <string name="vm_visible_signal">可见信号：%1$s</string>
+    <string name="vm_visible_blocker">屏幕上有阻塞</string>
+    <string name="vm_visible_idle">屏幕上是空闲</string>
+    <string name="vm_visible_working">屏幕上在工作</string>
+    <string name="vm_explain_fallback_reason">降级原因：%1$s</string>
+    <string name="vm_explain_warning">注意：%1$s</string>
+
+    <!-- 读屏 -->
+    <string name="vm_read_cancelled">读取已取消，显示上次内容。</string>
+    <string name="vm_read_failed">读取失败，显示上次内容：%1$s</string>
+
+    <!-- 审批：没送到 / 送到了但没证据 / 不确定 -->
+    <string name="vm_approval_verify_first">请先核对远端操作结果或刷新当前证据，再进行辅助审批。</string>
+    <string name="vm_approval_not_sent">主机未连接或有操作正在进行，审批未发送。</string>
+    <string name="vm_approval_cancelled">审批已取消，没有发送。</string>
+    <string name="vm_not_waiting_not_sent">它已不在等待审批，没有发送。</string>
+    <string name="vm_approval_interrupted">审批请求已中断，是否已接受不确定；请核对后再操作。</string>
+    <string name="vm_approval_verify_cancelled">审批核对已取消，没有发送。</string>
+    <string name="vm_approval_uncertain">审批结果不确定，请核对远端状态，勿直接重发。%1$s</string>
+
+    <!-- 按键审批：接受 ≠ 成功 -->
+    <string name="vm_key_accepted">按键请求已接受：%1$s。远端执行结果待核实。</string>
+    <string name="vm_key_accepted_truncated">按键请求已接受，但后续屏幕不完整；执行结果待核实，请勿重复审批。</string>
+    <string name="vm_key_accepted_unchanged">按键请求已接受，屏幕暂未变化；执行结果待核实，请勿重复审批。</string>
+    <string name="vm_key_accepted_changed">按键请求已接受，已观察到屏幕变化；这不代表远端任务执行成功。</string>
+    <string name="vm_key_accepted_verify_cancelled">按键请求已接受，后续核对已取消；执行结果不确定，请勿重复审批。</string>
+    <string name="vm_key_accepted_read_failed">按键请求已接受，但后续读取失败；执行结果待核实。%1$s</string>
+    <string name="vm_reread_failed_not_sent">没能重读屏幕，没有发送。%1$s</string>
+
+    <!-- 手动发送（回复 / 原始按键） -->
+    <string name="vm_label_keys">按键</string>
+    <string name="vm_label_reply">回复</string>
+    <string name="vm_send_cancelled">%1$s已取消，没有发送。</string>
+    <string name="vm_send_accepted">%1$s请求已接受；远端执行结果仍需核对。</string>
+    <string name="vm_send_accepted_verify_cancelled">%1$s请求已接受，后续核对已取消。</string>
+    <string name="vm_send_interrupted">%1$s请求中断，是否已接受不确定；请核对远端状态。</string>
+    <string name="vm_send_accepted_followup_failed">%1$s请求已接受，但后续处理失败：%2$s</string>
+    <string name="vm_send_uncertain">%1$s结果不确定，请核对后再操作：%2$s</string>
+    <string name="vm_send_not_sent">%1$s没有发送：%2$s</string>
+</resources>

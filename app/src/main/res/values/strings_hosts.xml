@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hosts_title">机器</string>
+    <plurals name="hosts_subtitle_count">
+        <item quantity="other">%1$d 台机器 · %2$d 台已连接</item>
+    </plurals>
+    <string name="hosts_subtitle_short">%1$d/%2$d 台在线</string>
+    <string name="hosts_usage_security">使用与安全</string>
+    <string name="hosts_empty_title">添加第一台机器</string>
+    <string name="hosts_empty_body">只需要 SSH 可达。终端随时可用；连接会话只是额外能力，需要主机上能运行 herdr remote-api-bridge。</string>
+    <string name="hosts_empty_action">添加机器</string>
+    <string name="hosts_footer">没有通知、没有后台常驻：离开 App 就断开，回来先显示上次快照，再刷新。</string>
+    <string name="hosts_open_terminal">打开终端</string>
+    <string name="hosts_check_sessions">检查会话</string>
+    <string name="hosts_connect_bridge">连接会话</string>
+    <string name="hosts_connecting">连接中</string>
+    <string name="hosts_details">详情</string>
+    <string name="hosts_state_connected">已连接</string>
+    <string name="hosts_state_connecting">连接中</string>
+    <string name="hosts_state_failed">连接失败</string>
+    <string name="hosts_state_idle">未连接</string>
+    <plurals name="hosts_connected_agents">
+        <item quantity="other">已连接 · %1$d 个 agent</item>
+    </plurals>
+    <string name="hosts_connecting_ellipsis">连接中…</string>
+    <string name="hosts_failed_short">连接失败 · 详情里看原因</string>
+    <string name="hosts_failed_reason">连接失败：%1$s</string>
+    <string name="hosts_last_sync">最后成功同步：%1$s</string>
+    <string name="hosts_failure_hint">检查网络与 SSH 凭据；若 SSH 正常，检查主机上的 Herdr 命令。</string>
+    <string name="hosts_manage">管理 %1$s</string>
+    <string name="hosts_menu_edit">编辑连接</string>
+    <string name="hosts_menu_delete">移除机器</string>
+    <string name="hosts_delete_title">移除 %1$s？</string>
+    <string name="hosts_delete_body">只会删除手机上的连接配置，不会影响主机或正在运行的 agent。</string>
+    <string name="hosts_detail_session">Session：%1$s\n命令：%2$s</string>
+    <string name="hosts_detail_fingerprint_saved">已保存的主机指纹</string>
+    <string name="hosts_detail_fingerprint_observed">本次连接的主机指纹</string>
+    <string name="hosts_detail_fingerprint_none">尚无指纹；连接后可查看</string>
+    <string name="hosts_detail_fingerprint_line">%1$s\n%2$s</string>
+    <string name="hosts_detail_copy">复制连接诊断</string>
+    <string name="hosts_session_default">默认</string>
+</resources>
