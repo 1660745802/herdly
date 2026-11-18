@@ -36,6 +36,7 @@ class VtScreen(
     private var wrapPending = false
     private var cursorVisible = true
     private var autowrap = true
+    private var originMode = false
     private var appCursorKeys = false
     /** DECSET 2004: the remote wants clipboard pastes wrapped in ESC[200~ .. ESC[201~. */
     private var bracketedPaste = false
@@ -50,11 +51,12 @@ class VtScreen(
 
     // Parser state.
     private var state = S_GROUND
-    private var params = IntArray(16)
+    private var params = IntArray(MAX_CSI_PARAMS)
     private var paramCount = 0
     private var digit = -1
     private var prefix = 0
     private var intermediate = 0
+    private var csiLength = 0
     private var carry = ByteArray(4)
     private var carryLen = 0
 
@@ -124,7 +126,10 @@ class VtScreen(
                 }
                 cp = (cp shl 6) or (b and 0x3F)
             }
-            if (!valid || cp > 0x10FFFF || cp in 0xD800..0xDFFF) {
+            if (!valid ||
+                cp < when (size) { 2 -> 0x80; 3 -> 0x800; else -> 0x10000 } ||
+                cp > 0x10FFFF || cp in 0xD800..0xDFFF
+            ) {
                 handleCodePoint(REPLACEMENT)
                 i++
                 continue
@@ -147,7 +152,10 @@ class VtScreen(
     fun snapshot(): VtSnapshot {
         val lines = ArrayList<VtLine>(scrollback.size + height)
         lines.addAll(scrollback)
-        for (row in grid) lines.add(renderRow(row))
+        for ((index, row) in grid.withIndex()) {
+            val cursor = if (cursorVisible && index == cursorRow) cursorCol else null
+            lines.add(renderRow(row, cursor))
+        }
         return VtSnapshot(
             cols = width,
             rows = height,
@@ -171,6 +179,7 @@ class VtScreen(
             S_ESCAPE -> escape(cp)
             S_ESCAPE_SINGLE -> state = S_GROUND
             S_CSI -> csi(cp)
+            S_CSI_IGNORE -> ignoreCsi(cp)
             S_OSC -> osc(cp)
             S_STRING -> string(cp)
             S_OSC_ESC -> when (cp) {
@@ -283,11 +292,26 @@ class VtScreen(
         digit = -1
         prefix = 0
         intermediate = 0
+        csiLength = 0
     }
 
     private fun csi(cp: Int) {
+        // Recovery controls take precedence even at the length boundary. ESC starts a new sequence;
+        // CAN/SUB abort this one. Treating them as overflow would swallow the following command.
+        if (cp == ESC) {
+            state = S_ESCAPE
+            return
+        }
+        if (cp == CAN || cp == SUB) {
+            state = S_GROUND
+            return
+        }
+        csiLength++
+        if (csiLength > MAX_CSI_LENGTH) {
+            state = if (cp in 0x40..0x7E) S_GROUND else S_CSI_IGNORE
+            return
+        }
         when {
-            cp == ESC -> state = S_ESCAPE
             cp < 0x20 -> control(cp)
             cp == 0x7F -> Unit
             cp in '0'.code..'9'.code -> {
@@ -298,12 +322,20 @@ class VtScreen(
             cp in 0x3C..0x3F -> prefix = cp
             cp in 0x20..0x2F -> intermediate = cp
             cp in 0x40..0x7E -> {
-                pushParam()
-                dispatchCsi(cp)
+                if (pushParam()) dispatchCsi(cp)
                 state = S_GROUND
                 prefix = 0
                 intermediate = 0
             }
+        }
+    }
+
+    /** Swallow an overlong CSI until its final byte instead of rendering its tail as text. */
+    private fun ignoreCsi(cp: Int) {
+        when {
+            cp == ESC -> state = S_ESCAPE
+            cp == CAN || cp == SUB -> state = S_GROUND
+            cp in 0x40..0x7E -> state = S_GROUND
         }
     }
 
@@ -316,10 +348,14 @@ class VtScreen(
         if (cp == ESC) state = S_STRING_ESC
     }
 
-    private fun pushParam() {
-        if (paramCount == params.size) params = params.copyOf(params.size * 2)
+    private fun pushParam(): Boolean {
+        if (paramCount >= params.size) {
+            state = S_CSI_IGNORE
+            return false
+        }
         params[paramCount++] = digit
         digit = -1
+        return true
     }
 
     private fun param(index: Int, default: Int): Int {
@@ -351,13 +387,17 @@ class VtScreen(
                 markDirty()
             }
             'H'.code, 'f'.code -> {
-                cursorRow = (paramOr1(0) - 1).coerceIn(0, height - 1)
+                val origin = if (originMode) scrollTop else 0
+                val limit = if (originMode) scrollBottom else height - 1
+                cursorRow = (origin + paramOr1(0) - 1).coerceIn(origin, limit)
                 cursorCol = (paramOr1(1) - 1).coerceIn(0, width - 1)
                 wrapPending = false
                 markDirty()
             }
             'd'.code -> {
-                cursorRow = (paramOr1(0) - 1).coerceIn(0, height - 1)
+                val origin = if (originMode) scrollTop else 0
+                val limit = if (originMode) scrollBottom else height - 1
+                cursorRow = (origin + paramOr1(0) - 1).coerceIn(origin, limit)
                 wrapPending = false
                 markDirty()
             }
@@ -383,7 +423,9 @@ class VtScreen(
                 wrapPending = false
                 markDirty()
             }
-            'c'.code -> if (prefix == '?'.code) Unit else resetAll()
+            // CSI c is a Device Attributes query. Input-only emulation cannot answer it, but it
+            // must never be confused with RIS (ESC c), which is handled in [escape].
+            'c'.code -> Unit
             'p'.code -> if (intermediate == '!'.code) softReset()
             'k'.code -> Unit
             else -> Unit
@@ -395,12 +437,18 @@ class VtScreen(
         for (i in 0 until paramCount) {
             when (params[i]) {
                 1 -> appCursorKeys = on
+                6 -> {
+                    originMode = on
+                    cursorRow = if (on) scrollTop else 0
+                    cursorCol = 0
+                    wrapPending = false
+                }
                 7 -> autowrap = on
                 25 -> cursorVisible = on
                 47, 1047 -> setAlternateScreen(on, clear = true, restoreCursor = false)
                 1049 -> setAlternateScreen(on, clear = true, restoreCursor = true)
                 2004 -> bracketedPaste = on
-                6, 12, 1000, 1002, 1003, 1004, 1005, 1006 -> Unit // not emulated
+                12, 1000, 1002, 1003, 1004, 1005, 1006 -> Unit // not emulated
                 else -> Unit
             }
         }
@@ -417,7 +465,7 @@ class VtScreen(
             scrollTop = top
             scrollBottom = bottom
         }
-        cursorRow = 0
+        cursorRow = if (originMode) scrollTop else 0
         cursorCol = 0
         wrapPending = false
         markDirty()
@@ -560,13 +608,15 @@ class VtScreen(
     }
 
     private fun cursorUp(n: Int) {
-        cursorRow = (cursorRow - n).coerceAtLeast(0)
+        val limit = if (originMode) scrollTop else 0
+        cursorRow = (cursorRow - n).coerceAtLeast(limit)
         wrapPending = false
         markDirty()
     }
 
     private fun cursorDown(n: Int) {
-        cursorRow = (cursorRow + n).coerceAtMost(height - 1)
+        val limit = if (originMode) scrollBottom else height - 1
+        cursorRow = (cursorRow + n).coerceAtMost(limit)
         wrapPending = false
         markDirty()
     }
@@ -773,6 +823,7 @@ class VtScreen(
         pen.reset()
         cursorVisible = true
         autowrap = true
+        originMode = false
         appCursorKeys = false
         bracketedPaste = false
         scrollTop = 0
@@ -800,7 +851,10 @@ class VtScreen(
 
     // ------------------------------------------------------------------ rendering
 
-    private fun renderRow(row: Row): VtLine {
+    private fun renderRow(row: Row, cursorColumn: Int? = null): VtLine {
+        val cursorCell = cursorColumn?.let { column ->
+            if (row.cells[column].cont && column > 0) column - 1 else column
+        }
         val runs = ArrayList<VtRun>(4)
         val text = StringBuilder(width)
         var fg = DEFAULT_COLOR
@@ -829,8 +883,9 @@ class VtScreen(
             text.setLength(0)
         }
 
-        for (cell in row.cells) {
+        for ((index, cell) in row.cells.withIndex()) {
             if (cell.cont) continue
+            val cellInverse = cell.inverse xor (index == cursorCell)
             if (!started) {
                 started = true
                 fg = cell.fg
@@ -839,10 +894,10 @@ class VtScreen(
                 dim = cell.dim
                 italic = cell.italic
                 underline = cell.underline
-                inverse = cell.inverse
+                inverse = cellInverse
             } else if (
                 cell.fg != fg || cell.bg != bg || cell.bold != bold || cell.dim != dim ||
-                cell.italic != italic || cell.underline != underline || cell.inverse != inverse
+                cell.italic != italic || cell.underline != underline || cellInverse != inverse
             ) {
                 flush()
                 fg = cell.fg
@@ -851,7 +906,7 @@ class VtScreen(
                 dim = cell.dim
                 italic = cell.italic
                 underline = cell.underline
-                inverse = cell.inverse
+                inverse = cellInverse
             }
             text.appendCodePoint(cell.cp)
             cell.combining?.let { text.append(it) }
@@ -987,6 +1042,10 @@ class VtScreen(
         const val S_STRING = 5
         const val S_OSC_ESC = 6
         const val S_STRING_ESC = 7
+        const val S_CSI_IGNORE = 8
+
+        const val MAX_CSI_PARAMS = 32
+        const val MAX_CSI_LENGTH = 256
 
         /**
          * Terminal cell width of a code point: 0 for combining/format characters, 2 for

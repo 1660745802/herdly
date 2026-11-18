@@ -141,6 +141,19 @@ class HerdrClientTransportTest {
     }
 
     @Test(timeout = 20_000)
+    fun `interactive shell rejects an unpinned key before password authentication`() = withFixture { fixture ->
+        ShellSession(fixture.config()).use { shell ->
+            val failure = requestFailure { shell.connect() }
+            assertTrue("expected unknown host key, got ${failure.javaClass.simpleName}", failure is UnknownHostKeyException)
+            failure as UnknownHostKeyException
+            assertEquals(fixture.fingerprint, failure.fingerprint)
+            assertFalse(shell.isConnected)
+        }
+        fixture.awaitCount("active_transports", 0)
+        assertEquals("credentials must not reach an unconfirmed host", 0, fixture.count("auth_attempts"))
+    }
+
+    @Test(timeout = 20_000)
     fun `matching pin with wrong password stays an authentication failure`() = withFixture { fixture ->
         HerdrClient(fixture.config().copy(fingerprint = fixture.fingerprint, secret = "wrong-password")).use { client ->
             val failure = requestFailure { client.connect() }

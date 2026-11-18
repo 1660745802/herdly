@@ -52,6 +52,17 @@ class VtScreenTest {
     }
 
     @Test
+    fun `invalid and overlong utf8 are replaced without creating controls`() {
+        val vt = screen(cols = 12, rows = 2)
+        vt.feed(byteArrayOf(0xC0.toByte(), 0x80.toByte(), 'A'.code.toByte()))
+        vt.feed(byteArrayOf(0xE0.toByte(), 0x80.toByte(), 0x80.toByte(), 'B'.code.toByte()))
+
+        val text = vt.snapshot().visible(0)
+        assertTrue(text.endsWith("A���B"))
+        assertEquals(7, vt.snapshot().cursorCol)
+    }
+
+    @Test
     fun `cjk occupies two cells and the second is a continuation`() {
         val vt = screen()
         vt.feedText("中文A")
@@ -272,6 +283,66 @@ class VtScreenTest {
         vt.feedText("\u001b[?25h\u001b[?1l")
         assertTrue(vt.snapshot().cursorVisible)
         assertFalse(vt.snapshot().applicationCursorKeys)
+    }
+
+    @Test
+    fun `csi device attributes query does not reset the screen`() {
+        val vt = screen(cols = 10, rows = 2)
+        vt.feedText("hello\u001b[c!")
+
+        assertEquals("hello!", vt.snapshot().visible(0))
+    }
+
+    @Test
+    fun `overlong csi and excess params are swallowed and parsing recovers`() {
+        val vt = screen(cols = 20, rows = 2)
+        val atParamLimit = List(32) { "1" }.joinToString(";")
+        vt.feedText("\u001b[${atParamLimit}mbefore")
+        vt.feedText("\u001b[" + "1;".repeat(40) + "31mafter")
+        vt.feedText("\u001b[" + "1".repeat(300) + "mend")
+        vt.feedText("\u001b[" + "1".repeat(256) + "Xtail")
+
+        assertEquals("beforeafterendtail", vt.snapshot().visible(0))
+    }
+
+    @Test
+    fun `csi recovery controls win at the length boundary`() {
+        val vt = screen(cols = 20, rows = 2)
+        val boundary = "1".repeat(256)
+
+        vt.feedText("\u001b[$boundary\u001b[31mred")
+        var runs = vt.snapshot().lines[vt.snapshot().scrollbackCount].runs
+        assertEquals("red", runs.joinToString("") { it.text }.trimEnd())
+        assertEquals(1, runs.first { it.text.contains("red") }.fg)
+
+        vt.feedText("\r\u001b[2K\u001b[$boundary\u0018plain")
+        assertEquals("plain", vt.snapshot().visible(0))
+    }
+
+    @Test
+    fun `origin mode positions and moves the cursor inside the scroll region`() {
+        val vt = screen(cols = 10, rows = 6)
+        vt.feedText("\u001b[2;5r\u001b[?6h\u001b[1;1HX")
+        assertEquals("X", vt.snapshot().visible(1))
+
+        vt.feedText("\u001b[99B!")
+        assertEquals("!", vt.snapshot().visible(4).drop(1))
+
+        vt.feedText("\u001b[?6l\u001b[1;1HY")
+        assertEquals("Y", vt.snapshot().visible(0))
+    }
+
+    @Test
+    fun `cursor is rendered as inverse only while visible`() {
+        val vt = screen(cols = 5, rows = 2)
+        vt.feedText("a")
+
+        var line = vt.snapshot().lines[0]
+        assertTrue(line.runs.any { it.inverse && it.text.contains(' ') })
+
+        vt.feedText("\u001b[?25l")
+        line = vt.snapshot().lines[0]
+        assertFalse(line.runs.any { it.inverse })
     }
 
     @Test

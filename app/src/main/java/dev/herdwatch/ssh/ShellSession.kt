@@ -31,7 +31,7 @@ class ShellConnectException(message: String, cause: Throwable? = null) : Excepti
 
 /**
  * The host presents a key we have never stored. Nothing has been sent yet: the caller must show
- * the fingerprint to the user and only then reconnect with [ShellSession]'s allowUnknownKey.
+ * the fingerprint to the user and only then reconnect with that exact fingerprint pinned.
  */
 class UnknownHostKeyException(val fingerprint: String) :
     Exception(Str.get(R.string.ssh_unknown_host_key, fingerprint))
@@ -43,17 +43,12 @@ class UnknownHostKeyException(val fingerprint: String) :
  * hosts with different pinning/authentication policies can be connected at once. Host keys
  * follow the same policy as [HerdrClient]: a pinned fingerprint is verified *inside* the
  * handshake (credentials are never offered to an unexpected host), and without a pin the
- * observed fingerprint is reported through [fingerprint] for the caller to persist.
+ * observed fingerprint is rejected and reported to the caller for explicit confirmation.
  *
  * There is no automatic reconnect: a closed session stays closed.
  */
 class ShellSession(
     private val config: HostConfig,
-    /**
-     * Only ever true when the user already confirmed this exact host key. Without a stored pin and
-     * without this flag the connection is refused before any credential is sent.
-     */
-    private val allowUnknownKey: Boolean = false,
 ) : AutoCloseable {
     private val connectMutex = Mutex()
     private val writeMutex = Mutex()
@@ -185,10 +180,9 @@ class ShellSession(
             "PreferredAuthentications",
             if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey",
         )
-        // With a pin, strict checking runs inside the handshake: the password is never sent to
-        // a host whose key does not match. Without a pin we refuse first (unless the user just
-        // confirmed this key), so a first connection is never silently trusted.
-        s.setConfig("StrictHostKeyChecking", if (pinned == null && allowUnknownKey) "no" else "yes")
+        // Strict checking always runs inside the handshake. With no pin the repository rejects the
+        // key after recording its fingerprint, so credentials are never sent before confirmation.
+        s.setConfig("StrictHostKeyChecking", "yes")
         s.serverAliveInterval = 30_000
         s.serverAliveCountMax = 3
         if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
@@ -206,7 +200,7 @@ class ShellSession(
             if (pinned != null && observed != null && observed != pinned) {
                 throw HostKeyMismatchException(pinned, observed)
             }
-            if (pinned == null && !allowUnknownKey && observed != null) {
+            if (pinned == null && observed != null) {
                 throw UnknownHostKeyException(observed)
             }
             throw ShellConnectException(Str.get(R.string.ssh_connect_failed, config.host, detail(e)), e)
@@ -256,8 +250,11 @@ class ShellSession(
         override fun check(host: String, key: ByteArray): Int {
             val observed = fingerprintOf(key)
             lastSeenFingerprint = observed
-            if (pinned == null) return HostKeyRepository.OK
-            return if (observed == pinned) HostKeyRepository.OK else HostKeyRepository.NOT_INCLUDED
+            return if (pinned != null && observed == pinned) {
+                HostKeyRepository.OK
+            } else {
+                HostKeyRepository.NOT_INCLUDED
+            }
         }
 
         override fun add(hostkey: HostKey?, ui: UserInfo?) = Unit

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 
 /** What the terminal page needs to draw one frame. */
 data class TerminalUiState(
@@ -55,7 +56,7 @@ data class TerminalUiState(
  */
 class TerminalController(
     private val scope: CoroutineScope,
-    /** Called after the user confirms an unpinned host key, so the pin becomes durable. */
+    /** Called when the user confirms an unpinned host key, before connecting with that pin. */
     private val onFingerprintTrusted: (hostId: String, fingerprint: String) -> Unit = { _, _ -> },
 ) {
     private val _state = MutableStateFlow(TerminalUiState())
@@ -69,8 +70,27 @@ class TerminalController(
     private var pumpJob: Job? = null
     private var generation = 0L
 
-    /** Once the user confirmed the key for this host, the retry may accept an unknown pin. */
-    private var trustUnknownKey = false
+    private data class PendingWrite(
+        val generation: Long,
+        val session: ShellSession,
+        val text: String,
+        val newline: Boolean,
+    )
+
+    /** One consumer preserves UI event order; independent IO coroutines may acquire a Mutex out of order. */
+    private val writes = Channel<PendingWrite>(Channel.UNLIMITED)
+
+    init {
+        scope.launch(Dispatchers.IO) {
+            for (request in writes) {
+                if (request.generation != generation || session !== request.session || !_state.value.connected) continue
+                runCatching { request.session.write(request.text, request.newline) }
+                    .onFailure {
+                        if (request.generation == generation && session === request.session) fail(it)
+                    }
+            }
+        }
+    }
 
     /**
      * Composer semantics for this session. LINE (the default) has the page buffer a whole line and
@@ -83,13 +103,12 @@ class TerminalController(
     @Volatile
     private var dirty = false
 
-    fun open(config: HostConfig, fontSize: Float = _state.value.fontSize, allowUnknownKey: Boolean = false) {
+    fun open(config: HostConfig, fontSize: Float = _state.value.fontSize) {
         val sameHost = _state.value.hostId == config.id && (session != null || connectJob != null)
         if (sameHost && _state.value.connected) return
         close()
         val gen = ++generation
         this.config = config
-        trustUnknownKey = allowUnknownKey
         val current = _state.value
         val cols = if (current.hostId == config.id) current.cols else 80
         val rows = if (current.hostId == config.id) current.rows else 24
@@ -140,11 +159,14 @@ class TerminalController(
     fun write(text: String, submit: Boolean = false) {
         val s = session ?: return
         if (!_state.value.connected) return
-        val newline = submit && inputMode == InputMode.LINE
-        scope.launch(Dispatchers.IO) {
-            runCatching { s.write(text, newline) }
-                .onFailure { fail(it) }
-        }
+        writes.trySend(
+            PendingWrite(
+                generation = generation,
+                session = s,
+                text = text,
+                newline = submit && inputMode == InputMode.LINE,
+            )
+        )
     }
 
     /** Sends a literal escape sequence, e.g. ESC or an arrow key. */
@@ -164,13 +186,39 @@ class TerminalController(
         }
     }
 
-    /** The user accepted the presented host key: remember it, then connect for real. */
+    /** Persist the exact key the user accepted, then reconnect with that durable pin. */
     fun trustFingerprint() {
         val current = config ?: return
-        if (_state.value.pendingFingerprint == null) return
-        val fontSize = _state.value.fontSize
+        val accepted = _state.value.pendingFingerprint ?: return
+        try {
+            onFingerprintTrusted(current.id, accepted)
+        } catch (error: Exception) {
+            fail(error)
+            return
+        }
         close()
-        open(current, fontSize, allowUnknownKey = true)
+        val pinned = current.copy(fingerprint = accepted)
+        config = pinned
+        val gen = ++generation
+        val state = _state.value
+        val cols = state.cols
+        val rows = state.rows
+        val buffer = VtScreen(cols, rows)
+        screen = buffer
+        dirty = false
+        _state.update {
+            it.copy(
+                connecting = true,
+                connected = false,
+                error = null,
+                pendingFingerprint = null,
+                fingerprint = accepted,
+                snapshot = buffer.snapshot(),
+                sessionNonce = it.sessionNonce + 1,
+            )
+        }
+        start(gen, pinned, cols, rows)
+        startPump(gen)
     }
 
     fun setFontSize(size: Float) {
@@ -188,7 +236,7 @@ class TerminalController(
 
     private fun start(gen: Long, config: HostConfig, cols: Int, rows: Int) {
         connectJob = scope.launch {
-            val s = ShellSession(config, allowUnknownKey = trustUnknownKey)
+            val s = ShellSession(config)
             session = s
             try {
                 s.connect()
@@ -198,9 +246,6 @@ class TerminalController(
                 }
                 s.resize(cols, rows)
                 val observed = s.fingerprint
-                if (trustUnknownKey && config.fingerprint.isNullOrBlank() && !observed.isNullOrBlank()) {
-                    onFingerprintTrusted(config.id, observed)
-                }
                 _state.update {
                     it.copy(connecting = false, connected = true, fingerprint = observed ?: it.fingerprint)
                 }

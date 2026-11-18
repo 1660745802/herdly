@@ -70,6 +70,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -231,6 +232,7 @@ fun TerminalScreen(
                         enabled = state.connected,
                         secondRow = keyBarRows >= 2,
                         longPressRepeat = longPressRepeat,
+                        applicationCursorKeys = state.snapshot?.applicationCursorKeys == true,
                     )
                 }
                 if (inputMode == InputMode.DIRECT) {
@@ -244,6 +246,7 @@ fun TerminalScreen(
                 TerminalInputBar(
                     enabled = state.connected,
                     inputMode = inputMode,
+                    sessionNonce = state.sessionNonce,
                     onInput = onInput,
                     onKey = onKey,
                     onFollow = onFollow,
@@ -484,7 +487,7 @@ private fun TerminalGrid(
             ) {
                 itemsIndexed(snapshot.lines) { _, line ->
                     Text(
-                        text = line.annotated(term.text),
+                        text = line.annotated(term.text, term.background),
                         style = textStyle,
                         softWrap = false,
                         maxLines = 1,
@@ -569,6 +572,7 @@ private fun TerminalKeys(
     enabled: Boolean,
     secondRow: Boolean,
     longPressRepeat: Boolean,
+    applicationCursorKeys: Boolean,
 ) {
     var ctrl by rememberSaveable { mutableStateOf(false) }
     val ctrlDesc = stringResource(R.string.terminal_key_ctrl)
@@ -582,15 +586,15 @@ private fun TerminalKeys(
         // Shift+Tab (back-tab): cycles permission modes in agent CLIs, tabs in tmux.
         TerminalKey(shiftTabLabel, "[Z", R.string.terminal_key_shift_tab_a11y, repeatable = false),
         TerminalKey("⌫", "", R.string.terminal_key_backspace),
-        TerminalKey("←", "[D", R.string.terminal_key_left),
-        TerminalKey("→", "[C", R.string.terminal_key_right),
+        TerminalKey("←", arrowKeySequence('D', applicationCursorKeys), R.string.terminal_key_left),
+        TerminalKey("→", arrowKeySequence('C', applicationCursorKeys), R.string.terminal_key_right),
     )
     val secondary = listOf(
         TerminalKey("^C", "", R.string.terminal_key_ctrl_c, repeatable = false),
         TerminalKey("^D", "", R.string.terminal_key_ctrl_d, repeatable = false),
         TerminalKey("^Z", "", R.string.terminal_key_ctrl_z, repeatable = false),
-        TerminalKey("↑", "[A", R.string.terminal_key_up),
-        TerminalKey("↓", "[B", R.string.terminal_key_down),
+        TerminalKey("↑", arrowKeySequence('A', applicationCursorKeys), R.string.terminal_key_up),
+        TerminalKey("↓", arrowKeySequence('B', applicationCursorKeys), R.string.terminal_key_down),
         TerminalKey("PgUp", "[5~", R.string.terminal_key_page_up, repeatable = false),
         TerminalKey("PgDn", "[6~", R.string.terminal_key_page_down, repeatable = false),
     )
@@ -707,10 +711,94 @@ private data class TerminalKey(
     val repeatable: Boolean = true,
 )
 
+/** DECCKM switches cursor keys from CSI to SS3 sequences. */
+internal fun arrowKeySequence(final: Char, applicationCursorKeys: Boolean): String {
+    require(final in "ABCD") { "unsupported cursor key: $final" }
+    return if (applicationCursorKeys) "\u001bO$final" else "\u001b[$final"
+}
+
+private const val DIRECT_INPUT_SENTINEL = "\u2060"
+
+private fun emptyDirectInput(): TextFieldValue =
+    TextFieldValue(DIRECT_INPUT_SENTINEL, selection = TextRange(DIRECT_INPUT_SENTINEL.length))
+
+internal data class DirectInputDelta(
+    val text: String,
+    val deleteBackward: Boolean,
+    val remaining: TextFieldValue,
+)
+
+private data class DirectInputParts(
+    val prefix: String,
+    val composing: String,
+    val suffix: String,
+    val selection: TextRange,
+)
+
+/** Removes one synthetic sentinel and separates safe committed prefix from active composition. */
+private fun directInputParts(value: TextFieldValue): DirectInputParts {
+    val raw = value.text
+    val sentinelIndex = raw.indexOf(DIRECT_INPUT_SENTINEL)
+    val clean = if (sentinelIndex >= 0) raw.removeRange(sentinelIndex, sentinelIndex + 1) else raw
+    fun mappedIndex(index: Int): Int {
+        val bounded = index.coerceIn(0, raw.length)
+        return bounded - if (sentinelIndex >= 0 && bounded > sentinelIndex) 1 else 0
+    }
+    val selection = TextRange(
+        mappedIndex(value.selection.start).coerceIn(0, clean.length),
+        mappedIndex(value.selection.end).coerceIn(0, clean.length),
+    )
+    val composition = value.composition
+        ?: return DirectInputParts(clean, "", "", selection)
+    val start = mappedIndex(composition.min).coerceIn(0, clean.length)
+    val end = mappedIndex(composition.max).coerceIn(start, clean.length)
+    return DirectInputParts(
+        prefix = clean.substring(0, start),
+        composing = clean.substring(start, end),
+        suffix = clean.substring(end),
+        selection = selection,
+    )
+}
+
+private fun remainingDirectInput(parts: DirectInputParts): TextFieldValue {
+    val held = parts.composing + parts.suffix
+    if (held.isEmpty()) return emptyDirectInput()
+    val text = DIRECT_INPUT_SENTINEL + held
+    val compositionEnd = DIRECT_INPUT_SENTINEL.length + parts.composing.length
+    fun retained(index: Int): Int = (DIRECT_INPUT_SENTINEL.length + index - parts.prefix.length)
+        .coerceIn(DIRECT_INPUT_SENTINEL.length, text.length)
+    return TextFieldValue(
+        text = text,
+        selection = TextRange(retained(parts.selection.start), retained(parts.selection.end)),
+        composition = if (parts.composing.isEmpty()) null else
+            TextRange(DIRECT_INPUT_SENTINEL.length, compositionEnd),
+    )
+}
+
+/** Interprets one IME edit and retains active composition plus any later committed suffix. */
+internal fun directInputDelta(
+    previous: TextFieldValue,
+    next: TextFieldValue,
+): DirectInputDelta {
+    val parts = directInputParts(next)
+    val remaining = remainingDirectInput(parts)
+    val heldIsEmpty = parts.composing.isEmpty() && parts.suffix.isEmpty()
+    return DirectInputDelta(
+        text = parts.prefix,
+        deleteBackward = parts.prefix.isEmpty() && heldIsEmpty &&
+            previous.composition == null && next.text.length < previous.text.length,
+        remaining = remaining,
+    )
+}
+
+/** Enter may send only text before an unfinished composition without changing character order. */
+internal fun directSubmitText(value: TextFieldValue): String = directInputParts(value).prefix
+
 @Composable
 private fun TerminalInputBar(
     enabled: Boolean,
     inputMode: InputMode,
+    sessionNonce: Long,
     onInput: (String, Boolean) -> Unit,
     onKey: (String) -> Unit,
     onFollow: () -> Unit,
@@ -719,30 +807,39 @@ private fun TerminalInputBar(
     val direct = inputMode == InputMode.DIRECT
     // TextFieldValue (not String) so direct mode can see `composition` and hold back pinyin that
     // the IME has not committed yet: sending half-formed glyphs would garble the remote line.
-    var entry by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+    var lineEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+    var directEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(emptyDirectInput())
+    }
+    val entry = if (direct) directEntry else lineEntry
     val inputDesc = stringResource(R.string.terminal_input_desc)
     val placeholder = stringResource(R.string.terminal_input_placeholder)
     val sendDesc = stringResource(R.string.terminal_send)
 
     fun submit() {
-        // In direct mode the field is a clear-as-you-send buffer, so this is normally a bare Enter;
-        // a leftover buffer (mode switched mid-line) ships in the same write to keep the order.
-        // Text the IME is still composing is dropped rather than leaking pinyin to the PTY.
+        // In direct mode the field normally contains only an active IME composition. Send any
+        // committed prefix/suffix before Enter, but never leak unfinished pinyin to the PTY.
         if (direct) {
-            val pending = if (entry.composition == null) entry.text else ""
-            onInput(pending + "\r", false)
-            entry = TextFieldValue("")
+            val parts = directInputParts(directEntry)
+            if (parts.composing.isNotEmpty()) {
+                if (parts.prefix.isNotEmpty()) onInput(parts.prefix, false)
+                directEntry = remainingDirectInput(parts)
+                onFollow()
+                return
+            }
+            onInput(directSubmitText(directEntry) + "\r", false)
+            directEntry = emptyDirectInput()
             onFollow()
             return
         }
-        if (entry.text.isEmpty()) {
+        if (lineEntry.text.isEmpty()) {
             onKey("\r")
             return
         }
-        onInput(entry.text, true)
-        entry = TextFieldValue("")
+        onInput(lineEntry.text, true)
+        lineEntry = TextFieldValue("")
         onFollow()
     }
 
@@ -756,20 +853,20 @@ private fun TerminalInputBar(
             value = entry,
             onValueChange = onChange@{ next ->
                 if (!direct) {
-                    entry = next
+                    lineEntry = next
                     return@onChange
                 }
-                // Direct mode: nothing is sent while the IME is composing, so no pinyin reaches
-                // the PTY; once the composition commits the tail goes out character by character.
-                if (next.composition != null) {
-                    entry = next
-                    return@onChange
-                }
-                val delta = next.text
-                entry = TextFieldValue("")
-                if (delta.isNotEmpty()) {
-                    onInput(delta, false)
-                    onFollow()
+                val delta = directInputDelta(directEntry, next)
+                directEntry = delta.remaining
+                when {
+                    delta.text.isNotEmpty() -> {
+                        onInput(delta.text, false)
+                        onFollow()
+                    }
+                    delta.deleteBackward -> {
+                        onKey("\u007f")
+                        onFollow()
+                    }
                 }
             },
             enabled = enabled,
@@ -805,12 +902,11 @@ private fun TerminalInputBar(
 /**
  * Clipboard payload as it must be written to the PTY.
  *
- * With bracketed paste on (DECSET 2004, mirrored on [VtSnapshot.bracketedPaste]) a multi-line
- * text is wrapped in ESC[200~ .. ESC[201~ so the remote application inserts it atomically and
- * does not execute every line; single-line text and shells without the mode get it verbatim.
+ * With bracketed paste on (DECSET 2004, mirrored on [VtSnapshot.bracketedPaste]) every paste is
+ * wrapped in ESC[200~ .. ESC[201~ so the remote application can distinguish pasted text from keys.
  */
 internal fun bracketedPastePayload(text: String, bracketedPaste: Boolean): String =
-    if (bracketedPaste && text.contains('\n')) "\u001b[200~" + text + "\u001b[201~" else text
+    if (bracketedPaste) "\u001b[200~" + text + "\u001b[201~" else text
 
 /**
  * First connection to a host without a saved pin: non-dismissible until the user decides.
@@ -910,23 +1006,23 @@ private val TERM_PALETTE = listOf(
 )
 
 /** Renders one terminal line, preserving per-run colour and emphasis. */
-internal fun dev.herdwatch.term.VtLine.annotated(defaultText: Color): AnnotatedString =
-    buildAnnotatedString {
-        runs.forEach { run ->
-            withStyle(run.spanStyle(defaultText)) { append(run.text) }
-        }
+internal fun dev.herdwatch.term.VtLine.annotated(
+    defaultText: Color,
+    defaultBackground: Color,
+): AnnotatedString = buildAnnotatedString {
+    runs.forEach { run ->
+        withStyle(run.spanStyle(defaultText, defaultBackground)) { append(run.text) }
     }
+}
 
-internal fun VtRun.spanStyle(defaultText: Color): SpanStyle {
-    val base = if (inverse) bg?.let { xtermColor(it, defaultText) } ?: defaultText else fg?.let { xtermColor(it, defaultText) } ?: defaultText
-    val bgColor = when {
-        inverse -> bg?.let { xtermColor(it, defaultText) }
-        bg != null -> xtermColor(bg, defaultText)
-        else -> null
-    }
+internal fun VtRun.spanStyle(defaultText: Color, defaultBackground: Color = Color.Transparent): SpanStyle {
+    val foreground = fg?.let { xtermColor(it, defaultText) } ?: defaultText
+    val background = bg?.let { xtermColor(it, defaultBackground) } ?: defaultBackground
+    val effectiveForeground = if (inverse) background else foreground
+    val effectiveBackground = if (inverse) foreground else background
     return SpanStyle(
-        color = if (dim) base.copy(alpha = 0.7f) else base,
-        background = bgColor ?: Color.Unspecified,
+        color = if (dim) effectiveForeground.copy(alpha = 0.7f) else effectiveForeground,
+        background = effectiveBackground,
         fontWeight = if (bold) androidx.compose.ui.text.font.FontWeight.Bold else null,
         fontStyle = if (italic) androidx.compose.ui.text.font.FontStyle.Italic else null,
         textDecoration = if (underline) androidx.compose.ui.text.style.TextDecoration.Underline else null,
