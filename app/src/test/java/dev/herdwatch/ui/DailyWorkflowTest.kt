@@ -27,8 +27,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Long-use regressions: the inbox queue is the traversal queue, hiding search keeps its
- * filter, back from structure returns where the user came from, reading bookmarks survive
+ * Long-use regressions: hiding search keeps its filter, back from the agent detail returns to
+ * the same inbox, back from structure returns where the user came from, reading bookmarks survive
  * re-entry, and repeated reconnect taps coalesce while a connection attempt is suspended.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -105,11 +105,12 @@ class DailyWorkflowTest {
             val alpha = vm.ui.value.repo.agents.single { it.name == "alpha" }
             vm.openAgent(alpha)
             runCurrent()
-            // The hidden filter still scopes the traversal queue to the single match.
-            assertEquals(1, vm.ui.value.detail.queueSize)
-            vm.openAdjacentAgent(1)
+            assertEquals(Screen.Detail(alpha.key), vm.ui.value.screen)
+            // Navigation goes back to the filtered inbox instead of silently switching agents.
+            vm.back()
             runCurrent()
-            assertEquals(alpha.key, vm.ui.value.detail.agent?.key)
+            assertEquals(Screen.Inbox, vm.ui.value.screen)
+            assertEquals("alpha", vm.ui.value.query)
         } finally {
             models.clear()
             Dispatchers.resetMain()

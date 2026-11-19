@@ -17,6 +17,9 @@
     <string name="common_loading">Loading…</string>
     <string name="common_refresh">Refresh</string>
     <string name="common_reconnect">Reconnect</string>
+    <string name="common_agent">Agent</string>
+    <string name="mode_agent_tag">AGENT · DECISIONS</string>
+    <string name="mode_terminal_tag">SSH · TERMINAL</string>
     <string name="status_waiting">Waiting for you</string>
     <string name="status_working">Working</string>
     <string name="status_review">To review</string>

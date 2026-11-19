@@ -11,12 +11,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import dev.herdwatch.model.AgentStatus
+import dev.herdwatch.model.ConnState
 import dev.herdwatch.ui.design.DsLight
+import dev.herdwatch.ui.design.DsColors
 import dev.herdwatch.ui.design.DsDark
+import dev.herdwatch.ui.design.DsSpacing
+import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.LocalDs
+import dev.herdwatch.ui.design.LocalSpacing
+import dev.herdwatch.ui.design.Spacing
 
 data class StatusPalette(
     val waiting: Color,
@@ -28,7 +32,33 @@ data class StatusPalette(
     val danger: Color,
 )
 
+/** Status colours of the dark chassis. Public so previews can show the real thing. */
+val DarkStatusPalette = StatusPalette(
+    waiting = Color(0xFFFB923C),
+    working = Color(0xFFFACC15),
+    review = Color(0xFF4ADE80),
+    idle = Color(0xFFACB2C0),
+    unknown = Color(0xFFACB2C0),
+    waitingWash = Color(0xFF2B1D15),
+    danger = Color(0xFFF87171),
+)
+
 data class TerminalTokens(val background: Color, val text: Color, val muted: Color, val accent: Color, val risk: Color)
+
+/**
+ * The one mapping from agent state to color.
+ *
+ * Every lamp, dot and row tint in the app reads this, so "waiting" is the same amber on the
+ * queue row, on the machine tree and inside the agent header. Danger red stays reserved for
+ * failures and destructive actions.
+ */
+fun statusColor(status: AgentStatus, p: StatusPalette): Color = when (status) {
+    AgentStatus.WAITING -> p.waiting
+    AgentStatus.WORKING -> p.working
+    AgentStatus.REVIEW -> p.review
+    AgentStatus.IDLE -> p.idle
+    AgentStatus.UNKNOWN -> p.unknown
+}
 
 /**
  * Motion durations in milliseconds. Kept restrained on purpose: nothing exceeds [slow],
@@ -37,7 +67,6 @@ data class TerminalTokens(val background: Color, val text: Color, val muted: Col
 data class MotionTokens(val quick: Int = 120, val medium: Int = 200, val slow: Int = 280)
 
 val LocalMotion = staticCompositionLocalOf { MotionTokens() }
-
 /**
  * True when the platform reports animations as disabled ("Remove animations" accessibility
  * setting, developer option, or an animator duration scale of 0). Components read this to
@@ -74,17 +103,18 @@ val LocalGlassTokens = staticCompositionLocalOf {
     )
 }
 
-val LocalStatusPalette = staticCompositionLocalOf {
-    StatusPalette(
-        waiting = Color(0xFFC2410C),
-        working = Color(0xFFA16207),
-        review = Color(0xFF15803D),
-        idle = Color(0xFF626773),
-        unknown = Color(0xFF626773),
-        waitingWash = Color(0xFFFBEFE7),
-        danger = Color(0xFFB23A37),
-    )
-}
+/** Status colours of the light chassis. */
+val LightStatusPalette = StatusPalette(
+    waiting = Color(0xFFC2410C),
+    working = Color(0xFFA16207),
+    review = Color(0xFF15803D),
+    idle = Color(0xFF626773),
+    unknown = Color(0xFF626773),
+    waitingWash = Color(0xFFFBEFE7),
+    danger = Color(0xFFB23A37),
+)
+
+val LocalStatusPalette = staticCompositionLocalOf { LightStatusPalette }
 
 private val LightGlass = GlassTokens(
     canvas = Color(0xFFF3F5FA),
@@ -154,47 +184,86 @@ private val Dark = darkColorScheme(
     onErrorContainer = Color(0xFFFFC5BF),
 )
 
-private val AppTypography = androidx.compose.material3.Typography(
-    headlineMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 28.sp, lineHeight = 34.sp),
-    headlineSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, lineHeight = 30.sp),
-    titleLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp),
-    titleMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp),
-    titleSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
-    bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 23.sp),
-    bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 14.sp, lineHeight = 21.sp),
-    labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, lineHeight = 20.sp),
-    labelMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 12.5.sp, lineHeight = 18.sp),
-    labelSmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp),
-    bodySmall = TextStyle(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 17.sp),
+/**
+ * Material color scheme is derived from the app palette instead of a second set of literals.
+ *
+ * Dropdowns, sheet internals and Material text fields read `MaterialTheme.colorScheme`. With the
+ * stock Material defaults a menu appeared as a pure white slab (light) or a blue-grey panel (dark)
+ * on top of the matte chassis - the same overlay looked like a different product. Mapping the app
+ * inks onto the scheme keeps every Material surface on the same material.
+ */
+private fun appColorScheme(colors: DsColors, darkTheme: Boolean): androidx.compose.material3.ColorScheme {
+    val base = if (darkTheme) Dark else Light
+    return base.copy(
+        primary = colors.accent,
+        onPrimary = colors.onAccent,
+        primaryContainer = colors.accentWash,
+        onPrimaryContainer = colors.text,
+        secondary = colors.accent,
+        onSecondary = colors.onAccent,
+        secondaryContainer = colors.accentWash,
+        onSecondaryContainer = colors.text,
+        tertiary = colors.accent,
+        onTertiary = colors.onAccent,
+        background = colors.base,
+        onBackground = colors.text,
+        surface = colors.baseRaised,
+        onSurface = colors.text,
+        surfaceVariant = colors.well,
+        onSurfaceVariant = colors.textSoft,
+        outline = colors.shadowDark,
+        outlineVariant = colors.wellDeep,
+        error = colors.danger,
+        onError = colors.onDanger,
+        errorContainer = colors.danger.copy(alpha = 0.12f),
+        onErrorContainer = colors.danger,
+    )
+}
+
+/**
+ * Material typography is derived from [DsTypography] instead of being written twice.
+ *
+ * Every control the app draws itself uses the `Ds*` scale, but Material components (text fields
+ * inside sheets, menu items, sheet drag handles) read `MaterialTheme.typography`. Two hand-written
+ * scales drifted apart: a Material label ended up a hair smaller than the app label next to it.
+ * Deriving one from the other makes the material set follow the app scale automatically.
+ */
+internal val AppTypography = androidx.compose.material3.Typography(
+    displayLarge = DsTypography.display,
+    displayMedium = DsTypography.display,
+    displaySmall = DsTypography.title,
+    headlineLarge = DsTypography.display,
+    headlineMedium = DsTypography.title,
+    headlineSmall = DsTypography.headline,
+    titleLarge = DsTypography.title,
+    titleMedium = DsTypography.headline,
+    titleSmall = DsTypography.bodyStrong,
+    bodyLarge = DsTypography.body,
+    bodyMedium = DsTypography.body,
+    bodySmall = DsTypography.caption,
+    labelLarge = DsTypography.bodyStrong,
+    labelMedium = DsTypography.caption,
+    labelSmall = DsTypography.micro,
 )
 
-val MonoStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, lineHeight = 18.sp)
+/** Mono ink for command blocks and read-only code. Same scale as [DsTypography.mono]. */
+val MonoStyle: TextStyle = DsTypography.mono
 
 @Composable
 fun HerdwatchTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     reduceMotion: Boolean = false,
+    spacing: Spacing = DsSpacing.comfortable,
     content: @Composable () -> Unit,
 ) {
-    val status = if (darkTheme) {
-        StatusPalette(
-            waiting = Color(0xFFFB923C),
-            working = Color(0xFFFACC15),
-            review = Color(0xFF4ADE80),
-            idle = Color(0xFFACB2C0),
-            unknown = Color(0xFFACB2C0),
-            waitingWash = Color(0xFF2B1D15),
-            danger = Color(0xFFF87171),
-        )
-    } else {
-        LocalStatusPalette.current
-    }
+    val status = if (darkTheme) DarkStatusPalette else LocalStatusPalette.current
     val reducedMotion = reduceMotion || rememberReducedMotion()
     androidx.compose.runtime.CompositionLocalProvider(
         LocalStatusPalette provides status,
         LocalMotion provides MotionTokens(),
         LocalReducedMotion provides reducedMotion,
         LocalDs provides if (darkTheme) DsDark else DsLight,
+        LocalSpacing provides spacing,
         LocalGlassTokens provides if (darkTheme) DarkGlass else LightGlass,
         LocalTerminalTokens provides if (darkTheme) {
             TerminalTokens(Color(0xFF090B0F), Color(0xFFE8EBF2), Color(0xFFA8B0C0), Color(0xFFB6C3FF), Color(0xFFFF9A8B))
@@ -203,7 +272,7 @@ fun HerdwatchTheme(
         },
     ) {
         MaterialTheme(
-            colorScheme = if (darkTheme) Dark else Light,
+            colorScheme = appColorScheme(if (darkTheme) DsDark else DsLight, darkTheme),
             typography = AppTypography,
             content = content,
         )
@@ -213,3 +282,22 @@ fun HerdwatchTheme(
 @Composable
 @ReadOnlyComposable
 fun statusPalette(): StatusPalette = LocalStatusPalette.current
+
+/** Status color for the current theme; use this instead of mapping states by hand. */
+@Composable
+@ReadOnlyComposable
+fun agentStatusColor(status: AgentStatus): Color = statusColor(status, LocalStatusPalette.current)
+
+/** Connection state color: green when live, amber while dialing, red on failure. */
+@Composable
+@ReadOnlyComposable
+fun connStatusColor(state: ConnState): Color {
+    val p = LocalStatusPalette.current
+    val d = LocalDs.current
+    return when (state) {
+        is ConnState.Connected -> p.review
+        ConnState.Connecting -> p.working
+        is ConnState.Failed -> d.danger
+        ConnState.Idle -> d.textFaint
+    }
+}

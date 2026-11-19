@@ -4,7 +4,6 @@ import android.content.Context
 import android.widget.Toast
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -14,7 +13,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -28,11 +26,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -77,10 +72,12 @@ import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
 import dev.herdwatch.ui.design.NeoLamp
+import dev.herdwatch.ui.design.NeoModeTag
 import dev.herdwatch.ui.design.NeoMenu
 import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
 import dev.herdwatch.ui.design.NeoSkeleton
+import dev.herdwatch.ui.design.NeoSpinner
 import dev.herdwatch.ui.design.NeoSheet
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
@@ -88,6 +85,9 @@ import dev.herdwatch.ui.theme.LocalTerminalTokens
 import dev.herdwatch.ui.theme.MonoStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.herdwatch.ui.theme.agentStatusColor
+import dev.herdwatch.ui.motionMillis
+import dev.herdwatch.ui.design.spacing
 
 private val TerminalBackground: Color @Composable get() = LocalTerminalTokens.current.background
 private val TerminalText: Color @Composable get() = LocalTerminalTokens.current.text
@@ -108,9 +108,6 @@ fun AgentScreen(
     onDraftChange: (String) -> Unit,
     onSendPrompt: (String) -> Unit,
     onSendKeys: (List<String>) -> Unit,
-    onSwipeAgent: (Int) -> Unit,
-    canOpenPrevious: Boolean,
-    canOpenNext: Boolean,
     onLoadMore: () -> Unit,
     onSetSnapshotLines: (Int) -> Unit,
     onStop: () -> Unit,
@@ -236,9 +233,100 @@ fun AgentScreen(
     val compact = maxHeight < 640.dp || LocalDensity.current.fontScale >= 1.3f
     val typing = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val minimal = maxHeight < 360.dp
+    // The overflow stays reachable even in the minimal landscape header; only the status
+    // chrome is allowed to collapse.
+    val overflowMenu: @Composable () -> Unit = {
+        Box {
+            NeoIconButton(
+                glyph = NeoGlyph.More,
+                onClick = { menu = true },
+                contentDescription = stringResource(R.string.agent_cd_more_actions),
+            )
+            NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_read_fullscreen),
+                    onClick = {
+                        menu = false; reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated)
+                    },
+                    enabled = detail.text.isNotBlank(),
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_rename),
+                    onClick = { menu = false; renaming = true },
+                    enabled = !detail.sending,
+                )
+                NeoMenuItem(
+                    label = stringResource(
+                        if (detail.snapshotLines < 1200) R.string.agent_menu_expand_snapshot_1200
+                        else R.string.agent_menu_reread_snapshot_1200,
+                    ),
+                    onClick = { menu = false; onLoadMore() },
+                    enabled = !detail.loading && detail.hostConnected,
+                )
+                if (detail.snapshotLines > 400) NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_restore_snapshot_400),
+                    onClick = { menu = false; onSetSnapshotLines(400) },
+                    enabled = !detail.loading && detail.hostConnected,
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_status_source),
+                    onClick = { menu = false; onExplain() },
+                )
+                NeoMenuDivider()
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_copy_screen),
+                    onClick = {
+                        menu = false
+                        clipboard.setText(AnnotatedString(detail.text))
+                        Toast.makeText(context, copiedScreenToast, Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = detail.text.isNotBlank(),
+                )
+                NeoMenuItem(
+                    label = stringResource(
+                        if (wrapOutput) R.string.agent_menu_wrap_off else R.string.agent_menu_wrap_on,
+                    ),
+                    onClick = {
+                        menu = false
+                        wrapOutput = !wrapOutput
+                    },
+                    modifier = Modifier.semantics { stateDescription = wrapStateLabel },
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_select_copy),
+                    onClick = {
+                        menu = false
+                        selecting = true
+                    },
+                    enabled = detail.text.isNotBlank(),
+                )
+                NeoMenuDivider()
+                NeoMenuItem(
+                    label = stringResource(R.string.agent_menu_stop),
+                    onClick = { menu = false; confirmStop = true },
+                    enabled = !detail.sending,
+                    danger = true,
+                )
+            }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().weight(1f)) {
-        if (!minimal) Row(
+        // Even in extreme landscape there must be a way back and a visible mode label.
+        if (minimal) Row(
+            Modifier.fillMaxWidth().padding(horizontal = DsSpace.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NeoIconButton(
+                glyph = NeoGlyph.Back,
+                onClick = onBack,
+                contentDescription = stringResource(R.string.agent_cd_back),
+            )
+            Text(agent.name, style = DsTypography.headline, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).semantics { heading() })
+            NeoModeTag(stringResource(R.string.mode_agent_tag))
+            overflowMenu()
+        } else Row(
             Modifier.fillMaxWidth().padding(start = DsSpace.xxs, end = DsSpace.xs, top = DsSpace.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -251,13 +339,9 @@ fun AgentScreen(
                 Text(agent.name, style = if (compact) DsTypography.headline else DsTypography.title, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth().semantics { heading() })
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    NeoModeTag(stringResource(R.string.mode_agent_tag))
                     NeoLamp(
-                        color = when (agent.status) {
-                            AgentStatus.WAITING -> colors.danger
-                            AgentStatus.WORKING -> colors.accent
-                            AgentStatus.REVIEW -> colors.ok
-                            AgentStatus.IDLE, AgentStatus.UNKNOWN -> colors.textFaint
-                        },
+                        color = agentStatusColor(agent.status),
                         size = 7.dp,
                         modifier = Modifier.clearAndSetSemantics { },
                     )
@@ -273,79 +357,7 @@ fun AgentScreen(
                 contentDescription = stringResource(R.string.agent_cd_reread_screen),
                 enabled = !detail.loading && !detail.sending,
             )
-            Box {
-                NeoIconButton(
-                    glyph = NeoGlyph.More,
-                    onClick = { menu = true },
-                    contentDescription = stringResource(R.string.agent_cd_more_actions),
-                )
-                NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_read_fullscreen),
-                        onClick = {
-                            menu = false; reader = ReaderSnapshot(detail.text, detail.loadedAt, detail.truncated)
-                        },
-                        enabled = detail.text.isNotBlank(),
-                    )
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_rename),
-                        onClick = { menu = false; renaming = true },
-                        enabled = !detail.sending,
-                    )
-                    NeoMenuItem(
-                        label = stringResource(
-                            if (detail.snapshotLines < 1200) R.string.agent_menu_expand_snapshot_1200
-                            else R.string.agent_menu_reread_snapshot_1200,
-                        ),
-                        onClick = { menu = false; onLoadMore() },
-                        enabled = !detail.loading && detail.hostConnected,
-                    )
-                    if (detail.snapshotLines > 400) NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_restore_snapshot_400),
-                        onClick = { menu = false; onSetSnapshotLines(400) },
-                        enabled = !detail.loading && detail.hostConnected,
-                    )
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_status_source),
-                        onClick = { menu = false; onExplain() },
-                    )
-                    NeoMenuDivider()
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_copy_screen),
-                        onClick = {
-                            menu = false
-                            clipboard.setText(AnnotatedString(detail.text))
-                            Toast.makeText(context, copiedScreenToast, Toast.LENGTH_SHORT).show()
-                        },
-                        enabled = detail.text.isNotBlank(),
-                    )
-                    NeoMenuItem(
-                        label = stringResource(
-                            if (wrapOutput) R.string.agent_menu_wrap_off else R.string.agent_menu_wrap_on,
-                        ),
-                        onClick = {
-                            menu = false
-                            wrapOutput = !wrapOutput
-                        },
-                        modifier = Modifier.semantics { stateDescription = wrapStateLabel },
-                    )
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_select_copy),
-                        onClick = {
-                            menu = false
-                            selecting = true
-                        },
-                        enabled = detail.text.isNotBlank(),
-                    )
-                    NeoMenuDivider()
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_stop),
-                        onClick = { menu = false; confirmStop = true },
-                        enabled = !detail.sending,
-                        danger = true,
-                    )
-                }
-            }
+            overflowMenu()
         }
         if (!compact) Text(
             listOfNotNull(agent.hostLabel, agent.workspaceLabel ?: agent.repo, agent.tabLabel, agent.paneId)
@@ -356,10 +368,6 @@ fun AgentScreen(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(start = DsSpace.xxl, end = DsSpace.xl, top = DsSpace.xxs, bottom = DsSpace.xs),
         )
-        if (!compact && (canOpenPrevious || canOpenNext)) {
-            AgentTraversal(agent.key, canOpenPrevious, canOpenNext, detail.queuePosition, detail.queueSize, onSwipeAgent)
-        }
-
         // One fixed-height status strip instead of a variable notice stack.
         //
         // Previously every message (offline, stale, error, operation result, "no safe option")
@@ -390,7 +398,7 @@ fun AgentScreen(
                 // Terminal chrome is drawn with the same type scale and hit sizes as the rest of
                 // the app; Material TextButtons here were the last mismatched control on the page.
                 if (!minimal) Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = DsSpace.m, end = DsSpace.xs),
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = DsSpace.m, end = DsSpace.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -425,7 +433,7 @@ fun AgentScreen(
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (detail.text.isBlank() && detail.loading) {
                             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = TerminalMuted)
+                                NeoSpinner(Modifier.size(20.dp), color = TerminalMuted)
                                 Text(stringResource(R.string.agent_reading_screen), color = TerminalMuted)
                             }
                         } else {
@@ -443,7 +451,7 @@ fun AgentScreen(
                                     Text(
                                         visibleText.ifBlank { stringResource(R.string.agent_screen_empty) },
                                         modifier = textModifier,
-                                        style = MonoStyle.copy(fontSize = 12.5.sp, lineHeight = 19.sp),
+                                        style = MonoStyle,
                                         color = TerminalText, softWrap = wrapOutput,
                                     )
                                     if (detail.truncated) {
@@ -469,7 +477,7 @@ fun AgentScreen(
                             }
                         }
                         if (detail.loading && detail.text.isNotBlank()) {
-                            CircularProgressIndicator(Modifier.align(Alignment.TopEnd).padding(12.dp).size(16.dp), color = TerminalMuted, strokeWidth = 2.dp)
+                            NeoSpinner(Modifier.align(Alignment.TopEnd).padding(12.dp).size(16.dp), color = TerminalMuted)
                         }
                         Box(Modifier.align(Alignment.BottomCenter).padding(DsSpace.s)) {
                             BackToBottomChip(
@@ -496,12 +504,12 @@ fun AgentScreen(
         // Column inside the Box, Compose drew it first at the top-left and the weighted body took the
         // full height, so the composer covered the status bar. Keep the braces exactly as they are.
         Column(
-            Modifier.fillMaxWidth().background(colors.base).padding(horizontal = DsSpace.m),
+            Modifier.fillMaxWidth().background(colors.base).padding(horizontal = spacing().gutter),
         ) {
             if (!typing) AnimatedVisibility(
                 visible = detail.ask != null,
-                enter = fadeIn(tween(160)) + expandVertically(tween(200)),
-                exit = fadeOut(tween(120)) + shrinkVertically(tween(160)),
+                enter = fadeIn(tween(motionMillis(160))) + expandVertically(tween(motionMillis(200))),
+                exit = fadeOut(tween(motionMillis(120))) + shrinkVertically(tween(motionMillis(160))),
             ) {
                 val ask = detail.ask ?: return@AnimatedVisibility
                 Row(
@@ -762,7 +770,7 @@ fun AgentScreen(
     }
 }
 
-/** Text-only action on the terminal chrome: 44dp tall, no ripple, design-system type. */
+/** Text-only action on the terminal chrome: 48dp tall, no ripple, design-system type. */
 @Composable
 private fun TerminalChromeAction(
     label: String,
@@ -779,7 +787,7 @@ private fun TerminalChromeAction(
     }
     Box(
         modifier = modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(DsRadius.key))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = DsSpace.m),
@@ -892,59 +900,21 @@ private fun StatusStrip(
     }
     Row(
         Modifier.fillMaxWidth().padding(start = DsSpace.m, end = DsSpace.m, top = DsSpace.xs, bottom = DsSpace.xxs),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
     ) {
-        NeoLamp(color = lamp, size = 6.dp, modifier = Modifier.clearAndSetSemantics { })
+        NeoLamp(color = lamp, size = 6.dp, modifier = Modifier.padding(top = 3.dp).clearAndSetSemantics { })
         Text(
             message,
             style = DsTypography.caption,
             color = if (error != null) colors.danger else colors.textSoft,
-            maxLines = 1,
+            // A failed read used to be cut to a single line, so the reason ("host closed the
+            // connection: timeout") was exactly the part that never made it on screen.
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         action?.invoke()
-    }
-}
-
-@Composable
-private fun AgentTraversal(agentKey: String, canPrevious: Boolean, canNext: Boolean, position: Int, total: Int, onMove: (Int) -> Unit) {
-    val colors = ds()
-    var drag by remember(agentKey) { mutableStateOf(0f) }
-    val threshold = with(LocalDensity.current) { 72.dp.toPx() }
-    val latestMove by rememberUpdatedState(onMove)
-    val offset by animateFloatAsState(drag.coerceIn(-threshold, threshold) * 0.2f, label = "agent-drag")
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-            .pointerInput(agentKey, threshold, canPrevious, canNext) {
-                detectHorizontalDragGestures(
-                    onDragStart = { drag = 0f },
-                    onHorizontalDrag = { change, amount -> change.consume(); drag += amount },
-                    onDragEnd = {
-                        if (drag > threshold && canPrevious) latestMove(-1)
-                        if (drag < -threshold && canNext) latestMove(1)
-                        drag = 0f
-                    },
-                    onDragCancel = { drag = 0f },
-                )
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        NeoIconButton(
-            glyph = NeoGlyph.ChevronRight,
-            onClick = { onMove(-1) },
-            contentDescription = stringResource(R.string.agent_prev),
-            enabled = canPrevious,
-            modifier = Modifier.rotate(180f),
-        )
-        Text("$position / $total", style = DsTypography.mono, color = colors.textSoft, modifier = Modifier.weight(1f).graphicsLayer { translationX = offset }, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        NeoIconButton(
-            glyph = NeoGlyph.ChevronRight,
-            onClick = { onMove(1) },
-            contentDescription = stringResource(R.string.agent_next),
-            enabled = canNext,
-        )
     }
 }
 
@@ -1161,8 +1131,8 @@ private fun SelectionSheet(text: String, onCopy: (String) -> Unit, onDismiss: ()
 private fun BackToBottomChip(visible: Boolean, unseen: Boolean, onClick: () -> Unit) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(140)) + scaleIn(tween(160), initialScale = 0.92f),
-        exit = fadeOut(tween(110)) + scaleOut(tween(120), targetScale = 0.92f),
+        enter = fadeIn(tween(motionMillis(140))) + scaleIn(tween(motionMillis(160)), initialScale = 0.92f),
+        exit = fadeOut(tween(motionMillis(110))) + scaleOut(tween(motionMillis(120)), targetScale = 0.92f),
     ) {
         NeoButton(
             label = if (unseen) stringResource(R.string.agent_back_to_bottom_new) else stringResource(R.string.agent_back_to_bottom),

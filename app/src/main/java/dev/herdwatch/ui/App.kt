@@ -37,6 +37,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.herdwatch.model.Screen
+import androidx.compose.ui.unit.dp
 
 private data class Tab(val label: String, val icon: dev.herdwatch.ui.design.NeoGlyph, val screen: Screen)
 
@@ -93,6 +94,13 @@ fun HerdwatchRoot(vm: AppViewModel) {
     }
     val showTabs = ui.screen == Screen.Inbox || ui.screen == Screen.Hosts || ui.screen == Screen.Settings
     val pageState = rememberSaveableStateHolder()
+    // Page transition durations, already scaled by the reduced-motion preference.
+    val txEnter = motionMillis(180)
+    val txFadeMid = motionMillis(160)
+    val txFadeShort = motionMillis(100)
+    val txExit = motionMillis(120)
+    val txSlide = motionMillis(240)
+    val txSlideOut = motionMillis(220)
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -104,11 +112,10 @@ fun HerdwatchRoot(vm: AppViewModel) {
         },
         floatingActionButton = {
             val showNewTask = ui.screen == Screen.Inbox && ui.repo.hosts.isNotEmpty()
-            val hasPendingApproval = ui.repo.agents.any { it.status == dev.herdwatch.model.AgentStatus.WAITING }
             AnimatedVisibility(
                 visible = showNewTask,
-                enter = scaleIn(tween(180)) + fadeIn(tween(140)),
-                exit = scaleOut(tween(120)) + fadeOut(tween(90)),
+                enter = scaleIn(tween(motionMillis(180))) + fadeIn(tween(motionMillis(140))),
+                exit = scaleOut(tween(motionMillis(120))) + fadeOut(tween(motionMillis(90))),
             ) {
                 // Same chassis language as the rest of the app: one lifted control, not a
                 // Material tonal pill with a ripple from a different design system.
@@ -132,11 +139,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
             }
         },
     ) { inner ->
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(bottom = inner.calculateBottomPadding()),
-        ) {
+        Box(Modifier.fillMaxSize()) {
             // The backdrop paints under the status bar too; only the content is inset. Insetting the
             // whole tree left the system bar showing the window's light background above a dark page.
             GlassBackdrop(Modifier.fillMaxSize())
@@ -144,12 +147,14 @@ fun HerdwatchRoot(vm: AppViewModel) {
                 targetState = ui.screen,
                 contentKey = { screen -> if (screen is Screen.Detail) "detail" else screen },
                 transitionSpec = {
+                    // Durations are resolved outside the lambda: transitionSpec is not a composable
+                    // scope, so the reduced-motion factor has to be applied before it runs.
                     when {
                         targetState is Screen.Detail && initialState !is Screen.Detail ->
-                            (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { it / 10 }) togetherWith fadeOut(tween(100))
+                            (fadeIn(tween(txEnter)) + slideInHorizontally(tween(txSlide)) { it / 10 }) togetherWith fadeOut(tween(txFadeShort))
                         initialState is Screen.Detail && targetState !is Screen.Detail ->
-                            fadeIn(tween(160)) togetherWith (fadeOut(tween(120)) + slideOutHorizontally(tween(220)) { it / 10 })
-                        else -> fadeIn(tween(160)) togetherWith fadeOut(tween(100))
+                            fadeIn(tween(txFadeMid)) togetherWith (fadeOut(tween(txExit)) + slideOutHorizontally(tween(txSlideOut)) { it / 10 })
+                        else -> fadeIn(tween(txFadeMid)) togetherWith fadeOut(tween(txFadeShort))
                     }
                 },
                 label = "screen",
@@ -165,12 +170,15 @@ fun HerdwatchRoot(vm: AppViewModel) {
                 }
                 // Full-screen surfaces own their own insets: the terminal page unions ime+nav bars
                 // on its root, so adding a top inset here would push its dock past the top edge.
-                val insets = if (screen is Screen.Terminal || screen is Screen.Detail) {
+                // For the same reason the scaffold's bottom inset is dropped for them: applying
+                // both left a dead strip of navigation bar under the terminal dock.
+                val ownsInsets = screen is Screen.Terminal || screen is Screen.Detail
+                val insets = if (ownsInsets) {
                     Modifier.fillMaxSize()
                 } else {
                     Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)
                 }
-                Box(insets) {
+                Box(insets.padding(bottom = if (ownsInsets) 0.dp else inner.calculateBottomPadding())) {
                 pageState.SaveableStateProvider(pageKey) {
                     when (screen) {
                         Screen.Inbox -> InboxScreen(
@@ -215,7 +223,6 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                     onFocusTab = { vm.focusTab(runtime.host.id, it) },
                                     onFocusWorkspace = { vm.focusWorkspace(runtime.host.id, it) },
                                     onStartAgent = { pane -> vm.openStartAgent(runtime.host.id, pane) },
-                                    onRestore = vm::restoreAgent,
                                     onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
                                     onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
                                     onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
@@ -256,9 +263,6 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onDraftChange = vm::setDraft,
                             onSendPrompt = { vm.sendPrompt(it) },
                             onSendKeys = vm::sendRawKeys,
-                            onSwipeAgent = vm::openAdjacentAgent,
-                            canOpenPrevious = ui.detail.canOpenPrevious,
-                            canOpenNext = ui.detail.canOpenNext,
                             onLoadMore = vm::loadMore,
                             onSetSnapshotLines = vm::setSnapshotLines,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },

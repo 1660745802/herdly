@@ -162,7 +162,6 @@ data class HostRuntime(
     val lastSyncAt: Long? = null,
     val fingerprint: String? = null,
     val structure: HerdStructure = HerdStructure(),
-    val restorable: List<Agent> = emptyList(),
 )
 
 sealed interface Screen {

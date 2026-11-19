@@ -29,6 +29,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Text
 import dev.herdwatch.R
+import dev.herdwatch.model.AgentStatus
+import dev.herdwatch.ui.theme.DarkStatusPalette
+import dev.herdwatch.ui.theme.LightStatusPalette
+import dev.herdwatch.ui.theme.LocalStatusPalette
+import dev.herdwatch.ui.theme.statusColor
 
 /**
  * Living style sheet. Every control in the app is drawn from these parts, so this screen is the
@@ -39,13 +44,20 @@ import dev.herdwatch.R
 fun StyleGalleryScreen(onBack: () -> Unit) {
     var dark by rememberSaveable { mutableStateOf(false) }
     val colors = if (dark) DsDark else DsLight
-    CompositionLocalProvider(LocalDs provides colors) {
+    // The gallery must show the colours the app really paints with, otherwise preview and product
+    // drift apart: the status row used to demo `colors.warn`/`colors.ok` while the queue, the
+    // machine tree and the agent header all use the status palette.
+    val palette = if (dark) DarkStatusPalette else LightStatusPalette
+    CompositionLocalProvider(
+        LocalDs provides colors,
+        LocalStatusPalette provides palette,
+    ) {
         Column(
             Modifier
                 .fillMaxSize()
                 .background(colors.base)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = DsSpace.l),
+                .padding(horizontal = spacing().gutter),
         ) {
             Spacer(Modifier.height(DsSpace.l))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -156,12 +168,17 @@ fun StyleGalleryScreen(onBack: () -> Unit) {
 
             Section(stringResource(R.string.gallery_section_status)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.l), verticalAlignment = Alignment.CenterVertically) {
-                    StatusSample(stringResource(R.string.gallery_status_waiting_you), colors.warn, pulse = false)
-                    StatusSample(stringResource(R.string.gallery_status_working), colors.accent, pulse = true)
-                    StatusSample(stringResource(R.string.gallery_status_idle), colors.ok, pulse = false)
-                    StatusSample(stringResource(R.string.gallery_status_unknown), colors.textFaint, pulse = false)
+                    StatusSample(stringResource(R.string.gallery_status_waiting_you), statusColor(AgentStatus.WAITING, palette), pulse = false)
+                    StatusSample(stringResource(R.string.gallery_status_working), statusColor(AgentStatus.WORKING, palette), pulse = true)
+                    StatusSample(stringResource(R.string.gallery_status_idle), statusColor(AgentStatus.IDLE, palette), pulse = false)
+                    StatusSample(stringResource(R.string.gallery_status_unknown), statusColor(AgentStatus.UNKNOWN, palette), pulse = false)
                 }
                 Spacer(Modifier.height(DsSpace.m))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    NeoSpinner(Modifier.size(16.dp))
+                    Text(stringResource(R.string.gallery_loading), style = DsTypography.caption, color = colors.textSoft)
+                }
+                Spacer(Modifier.height(DsSpace.s))
                 NeoSkeleton(Modifier.fillMaxWidth(0.7f))
                 Spacer(Modifier.height(DsSpace.s))
                 NeoSkeleton(Modifier.fillMaxWidth(0.45f))
@@ -191,7 +208,7 @@ fun StyleGalleryScreen(onBack: () -> Unit) {
                 NeoCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(DsSpace.l)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            NeoLamp(colors.warn, pulse = true)
+                            NeoLamp(statusColor(AgentStatus.WAITING, palette), pulse = true)
                             Column(Modifier.weight(1f).padding(start = DsSpace.s)) {
                                 Text("auth-service", style = DsTypography.bodyStrong, color = colors.text)
                                 Text(
@@ -209,6 +226,28 @@ fun StyleGalleryScreen(onBack: () -> Unit) {
                             color = colors.textFaint,
                         )
                     }
+                }
+            }
+
+            Section(stringResource(R.string.gallery_section_context)) {
+                // The two surfaces that must never be confused with each other: the agent
+                // decision view and the raw SSH session.
+                Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    NeoModeTag(stringResource(R.string.mode_agent_tag))
+                    NeoModeTag(stringResource(R.string.mode_terminal_tag))
+                }
+                Spacer(Modifier.height(DsSpace.s))
+                NeoEmptyState(
+                    icon = NeoGlyph.Tray,
+                    title = stringResource(R.string.gallery_empty_title),
+                    body = stringResource(R.string.gallery_empty_body),
+                ) {
+                    NeoButton(
+                        label = stringResource(R.string.gallery_action_view),
+                        onClick = {},
+                        tone = NeoButtonTone.Ghost,
+                        compact = true,
+                    )
                 }
             }
 

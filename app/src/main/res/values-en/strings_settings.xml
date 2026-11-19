@@ -26,7 +26,7 @@
     <string name="settings_motion_full">Full</string>
     <string name="settings_motion_reduced">Reduced</string>
     <string name="settings_density_title">Density</string>
-    <string name="settings_density_summary">Compact fits more on one screen</string>
+    <string name="settings_density_summary">Compact narrows the margins and tightens rows, so more tasks fit on screen</string>
     <string name="settings_density_comfortable">Cozy</string>
     <string name="settings_density_compact">Compact</string>
 

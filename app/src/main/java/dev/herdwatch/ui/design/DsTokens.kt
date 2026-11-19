@@ -155,6 +155,38 @@ object DsMotion {
     const val page: Int = 240
 }
 
+/**
+ * Page rhythm.
+ *
+ * Only the space *between* blocks follows this scale. Spacing inside a control (button padding,
+ * chip gaps, key bar padding) stays on [DsSpace] so that touch targets and text legibility never
+ * change with the density preference.
+ */
+@Immutable
+data class Spacing(
+    /** Side margin of a page. */
+    val gutter: Dp,
+    /** Gap between two blocks of a page. */
+    val block: Dp,
+    /** Vertical padding of one list row. */
+    val row: Dp,
+)
+
+object DsSpacing {
+    /** Default rhythm: one clear gutter, breathing room between rows. */
+    val comfortable = Spacing(gutter = 16.dp, block = 12.dp, row = 12.dp)
+
+    /** Tight rhythm for long queues: more rows on the same screen, same tap targets. */
+    val compact = Spacing(gutter = 12.dp, block = 8.dp, row = 8.dp)
+}
+
+/** Rhythm in effect for the current density preference. */
+val LocalSpacing = staticCompositionLocalOf { DsSpacing.comfortable }
+
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+fun spacing(): Spacing = LocalSpacing.current
+
 private val Sans = FontFamily.SansSerif
 private val Mono = FontFamily.Monospace
 

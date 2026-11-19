@@ -72,7 +72,6 @@ class HerdRepository internal constructor(
     private val versions = HashMap<String, Long>()
     private val mismatches = HashMap<String, HostKeyMismatchException>()
     private val marks = HashMap<String, Seen>()
-    private val remembered = HashMap<String, Agent>()
     private var refreshingGeneration: Long? = null
     private val networkSlots = Semaphore(4)
     private var generation = 0L
@@ -81,10 +80,7 @@ class HerdRepository internal constructor(
     private val cached = storedHosts.flatMap { host ->
         store.loadAgents(host.id).filter { it.hostId == host.id }.map { it.copy(hostLabel = host.label) }
     }.distinctBy { it.key }.also { agents ->
-        agents.forEach {
-            remembered[it.key] = it
-            marks[it.key] = Seen(it.status, it.sinceMillis)
-        }
+        agents.forEach { marks[it.key] = Seen(it.status, it.sinceMillis) }
     }
     private val _state = MutableStateFlow(RepoState(
         hosts = storedHosts.map { HostRuntime(it) },
@@ -186,7 +182,6 @@ class HerdRepository internal constructor(
                 storedHosts = updated
                 val old = invalidate(hostId)
                 marks.keys.removeAll { it.startsWith("$hostId:") }
-                remembered.entries.removeAll { it.value.hostId == hostId }
                 _state.update { s -> s.copy(
                     hosts = s.hosts.filterNot { it.host.id == hostId },
                     agents = s.agents.filterNot { it.hostId == hostId },
@@ -459,12 +454,8 @@ class HerdRepository internal constructor(
             marks[agent.key] = seen
             agent.copy(sinceMillis = seen.since)
         }
-        incoming.forEach { remembered[it.key] = it }
-        val paneIds = snapshot.structure.panes.map { it.id }.toSet()
-        remembered.entries.removeAll { it.value.hostId == hostId && it.value.paneId !in paneIds }
         val liveKeys = incoming.map { it.key }.toSet()
         marks.keys.removeAll { it.startsWith("$hostId:") && it !in liveKeys }
-        val restorable = remembered.values.filter { it.hostId == hostId && it.paneId in paneIds && it.key !in liveKeys }
         _state.update { s -> s.copy(
             agents = (s.agents.filterNot { it.hostId == hostId } + incoming).sortedWith(agentOrder),
             hosts = s.hosts.map { runtime -> if (runtime.host.id == hostId) runtime.copy(
@@ -472,11 +463,13 @@ class HerdRepository internal constructor(
                 agentCount = incoming.size,
                 waitingCount = incoming.count { it.status == AgentStatus.WAITING || it.status == AgentStatus.UNKNOWN },
                 lastSyncAt = now, fingerprint = fingerprint,
-                structure = snapshot.structure, restorable = restorable,
+                structure = snapshot.structure,
             ) else runtime },
             lastSyncAt = now,
         ) }
-        return remembered.values.filter { it.hostId == hostId }.toList()
+        // Cache only agents that are actually present in the latest successful snapshot.
+        // Stale/remembered agents are intentionally not persisted or offered for restore.
+        return incoming
     }
 
     private fun startPolling() = synchronized(gate) {

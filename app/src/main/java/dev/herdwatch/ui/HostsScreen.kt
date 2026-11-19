@@ -51,6 +51,7 @@ import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.NeoButton
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoEmptyState
 import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoGlyph
@@ -63,6 +64,8 @@ import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
+import dev.herdwatch.ui.theme.connStatusColor
+import dev.herdwatch.ui.design.spacing
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -109,7 +112,7 @@ fun HostsScreen(
             // Top padding is not cosmetic: the card's highlight is drawn outside its bounds, and
             // a LazyColumn clips at the viewport edge, so without it the first card's top rim is
             // sliced off (the inbox already had this breathing room).
-            contentPadding = PaddingValues(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.m, bottom = 108.dp),
+            contentPadding = PaddingValues(start = spacing().gutter, end = spacing().gutter, top = DsSpace.m, bottom = 108.dp),
             verticalArrangement = Arrangement.spacedBy(DsSpace.m),
         ) {
             if (hosts.isEmpty()) {
@@ -153,25 +156,17 @@ fun HostsScreen(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EmptyMachines(onAdd: () -> Unit) {
-    NeoCard(
-        modifier = Modifier.fillMaxWidth(),
-        depth = DsElev.soft,
+    NeoEmptyState(
+        icon = NeoGlyph.Terminal,
+        title = stringResource(R.string.hosts_empty_title),
+        body = stringResource(R.string.hosts_empty_body),
     ) {
-        Column(Modifier.padding(DsSpace.xxl), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
-            NeoWell(Modifier.size(56.dp), corner = DsRadius.control) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    NeoIcon(NeoGlyph.Terminal, modifier = Modifier.size(26.dp), tint = ds().accent, contentDescription = null)
-                }
-            }
-            Text(stringResource(R.string.hosts_empty_title), style = DsTypography.title, color = ds().text)
-            Text(stringResource(R.string.hosts_empty_body), style = DsTypography.body, color = ds().textSoft)
-            NeoButton(
-                label = stringResource(R.string.hosts_empty_action),
-                onClick = onAdd,
-                tone = NeoButtonTone.Primary,
-                icon = NeoGlyph.Plus,
-            )
-        }
+        NeoButton(
+            label = stringResource(R.string.hosts_empty_action),
+            onClick = onAdd,
+            tone = NeoButtonTone.Primary,
+            icon = NeoGlyph.Plus,
+        )
     }
 }
 
@@ -212,12 +207,7 @@ private fun HostCard(
         is ConnState.Failed -> stringResource(R.string.hosts_state_failed)
         ConnState.Idle -> stringResource(R.string.hosts_state_idle)
     }
-    val lampColor = when (conn) {
-        is ConnState.Connected -> colors.ok
-        ConnState.Connecting -> colors.warn
-        is ConnState.Failed -> colors.danger
-        ConnState.Idle -> colors.textFaint
-    }
+    val lampColor = connStatusColor(conn)
     val connected = conn is ConnState.Connected
     NeoCard(
         modifier = modifier.fillMaxWidth().semantics { stateDescription = stateLabel },

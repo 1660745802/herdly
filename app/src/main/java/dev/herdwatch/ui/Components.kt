@@ -60,6 +60,8 @@ import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.LocalReducedMotion
 import dev.herdwatch.ui.theme.statusPalette
+import dev.herdwatch.ui.theme.statusColor
+import dev.herdwatch.ui.theme.connStatusColor
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -176,12 +178,7 @@ fun LazyItemScope.animateItemMotion(): Modifier {
 fun AnimatedConnDot(state: ConnState, modifier: Modifier = Modifier, size: Dp = 8.dp) {
     val p = statusPalette()
     val colors = ds()
-    val target = when (state) {
-        is ConnState.Connected -> p.review
-        ConnState.Connecting -> p.working
-        is ConnState.Failed -> colors.danger
-        ConnState.Idle -> colors.textFaint
-    }
+    val target = connStatusColor(state)
     val color by animateColorAsState(
         targetValue = target,
         animationSpec = tween(motionMillis(220)),
@@ -193,8 +190,9 @@ fun AnimatedConnDot(state: ConnState, modifier: Modifier = Modifier, size: Dp = 
 @Composable
 fun StatusGlyph(status: AgentStatus, modifier: Modifier = Modifier, size: Int = 16) {
     val p = statusPalette()
-    // Idle, unknown and completed rows do not keep an animation clock alive.
-    val angle = if (status == AgentStatus.WORKING) {
+    // Idle, unknown and completed rows do not keep an animation clock alive. With animations
+    // turned off the working arc stays a static ring instead of spinning forever.
+    val angle = if (status == AgentStatus.WORKING && !LocalReducedMotion.current) {
         val spin = rememberInfiniteTransition(label = "status-spin")
         val rotation by spin.animateFloat(
             initialValue = 0f,
@@ -204,13 +202,7 @@ fun StatusGlyph(status: AgentStatus, modifier: Modifier = Modifier, size: Int = 
         )
         rotation
     } else 0f
-    val color = when (status) {
-        AgentStatus.WAITING -> p.waiting
-        AgentStatus.WORKING -> p.working
-        AgentStatus.REVIEW -> p.review
-        AgentStatus.IDLE -> p.idle
-        AgentStatus.UNKNOWN -> p.unknown
-    }
+    val color = statusColor(status, p)
     val statusDesc = stringResource(R.string.components_status_a11y, stringResource(status.labelRes))
     Canvas(modifier.size(size.dp).semantics { contentDescription = statusDesc }) {
         val s = this.size.minDimension

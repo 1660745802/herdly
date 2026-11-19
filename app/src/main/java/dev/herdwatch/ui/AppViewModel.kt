@@ -70,10 +70,6 @@ data class DetailState(
     val stale: Boolean = true,
     val readingPaused: Boolean = false,
     val snapshotLines: Int = 400,
-    val canOpenPrevious: Boolean = false,
-    val canOpenNext: Boolean = false,
-    val queuePosition: Int = 0,
-    val queueSize: Int = 0,
     val readingPosition: ReadingPosition = ReadingPosition(),
 )
 
@@ -129,7 +125,6 @@ class AppViewModel(
     private var readGeneration = 0L
     private var explainGeneration = 0L
     private val operations = OperationState()
-    private var traversal = emptyList<String>()
     private var structureOrigin: Screen = Screen.Hosts
     private val readingPositions = object : LinkedHashMap<String, ReadingPosition>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReadingPosition>?) = size > 80
@@ -167,8 +162,6 @@ class AppViewModel(
     private fun decorate(detail: DetailState, repo: RepoState = _ui.value.repo): DetailState {
         val agent = detail.agent ?: return detail
         val record = operations.record(agent.key)
-        val index = traversal.indexOf(agent.key)
-        val liveKeys = repo.agents.map { it.key }.toSet()
         val canSend = connected(agent, repo) && record?.inFlight != true && record?.verificationRequired != true
         return detail.copy(
             sending = record?.inFlight == true,
@@ -184,10 +177,6 @@ class AppViewModel(
                 (agent.status == AgentStatus.WAITING || agent.status == AgentStatus.UNKNOWN) &&
                 ApprovalPolicy.unavailable(evidence(detail)) == null &&
                 !operations.blocksApproval(agent.key, evidence(detail)),
-            canOpenPrevious = index > 0 && traversal.take(index).any { it in liveKeys },
-            canOpenNext = index >= 0 && traversal.drop(index + 1).any { it in liveKeys },
-            queuePosition = traversal.filter { it in liveKeys }.indexOf(agent.key) + 1,
-            queueSize = traversal.count { it in liveKeys },
         )
     }
 
@@ -295,7 +284,6 @@ class AppViewModel(
     fun back() {
         leavePage()
         if (_ui.value.screen is Screen.Terminal) terminal.close()
-        traversal = emptyList()
         val current = _ui.value.screen
         val destination = when (current) {
             is Screen.Structure -> structureOrigin
@@ -449,13 +437,6 @@ class AppViewModel(
         }
     }
 
-    fun restoreAgent(agent: Agent) {
-        val args = resumeArgs(agent.kind)
-        screenMutation(Str.get(R.string.vm_restore_accepted, agent.name)) {
-            repository.startAgent(agent.hostId, agent.paneId, agent.kind, agent.name, args).getOrThrow()
-        }
-    }
-
     fun createWorkspace(hostId: String) = structureAction(hostId, Str.get(R.string.vm_created_workspace)) {
         repository.createWorkspace(hostId, null)
     }
@@ -583,23 +564,9 @@ class AppViewModel(
             dev.herdwatch.domain.AgentKinds.resumeArgs(kind.lowercase())
     }
 
-    fun openAdjacentAgent(delta: Int) {
-        if (delta == 0) return
-        val current = _ui.value.detail.agent?.key ?: return
-        val index = traversal.indexOf(current)
-        if (index < 0) return
-        val candidates = if (delta > 0) traversal.drop(index + 1) else traversal.take(index).asReversed()
-        val live = _ui.value.repo.agents.associateBy { it.key }
-        val target = candidates.firstNotNullOfOrNull { live[it] } ?: return
-        showAgent(target)
-    }
-
     fun openAgent(agent: Agent, hostFilterId: String? = null) {
         val state = _ui.value
         val live = state.repo.agents.firstOrNull { it.key == agent.key } ?: return
-        val agents = state.repo.agents.filter { hostFilterId == null || it.hostId == hostFilterId }
-        traversal = inboxQueue(agents, state.filter, state.query).map { it.key }
-            .let { if (live.key in it) it else listOf(live.key) }
         showAgent(live)
     }
 

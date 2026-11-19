@@ -81,6 +81,7 @@ import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.NeoButton
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoEmptyState
 import dev.herdwatch.ui.design.NeoChip
 import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoGlyph
@@ -93,6 +94,15 @@ import dev.herdwatch.ui.design.NeoSkeleton
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import kotlinx.coroutines.delay
+import dev.herdwatch.ui.theme.agentStatusColor
+import dev.herdwatch.ui.theme.connStatusColor
+import dev.herdwatch.ui.design.spacing
+
+/**
+ * Height cap of the queue panel. Beyond this the panel scrolls on its own, so a long queue does
+ * not push the rest of the page off the screen and only the visible rows are composed.
+ */
+private val QueuePanelMaxHeight = 420.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,23 +139,24 @@ fun InboxScreen(
     val colors = ds()
 
     Column(Modifier.fillMaxSize()) {
-        val connected = ui.repo.hosts.count { it.conn is ConnState.Connected }
-        val connecting = ui.repo.hosts.any { it.conn is ConnState.Connecting }
+        // Header describes the whole queue, not the current search/filter result; otherwise
+        // typing a query would make the task summary appear to change.
+        val attentionForHeader = scopedAgents.count { isAttention(it) }
         NeoPageHeader(
             title = "Herdly",
+            // Connection state stays on the host strip and duty summary; repeating it here
+            // made the home header look like a status dashboard instead of a task list.
             subtitle = when {
                 ui.repo.hosts.isEmpty() -> stringResource(R.string.inbox_subtitle_pocket)
-                connecting && connected == 0 ->
-                    pluralStringResource(R.plurals.inbox_subtitle_connecting, agents.size, agents.size)
-                compact -> pluralStringResource(
-                    R.plurals.inbox_summary_hosts_online, ui.repo.hosts.size, connected, ui.repo.hosts.size,
-                )
+                scopedAgents.isEmpty() -> stringResource(R.string.inbox_empty_none_title)
                 else -> stringResource(
-                    R.string.inbox_summary_hosts_and_agents,
+                    R.string.inbox_header_summary,
                     pluralStringResource(
-                        R.plurals.inbox_summary_hosts_online, ui.repo.hosts.size, connected, ui.repo.hosts.size,
+                        R.plurals.inbox_attention_count, attentionForHeader, attentionForHeader,
                     ),
-                    pluralStringResource(R.plurals.inbox_count_agents, agents.size, agents.size),
+                    pluralStringResource(
+                        R.plurals.inbox_count_agents, scopedAgents.size, scopedAgents.size,
+                    ),
                 )
             },
             compact = compact,
@@ -206,14 +217,14 @@ fun InboxScreen(
                 label = stringResource(R.string.inbox_search_label),
                 clearDescription = stringResource(R.string.inbox_cd_clear_search),
                 focusRequester = searchFocus,
-                modifier = Modifier.fillMaxWidth().padding(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.s),
+                modifier = Modifier.fillMaxWidth().padding(start = spacing().gutter, end = spacing().gutter, top = DsSpace.s),
                 onSearch = { keyboard?.hide() },
             )
         }
 
         if (!ui.searching && ui.query.isNotBlank()) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl),
+                Modifier.fillMaxWidth().padding(horizontal = spacing().gutter),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 NeoButton(
@@ -239,7 +250,7 @@ fun InboxScreen(
         ) {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.m, bottom = 100.dp),
+            contentPadding = PaddingValues(start = spacing().gutter, end = spacing().gutter, top = DsSpace.m, bottom = 100.dp),
         ) {
             if (ui.repo.hosts.isNotEmpty()) {
                 val connecting = ui.repo.hosts.filter { it.conn == ConnState.Connecting }
@@ -282,7 +293,7 @@ fun InboxScreen(
                 }
                 if (scopedAgents.isEmpty() && (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })) {
                     item {
-                        InboxEmpty(
+                        NeoEmptyState(
                             icon = NeoGlyph.Tray,
                             title = stringResource(
                                 if (hostScope == null) R.string.inbox_empty_none_title else R.string.inbox_empty_host_title,
@@ -342,7 +353,7 @@ fun InboxScreen(
             if (ui.repo.hosts.isEmpty()) {
                 item {
                     val clipboard = LocalClipboardManager.current
-                    InboxEmpty(
+                    NeoEmptyState(
                         icon = NeoGlyph.Server,
                         title = stringResource(R.string.inbox_setup_title),
                         body = stringResource(R.string.inbox_setup_body),
@@ -406,17 +417,28 @@ fun InboxScreen(
 
             // One panel holding the queue. Extruding every row made a five-item list look like
             // five separate objects glued to the screen; rows are now lines on a single surface.
+            //
+            // The rows are composed lazily inside the panel: a busy fleet used to build one row per
+            // agent on every frame, whether or not the row was on screen. The inner list is capped
+            // in height so it never asks for an infinite box, and hands scrolling back to the page
+            // once the visible part of the queue is reached.
             item(key = "queue") {
                 NeoCard(modifier = Modifier.fillMaxWidth().padding(top = DsSpace.s), depth = DsElev.soft) {
-                    Column(Modifier.fillMaxWidth()) {
-                        filtered.forEachIndexed { index, agent ->
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = QueuePanelMaxHeight),
+                    ) {
+                        items(
+                            count = filtered.size,
+                            key = { index -> filtered[index].key },
+                        ) { index ->
+                            val agent = filtered[index]
                             AgentRow(
                                 agent,
                                 now,
                                 ui.repo.hosts.firstOrNull { it.host.id == agent.hostId },
                                 hostScoped = hostScope != null,
                             ) { onOpenAgent(agent, hostScope) }
-                            if (index != filtered.lastIndex) NeoDivider(inset = DsSpace.xl + DsSpace.m)
+                            if (index != filtered.lastIndex) NeoDivider(inset = DsSpace.l)
                         }
                     }
                 }
@@ -424,25 +446,18 @@ fun InboxScreen(
 
             if (filtered.isEmpty() && scopedAgents.isNotEmpty()) {
                 item {
-                    Column(Modifier.fillMaxWidth().padding(top = 36.dp, bottom = 24.dp)) {
-                        Text(
-                            stringResource(R.string.inbox_no_match_title),
-                            style = DsTypography.title,
-                            color = colors.text,
-                        )
-                        Spacer(Modifier.height(DsSpace.xs))
-                        Text(
-                            stringResource(
-                                when {
-                                    ui.query.isNotBlank() -> R.string.inbox_no_match_search_body
-                                    ui.filter == InboxFilter.ATTENTION -> R.string.inbox_no_match_attention_body
-                                    hostScope != null -> R.string.inbox_no_match_host_body
-                                    else -> R.string.inbox_no_match_none_body
-                                },
-                            ),
-                            style = DsTypography.body,
-                            color = colors.textSoft,
-                        )
+                    NeoEmptyState(
+                        icon = NeoGlyph.Search,
+                        title = stringResource(R.string.inbox_no_match_title),
+                        body = stringResource(
+                            when {
+                                ui.query.isNotBlank() -> R.string.inbox_no_match_search_body
+                                ui.filter == InboxFilter.ATTENTION -> R.string.inbox_no_match_attention_body
+                                hostScope != null -> R.string.inbox_no_match_host_body
+                                else -> R.string.inbox_no_match_none_body
+                            },
+                        ),
+                    ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
                             if (ui.filter == InboxFilter.ATTENTION) {
                                 NeoButton(
@@ -564,7 +579,7 @@ private fun HostStrip(
     val colors = ds()
     LazyRow(
         Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = DsSpace.xl),
+        contentPadding = PaddingValues(horizontal = spacing().gutter),
         horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
     ) {
         item(key = "all-hosts") {
@@ -586,13 +601,7 @@ private fun HostStrip(
                 host.conn is ConnState.Failed -> stringResource(R.string.inbox_host_offline)
                 else -> stringResource(R.string.inbox_host_disconnected)
             }
-            val dot = when {
-                waiting > 0 -> colors.danger
-                host.conn is ConnState.Connected -> colors.ok
-                host.conn is ConnState.Connecting -> colors.warn
-                host.conn is ConnState.Failed -> colors.danger
-                else -> colors.textFaint
-            }
+            val dot = if (waiting > 0) agentStatusColor(AgentStatus.WAITING) else connStatusColor(host.conn)
             HostFilterChip(
                 label = host.host.label,
                 selected = selectedHostId == host.host.id,
@@ -633,7 +642,8 @@ private fun DutySummary(
     selectedHostId: String?,
 ) {
     val colors = ds()
-    val waiting = agents.filter { it.status == AgentStatus.WAITING }
+    val attention = agents.filter { isAttention(it) }
+    val waiting = attention.filter { it.status == AgentStatus.WAITING }
     val unknownCount = agents.count { it.status == AgentStatus.UNKNOWN }
     val workingCount = agents.count { it.status == AgentStatus.WORKING }
     val reviewCount = agents.count { it.status == AgentStatus.REVIEW }
@@ -660,14 +670,14 @@ private fun DutySummary(
             verticalArrangement = Arrangement.spacedBy(DsSpace.s),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (waiting.isNotEmpty()) {
+                if (attention.isNotEmpty()) {
                     NeoLamp(color = colors.danger, size = 7.dp)
                     Spacer(Modifier.width(DsSpace.s))
                     // Count and label live in one plural so locales can place the space themselves
                     // ("2 need attention" vs "2需要处理"); concatenating them leaked "2Needs attention".
                     Text(
                         pluralStringResource(
-                            R.plurals.inbox_attention_count, waiting.size, waiting.size,
+                            R.plurals.inbox_attention_count, attention.size, attention.size,
                         ),
                         style = DsTypography.bodyStrong,
                         color = colors.text,
@@ -675,12 +685,14 @@ private fun DutySummary(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    NeoButton(
-                        label = stringResource(R.string.inbox_view),
-                        onClick = { onOpen(longest!!) },
-                        tone = NeoButtonTone.Ghost,
-                        compact = true,
-                    )
+                    longest?.let { oldest ->
+                        NeoButton(
+                            label = stringResource(R.string.inbox_view_oldest, oldest.name),
+                            onClick = { onOpen(oldest) },
+                            tone = NeoButtonTone.Ghost,
+                            compact = true,
+                        )
+                    }
                     // The wait duration keeps its own line: inline it used to ellipsize the whole row.
                 } else {
                     NeoLamp(color = if (failures.isNotEmpty()) colors.warn else colors.ok, size = 7.dp)
@@ -718,7 +730,7 @@ private fun DutySummary(
                     }
                 }
             }
-            if (waiting.isNotEmpty()) {
+            if (longest != null) {
                 // Second line of the same block, flush left with the count above it. Inline it used
                 // to ellipsize the whole row, and a leading "·" here read as a stray bullet.
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -803,53 +815,6 @@ private fun DutySummary(
     }
 }
 
-/**
- * Empty state used for both "nothing needs you" and "no machines yet".
- *
- * The icon and the action slot stay generic because the two situations read very differently:
- * a calm tray for "all quiet", a server for "you have not told us where anything is".
- */
-@Composable
-private fun InboxEmpty(
-    icon: NeoGlyph,
-    title: String,
-    body: String,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val colors = ds()
-    NeoWell(
-        modifier = Modifier.fillMaxWidth().padding(vertical = DsSpace.m),
-        corner = DsRadius.card,
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(DsSpace.xl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(DsSpace.s),
-        ) {
-            NeoIcon(
-                glyph = icon,
-                modifier = Modifier.size(32.dp),
-                tint = colors.textSoft,
-                strokeWidth = 1.6.dp,
-            )
-            Text(
-                title,
-                style = DsTypography.bodyStrong,
-                color = colors.text,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                body,
-                style = DsTypography.body,
-                color = colors.textSoft,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(DsSpace.xs))
-            content()
-        }
-    }
-}
-
 @Composable
 private fun AgentRow(
     agent: Agent,
@@ -860,19 +825,13 @@ private fun AgentRow(
 ) {
     val colors = ds()
     val statusDescription = stringResource(agent.status.labelRes)
-    val lamp = when (agent.status) {
-        AgentStatus.WAITING -> colors.danger
-        AgentStatus.WORKING -> colors.accent
-        AgentStatus.REVIEW -> colors.ok
-        AgentStatus.IDLE -> colors.textFaint
-        AgentStatus.UNKNOWN -> colors.textFaint
-    }
+    val lamp = agentStatusColor(agent.status)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { stateDescription = statusDescription }
-            .padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+            .padding(horizontal = DsSpace.l, vertical = spacing().row),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             NeoLamp(color = lamp, pulse = agent.status == AgentStatus.WORKING)

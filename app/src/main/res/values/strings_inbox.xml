@@ -1,17 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 收件箱：顶部标题栏 -->
-    <string name="inbox_subtitle_pocket">手机上的 Herdr 收件箱</string>
-    <plurals name="inbox_subtitle_connecting">
-        <item quantity="other">连接中 · %1$d 个 agent</item>
-    </plurals>
-    <plurals name="inbox_summary_hosts_online">
-        <item quantity="other">%1$d/%2$d 台在线</item>
-    </plurals>
+    <string name="inbox_subtitle_pocket">手机上的 Herdr 任务台</string>
     <plurals name="inbox_count_agents">
         <item quantity="other">%1$d 个 agent</item>
     </plurals>
-    <string name="inbox_summary_hosts_and_agents">%1$s · %2$s</string>
+    <!-- %1$s：待处理数短语；%2$s：agent 数短语。连接状态不在这里重复。 -->
+    <string name="inbox_header_summary">%1$s · %2$s</string>
 
     <!-- 收件箱：搜索 -->
     <string name="inbox_cd_search">搜索</string>
@@ -44,7 +39,8 @@
     <!-- 收件箱：值守摘要 -->
     <string name="inbox_filter_attention">需要处理</string>
     <string name="inbox_filter_all">全部 Agent</string>
-    <string name="inbox_view">查看</string>
+    <!-- %1$s：等待最久的 agent 名称 -->
+    <string name="inbox_view_oldest">打开 %1$s</string>
     <string name="inbox_longest_waiting">最久 %1$s</string>
     <string name="inbox_longest_waiting_snapshot">最久 %1$s · 快照</string>
     <string name="inbox_some_hosts_offline">部分机器未连接</string>

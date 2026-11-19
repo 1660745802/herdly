@@ -170,7 +170,7 @@ fun NewTaskSheet(
             }
             Spacer(Modifier.height(12.dp))
 
-            Text("Agent", style = DsTypography.micro, color = colors.textSoft)
+            Text(stringResource(R.string.common_agent), style = DsTypography.micro, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 6.dp)) {
                 items(dev.herdwatch.domain.AgentKinds.common) { k ->
                     NeoChip(

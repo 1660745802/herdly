@@ -11,6 +11,9 @@
     <string name="gallery_section_icons">图标</string>
     <string name="gallery_section_type">字体</string>
     <string name="gallery_section_density">信息密度</string>
+    <string name="gallery_section_context">场景标记与空状态</string>
+    <string name="gallery_empty_title">现在没有需要你处理的事</string>
+    <string name="gallery_empty_body">新的审批会自己出现在这里。</string>
     <string name="gallery_raised_title">抬起 · chassis</string>
     <string name="gallery_raised_body">卡片、按钮、按键都从面板抬起；阴影由两层同心圆角矩形合成，深色在右下、高光在左上。</string>
     <string name="gallery_well_title">凹陷 · milled</string>
@@ -30,6 +33,7 @@
     <string name="gallery_toggle_disabled_example">禁用示例</string>
     <string name="gallery_field_label">发送到 p1</string>
     <string name="gallery_field_hint">输入命令或说明</string>
+    <string name="gallery_loading">加载中</string>
     <string name="gallery_status_waiting_you">等待你</string>
     <string name="gallery_status_working">进行中</string>
     <string name="gallery_status_idle">空闲</string>

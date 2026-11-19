@@ -69,8 +69,8 @@
     <string name="structure_start_pane">启动</string>
     <string name="structure_pane_idle_shell">空闲 shell</string>
     <string name="structure_pane_unverified">未核实分屏</string>
-    <!-- %1$s：分屏标题；%2$s：分屏种类或可用性 -->
-    <string name="structure_pane_meta">%1$s · %2$s</string>
+    <!-- %1$s：层级标签；%2$s：分屏标题；%3$s：分屏种类或可用性 -->
+    <string name="structure_pane_meta">%1$s · %2$s · %3$s</string>
     <!-- %1$s：分屏数量短语；%2$s：标签页状态 -->
     <string name="structure_tab_meta">%1$s · %2$s</string>
 

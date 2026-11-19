@@ -1,20 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Inbox: header -->
-    <string name="inbox_subtitle_pocket">Herdr inbox on your phone</string>
-    <plurals name="inbox_subtitle_connecting">
-        <item quantity="one">Connecting · %1$d agent</item>
-        <item quantity="other">Connecting · %1$d agents</item>
-    </plurals>
-    <plurals name="inbox_summary_hosts_online">
-        <item quantity="one">%1$d/%2$d host online</item>
-        <item quantity="other">%1$d/%2$d hosts online</item>
-    </plurals>
+    <string name="inbox_subtitle_pocket">Herdr tasks on your phone</string>
     <plurals name="inbox_count_agents">
         <item quantity="one">%1$d agent</item>
         <item quantity="other">%1$d agents</item>
     </plurals>
-    <string name="inbox_summary_hosts_and_agents">%1$s · %2$s</string>
+    <!-- %1$s: needs-attention phrase; %2$s: agent count phrase. Connection status lives elsewhere. -->
+    <string name="inbox_header_summary">%1$s · %2$s</string>
 
     <!-- Inbox: search -->
     <string name="inbox_cd_search">Search</string>
@@ -48,7 +41,8 @@
     <!-- Inbox: duty summary -->
     <string name="inbox_filter_attention">Needs attention</string>
     <string name="inbox_filter_all">All agents</string>
-    <string name="inbox_view">View</string>
+    <!-- %1$s: name of the longest-waiting agent -->
+    <string name="inbox_view_oldest">Open %1$s</string>
     <string name="inbox_longest_waiting">wait %1$s</string>
     <string name="inbox_longest_waiting_snapshot">wait %1$s · snapshot</string>
     <string name="inbox_some_hosts_offline">Some machines are not connected</string>

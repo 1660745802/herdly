@@ -51,7 +51,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
@@ -68,6 +67,7 @@ import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.NeoButton
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoEmptyState
 import dev.herdwatch.ui.design.NeoChip
 import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoDivider
@@ -77,10 +77,14 @@ import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
 import dev.herdwatch.ui.design.NeoMenu
 import dev.herdwatch.ui.design.NeoMenuItem
+import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoSheet
 import dev.herdwatch.ui.design.NeoToggle
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.statusPalette
+import dev.herdwatch.ui.theme.statusColor
+import dev.herdwatch.ui.design.spacing
+import androidx.compose.ui.semantics.Role
 
 @Composable
 fun StructureScreen(
@@ -97,7 +101,6 @@ fun StructureScreen(
     onFocusTab: (String) -> Unit,
     onFocusWorkspace: (String) -> Unit,
     onStartAgent: (String?) -> Unit,
-    onRestore: (Agent) -> Unit,
     onRenameWorkspace: (String, String) -> Unit,
     onRenameTab: (String, String) -> Unit,
     onRenamePane: (String, String) -> Unit,
@@ -116,66 +119,68 @@ fun StructureScreen(
         return listOfNotNull(runtime.host.label, workspace?.label, tab?.label, pane?.let { "${it.title.ifBlank { it.id }} (${it.id})" }, pane?.cwd ?: workspace?.worktreePath).joinToString("\n")
     }
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = DsSpace.m, end = DsSpace.m, top = DsSpace.xs, bottom = DsSpace.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NeoIconButton(
-                glyph = NeoGlyph.Back,
-                onClick = onBack,
-                contentDescription = stringResource(R.string.common_back),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(runtime.host.label, style = DsTypography.title, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    stringResource(R.string.structure_header_breadcrumb),
-                    style = DsTypography.micro,
-                    color = colors.textFaint,
+        NeoPageHeader(
+            title = runtime.host.label,
+            subtitle = stringResource(R.string.structure_header_breadcrumb),
+            onBack = onBack,
+            actions = {
+                NeoIconButton(
+                    glyph = NeoGlyph.Refresh,
+                    onClick = onRefresh,
+                    contentDescription = stringResource(R.string.common_refresh),
+                    enabled = !runtime.conn.isConnecting(),
                 )
-            }
-            NeoIconButton(
-                glyph = NeoGlyph.Refresh,
-                onClick = onRefresh,
-                contentDescription = stringResource(R.string.common_refresh),
-                enabled = !runtime.conn.isConnecting(),
-            )
-        }
+            },
+        )
 
         if (runtime.conn is ConnState.Failed) {
-            Text(
-                runtime.conn.message,
-                style = DsTypography.body,
-                color = colors.danger,
-                modifier = Modifier.padding(horizontal = DsSpace.xl, vertical = DsSpace.xs),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = DsSpace.l, vertical = DsSpace.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    runtime.conn.message,
+                    style = DsTypography.caption,
+                    color = colors.danger,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                NeoButton(
+                    label = stringResource(R.string.common_reconnect),
+                    onClick = onRefresh,
+                    tone = NeoButtonTone.Quiet,
+                    compact = true,
+                )
+            }
         }
 
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(start = DsSpace.l, end = DsSpace.l, bottom = DsSpace.xxl),
-            verticalArrangement = Arrangement.spacedBy(DsSpace.m),
+            // The first card's raised top rim needs room; otherwise the header/tab above clips it.
+            contentPadding = PaddingValues(
+                start = spacing().gutter, top = DsSpace.m, end = spacing().gutter, bottom = DsSpace.xxl,
+            ),
+            verticalArrangement = Arrangement.spacedBy(spacing().block),
         ) {
             item {
                 SummaryCard(runtime, showShells, availablePaneIds.size, currentAgents != null, onCreateWorkspace, onStartAgent) { showShells = !showShells }
             }
-            if (runtime.restorable.isNotEmpty()) {
-                item { RestoreCard(runtime.restorable, onRestore) }
-            }
             if (structure.workspaces.isEmpty()) {
                 item {
-                    // 空状态也是一张卡片：标题、说明、主行动按钮复用同一套材质。
-                    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
-                        Column(Modifier.padding(DsSpace.xxl), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
-                            Text(stringResource(R.string.structure_empty_title), style = DsTypography.title, color = colors.text)
-                            Text(stringResource(R.string.structure_empty_body), style = DsTypography.body, color = colors.textSoft)
-                            NeoButton(
-                                label = stringResource(R.string.structure_new_workspace),
-                                onClick = onCreateWorkspace,
-                                tone = NeoButtonTone.Primary,
-                                icon = NeoGlyph.Plus,
-                                enabled = runtime.conn is ConnState.Connected,
-                            )
-                        }
+                    // 空状态也用同一套组件：图标、标题、说明、主行动按钮。
+                    NeoEmptyState(
+                        icon = NeoGlyph.Tray,
+                        title = stringResource(R.string.structure_empty_title),
+                        body = stringResource(R.string.structure_empty_body),
+                    ) {
+                        NeoButton(
+                            label = stringResource(R.string.structure_new_workspace),
+                            onClick = onCreateWorkspace,
+                            tone = NeoButtonTone.Primary,
+                            icon = NeoGlyph.Plus,
+                            enabled = runtime.conn is ConnState.Connected,
+                        )
                     }
                 }
             }
@@ -368,44 +373,6 @@ private fun SummaryCard(
 }
 
 @Composable
-private fun RestoreCard(agents: List<Agent>, onRestore: (Agent) -> Unit) {
-    val p = statusPalette()
-    val colors = ds()
-    // 等待色的浅底仍然走状态调色板（语义色），形制交给卡片材质。
-    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft, fill = p.waitingWash) {
-        Column(Modifier.padding(DsSpace.l)) {
-            Text(stringResource(R.string.structure_restore_title), style = DsTypography.headline, color = p.waiting)
-            Text(
-                stringResource(R.string.structure_restore_body),
-                style = DsTypography.caption,
-                color = colors.textSoft,
-            )
-            Spacer(Modifier.height(DsSpace.s))
-            agents.forEach { agent ->
-                Row(Modifier.fillMaxWidth().padding(vertical = DsSpace.xxs), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(agent.name, style = DsTypography.body, color = colors.text)
-                        Text(
-                            listOfNotNull(agent.hostLabel, agent.workspaceLabel, agent.tabLabel, agent.paneId, agent.cwd).joinToString(" / "),
-                            style = DsTypography.caption,
-                            color = colors.textSoft,
-                        )
-                    }
-                    Text(agent.kind, style = DsTypography.mono.copy(fontSize = 11.sp), color = colors.textFaint)
-                    Spacer(Modifier.width(DsSpace.s))
-                    NeoButton(
-                        label = stringResource(R.string.structure_restore_action),
-                        onClick = { onRestore(agent) },
-                        tone = NeoButtonTone.Quiet,
-                        compact = true,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun WorkspaceCard(
     workspace: HerdWorkspace,
     structure: HerdStructure,
@@ -434,10 +401,11 @@ private fun WorkspaceCard(
     val colors = ds()
     NeoCard(modifier = modifier.fillMaxWidth(), depth = DsElev.soft) {
         Column(Modifier.padding(DsSpace.l)) {
+            Text(stringResource(R.string.structure_type_workspace), style = DsTypography.micro, color = colors.textFaint)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "W${workspace.number}",
-                    style = DsTypography.mono.copy(fontSize = 11.sp),
+                    style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
                     color = colors.textFaint,
                 )
                 Spacer(Modifier.width(DsSpace.s))
@@ -480,7 +448,7 @@ private fun WorkspaceCard(
                         append(repo)
                         workspace.worktreePath?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
                     },
-                    style = DsTypography.mono.copy(fontSize = 10.5.sp),
+                    style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
                     color = colors.textFaint,
                     modifier = Modifier.padding(top = DsSpace.xxs),
                 )
@@ -551,8 +519,9 @@ private fun TabBlock(
     val collapsedState = stringResource(R.string.structure_state_collapsed)
     val colors = ds()
     Column(
-        Modifier.fillMaxWidth().padding(top = DsSpace.s),
+        Modifier.fillMaxWidth().padding(top = DsSpace.s, start = DsSpace.s),
     ) {
+        Text(stringResource(R.string.structure_type_tab), style = DsTypography.micro, color = colors.textFaint)
         Row(verticalAlignment = Alignment.CenterVertically) {
             AnimatedStatusDot(tab.status, 6.dp)
             Spacer(Modifier.width(DsSpace.s))
@@ -653,7 +622,7 @@ private fun PaneRow(
     val paneStatusLabel = stringResource(pane.status.labelRes)
     val colors = ds()
     Row(
-        Modifier.fillMaxWidth().clickable(onClickLabel = stringResource(R.string.structure_focus_pane_label, paneLabel)) { onFocusPane(pane.id) }
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.structure_focus_pane_label, paneLabel)) { onFocusPane(pane.id) }
             .semantics { stateDescription = paneStatusLabel }.heightIn(min = 48.dp).padding(vertical = DsSpace.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -661,7 +630,12 @@ private fun PaneRow(
         Spacer(Modifier.width(DsSpace.s))
         Column(Modifier.weight(1f)) {
             Text(
-                stringResource(R.string.structure_pane_meta, paneLabel, paneKindLabel),
+                stringResource(
+                    R.string.structure_pane_meta,
+                    stringResource(R.string.structure_type_pane),
+                    paneLabel,
+                    paneKindLabel,
+                ),
                 style = DsTypography.body,
                 color = colors.text,
                 maxLines = 1,
@@ -674,7 +648,7 @@ private fun PaneRow(
                     pane.cwd,
                     pane.restoreError?.let { restoreFailedLabel },
                 ).joinToString(" · "),
-                style = DsTypography.mono.copy(fontSize = 10.5.sp),
+                style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
                 color = if (pane.restoreError != null) colors.danger else colors.textSoft,
             )
         }
@@ -759,13 +733,6 @@ private fun AnimatedStatusDot(status: AgentStatus, size: Dp) {
     Box(Modifier.size(size).background(color, CircleShape))
 }
 
-private fun statusColor(status: AgentStatus, p: dev.herdwatch.ui.theme.StatusPalette) = when (status) {
-    AgentStatus.WAITING -> p.waiting
-    AgentStatus.WORKING -> p.working
-    AgentStatus.REVIEW -> p.review
-    AgentStatus.IDLE -> p.idle
-    AgentStatus.UNKNOWN -> p.unknown
-}
 
 @Composable
 fun StartAgentSheet(
@@ -849,7 +816,7 @@ fun StartAgentSheet(
                 )
             }
             Spacer(Modifier.height(DsSpace.s))
-            Text("Agent", style = DsTypography.caption, color = colors.textSoft)
+            Text(stringResource(R.string.common_agent), style = DsTypography.caption, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s), modifier = Modifier.padding(vertical = DsSpace.xs)) {
                 items(dev.herdwatch.domain.AgentKinds.common) { k ->
                     NeoChip(label = k, selected = kind == k, onClick = { applyKind(k) })

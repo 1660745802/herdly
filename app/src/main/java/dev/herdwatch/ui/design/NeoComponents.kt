@@ -1,7 +1,11 @@
 package dev.herdwatch.ui.design
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -11,6 +15,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -19,10 +24,14 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -44,10 +53,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -59,8 +75,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.herdwatch.R
+import dev.herdwatch.ui.motionMillis
+import dev.herdwatch.ui.theme.LocalReducedMotion
 
 /**
  * The component library. Every control is drawn from the same three materials:
@@ -83,7 +103,7 @@ fun NeoCard(
     val pressed by interaction.collectIsPressedAsState()
     val sink by animateFloatAsState(
         targetValue = if (pressed && onClick != null) 1f else 0f,
-        animationSpec = tween(DsMotion.press),
+        animationSpec = tween(motionMillis(DsMotion.press)),
         label = "cardSink",
     )
     val clickable = if (onClick == null) {
@@ -135,7 +155,7 @@ fun NeoButton(
     val pressed by interaction.collectIsPressedAsState()
     val sink by animateFloatAsState(
         targetValue = if (pressed && enabled) 1f else 0f,
-        animationSpec = tween(DsMotion.press),
+        animationSpec = tween(motionMillis(DsMotion.press)),
         label = "buttonSink",
     )
     val baseFill = when (tone) {
@@ -247,7 +267,7 @@ fun NeoSegmented(
     val segmentDp = with(density) { segmentPx.toDp() }
     val thumbOffset by animateFloatAsState(
         targetValue = selectedIndex.coerceIn(0, options.lastIndex) * segmentPx,
-        animationSpec = tween(DsMotion.base),
+        animationSpec = tween(motionMillis(DsMotion.base)),
         label = "segmentThumb",
     )
     Box(
@@ -261,7 +281,7 @@ fun NeoSegmented(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(56.dp)
                 .onSizeChanged { trackWidth = it.width },
         ) {
             if (segmentPx > 0f) {
@@ -273,18 +293,18 @@ fun NeoSegmented(
                         .neoRaised(DsRadius.control - 4.dp, DsElev.soft, colors.baseRaised, colors),
                 )
             }
-            Row(Modifier.fillMaxWidth().height(44.dp)) {
+            Row(Modifier.fillMaxWidth().height(48.dp)) {
                 options.forEachIndexed { index, label ->
                     val selected = index == selectedIndex
                     val textColor by animateColorAsState(
                         targetValue = if (selected) colors.text else colors.textSoft,
-                        animationSpec = tween(DsMotion.quick),
+                        animationSpec = tween(motionMillis(DsMotion.quick)),
                         label = "segmentText",
                     )
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(44.dp)
+                            .height(48.dp)
                             .clip(RoundedCornerShape(DsRadius.control - 3.dp))
                             .clickable(role = Role.Tab) { onSelect(index) }
                             .semantics { this.selected = selected },
@@ -318,12 +338,12 @@ fun NeoToggle(
     val colors = ds()
     val progress by animateFloatAsState(
         targetValue = if (checked) 1f else 0f,
-        animationSpec = tween(DsMotion.base),
+        animationSpec = tween(motionMillis(DsMotion.base)),
         label = "toggleProgress",
     )
     val trackFill by animateColorAsState(
         targetValue = if (checked) colors.accent else colors.well,
-        animationSpec = tween(DsMotion.base),
+        animationSpec = tween(motionMillis(DsMotion.base)),
         label = "toggleTrack",
     )
     Row(
@@ -379,7 +399,9 @@ fun NeoField(
     val colors = ds()
     Column(modifier, verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
         if (label != null) {
-            Text(label, style = DsTypography.caption, color = colors.textSoft)
+            // The visible caption is decoration for sighted users; the field itself carries the
+            // label, so a screen reader announces "name, edit box" instead of a stray caption.
+            Text(label, style = DsTypography.caption, color = colors.textSoft, modifier = Modifier.clearAndSetSemantics { })
         }
         BasicTextField(
             value = value,
@@ -394,6 +416,7 @@ fun NeoField(
             visualTransformation = visualTransformation,
             modifier = Modifier
                 .fillMaxWidth()
+                .semantics { if (label != null) contentDescription = label }
                 .neoInset(DsRadius.control, DsElev.inset, colors.well, colors)
                 .clip(RoundedCornerShape(DsRadius.control))
                 .padding(horizontal = DsSpace.l, vertical = DsSpace.m),
@@ -427,22 +450,22 @@ fun NeoChip(
     val pressed by interaction.collectIsPressedAsState()
     val sink by animateFloatAsState(
         targetValue = if (pressed) 1f else if (selected) 0.65f else 0f,
-        animationSpec = tween(DsMotion.press),
+        animationSpec = tween(motionMillis(DsMotion.press)),
         label = "chipSink",
     )
     val fill by animateColorAsState(
         targetValue = if (selected) colors.baseRaised else colors.base,
-        animationSpec = tween(DsMotion.quick),
+        animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipFill",
     )
     val textColor by animateColorAsState(
         targetValue = if (selected) colors.text else colors.textSoft,
-        animationSpec = tween(DsMotion.quick),
+        animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipText",
     )
     Row(
         modifier = modifier
-            .defaultMinSize(minHeight = 44.dp)
+            .defaultMinSize(minHeight = 48.dp)
             .neoState(DsRadius.pill, DsElev.soft, fill, colors, sink)
             .clip(RoundedCornerShape(DsRadius.pill))
             .clickable(interactionSource = interaction, indication = null, role = Role.Tab) { onClick() }
@@ -468,7 +491,7 @@ fun NeoLamp(color: Color, modifier: Modifier = Modifier, pulse: Boolean = false,
     val colors = ds()
     val alpha by animateFloatAsState(
         targetValue = if (pulse) 0.45f else 0.22f,
-        animationSpec = tween(DsMotion.page),
+        animationSpec = tween(motionMillis(DsMotion.page)),
         label = "lampWash",
     )
     Box(modifier.size(size * 2.4f), contentAlignment = Alignment.Center) {
@@ -500,18 +523,18 @@ fun NeoKey(
     val pressed by interaction.collectIsPressedAsState()
     val sink by animateFloatAsState(
         targetValue = if (pressed || active) 1f else 0f,
-        animationSpec = tween(DsMotion.press),
+        animationSpec = tween(motionMillis(DsMotion.press)),
         label = "keySink",
     )
     val fill by animateColorAsState(
         targetValue = if (active) colors.accentWash else colors.base,
-        animationSpec = tween(DsMotion.quick),
+        animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "keyFill",
     )
     Box(
         modifier = modifier
-            .height(44.dp)
-            .then(if (wide) Modifier.width(64.dp) else Modifier.width(46.dp))
+            .height(48.dp)
+            .then(if (wide) Modifier.width(64.dp) else Modifier.width(48.dp))
             .neoState(DsRadius.key, DsElev.soft, fill, colors, sink)
             .clip(RoundedCornerShape(DsRadius.key))
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onPress),
@@ -573,6 +596,109 @@ fun NeoDivider(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
 fun SpacerHeight(height: Dp) = Spacer(Modifier.height(height))
 
 /**
+ * The one loading indicator.
+ *
+ * Material's spinner is a bright accent ring that reads like a different product dropped next to
+ * the matte chassis, and it kept spinning even when the system asked for reduced motion. This is
+ * a thin arc in the ink of the surrounding panel, and it holds still when motion is reduced.
+ *
+ * It is decorative on purpose: the text next to it ("正在读取屏幕") is what a screen reader
+ * should announce.
+ */
+@Composable
+fun NeoSpinner(
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp,
+    color: Color? = null,
+    strokeWidth: Dp = 2.dp,
+) {
+    val colors = ds()
+    val ink = color ?: colors.textSoft
+    val angle = if (!LocalReducedMotion.current) {
+        val spin = rememberInfiniteTransition(label = "spinner")
+        val rotation by spin.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing)),
+            label = "angle",
+        )
+        rotation
+    } else {
+        0f
+    }
+    Canvas(modifier.size(size)) {
+        val s = this.size.minDimension
+        val stroke = strokeWidth.toPx()
+        val r = s / 2 - stroke / 2
+        val c = Offset(s / 2, s / 2)
+        drawCircle(ink.copy(alpha = 0.22f), radius = r, center = c, style = Stroke(stroke))
+        drawArc(
+            color = ink,
+            startAngle = -90f + angle,
+            sweepAngle = 260f,
+            useCenter = false,
+            topLeft = Offset(c.x - r, c.y - r),
+            size = Size(r * 2, r * 2),
+            style = Stroke(stroke, cap = StrokeCap.Round),
+        )
+    }
+}
+
+/**
+ * The one empty state.
+ *
+ * Every screen that has nothing to show used to draw its own: a well here, a bare column there,
+ * a different icon, different padding. The result was four slightly different voices for the same
+ * message ("nothing here yet"). This is that message, drawn once: a quiet well, one glyph, a title,
+ * one line of guidance, and an optional action row.
+ */
+@Composable
+fun NeoEmptyState(
+    icon: NeoGlyph,
+    title: String,
+    body: String? = null,
+    modifier: Modifier = Modifier,
+    action: (@Composable ColumnScope.() -> Unit)? = null,
+) {
+    val colors = ds()
+    NeoWell(
+        modifier = modifier.fillMaxWidth().padding(vertical = DsSpace.s),
+        corner = DsRadius.card,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(DsSpace.xl),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(DsSpace.s),
+        ) {
+            NeoIcon(
+                glyph = icon,
+                modifier = Modifier.size(32.dp),
+                tint = colors.textSoft,
+                strokeWidth = 1.6.dp,
+            )
+            Text(
+                title,
+                style = DsTypography.bodyStrong,
+                color = colors.text,
+                textAlign = TextAlign.Center,
+            )
+            if (!body.isNullOrBlank()) {
+                Text(
+                    body,
+                    style = DsTypography.body,
+                    color = colors.textSoft,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (action != null) {
+                Spacer(Modifier.height(DsSpace.xs))
+                action()
+            }
+        }
+    }
+}
+
+/**
  * Bottom navigation drawn from the same chassis as everything else.
  *
  * Material's NavigationBar arrived as a flat tinted slab with a pill behind the active icon, which
@@ -605,14 +731,14 @@ fun NeoTabBar(
                         selected -> colors.accent
                         else -> colors.textSoft
                     },
-                    animationSpec = tween(DsMotion.quick),
+                    animationSpec = tween(motionMillis(DsMotion.quick)),
                     label = "tabTint",
                 )
                 // Selection is carried by colour and weight only. A milled well behind one third
                 // of the bar looked like a button that had been left pressed.
                 val wash by animateFloatAsState(
                     targetValue = if (selected) 1f else 0f,
-                    animationSpec = tween(DsMotion.quick),
+                    animationSpec = tween(motionMillis(DsMotion.quick)),
                     label = "tabWash",
                 )
                 Box(
@@ -679,41 +805,58 @@ fun NeoDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl), contentAlignment = Alignment.Center) {
-            Column(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .neoRaised(DsRadius.card, DsElev.deep, colors.baseRaised, colors)
-                    .clip(RoundedCornerShape(DsRadius.card))
-                    .padding(DsSpace.xl),
-                verticalArrangement = Arrangement.spacedBy(DsSpace.m),
-            ) {
-                Text(title, style = DsTypography.title, color = colors.text)
-                if (subtitle != null) {
-                    Text(subtitle, style = DsTypography.body, color = colors.textSoft)
-                }
-                content?.invoke(this)
-                Row(
-                    Modifier.fillMaxWidth().padding(top = DsSpace.xs),
-                    horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier.fillMaxWidth().imePadding().padding(horizontal = DsSpace.xl),
+            contentAlignment = Alignment.Center,
+        ) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                // Short landscape windows get a proportionally smaller dialog instead of a fixed
+                // 560dp slab that would run under the keyboard or off the bottom of the screen.
+                val maxDialogHeight = maxHeight * 0.85f
+                Column(
+                    modifier = modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxDialogHeight)
+                        .neoRaised(DsRadius.card, DsElev.deep, colors.baseRaised, colors)
+                        .clip(RoundedCornerShape(DsRadius.card))
+                        .padding(DsSpace.xl),
+                    verticalArrangement = Arrangement.spacedBy(DsSpace.m),
                 ) {
-                    if (dismissLabel != null) {
-                        NeoButton(
-                            label = dismissLabel,
-                            onClick = onDismissRequest,
-                            tone = NeoButtonTone.Ghost,
-                            compact = true,
-                        )
+                    Text(title, style = DsTypography.title, color = colors.text)
+                    if (subtitle != null) {
+                        Text(subtitle, style = DsTypography.body, color = colors.textSoft)
                     }
-                    if (confirmLabel != null && onConfirm != null) {
-                        NeoButton(
-                            label = confirmLabel,
-                            onClick = onConfirm,
-                            tone = if (destructive) NeoButtonTone.Danger else NeoButtonTone.Primary,
-                            enabled = confirmEnabled,
-                            compact = true,
-                        )
+                    // Only the body scrolls; the action row stays pinned to the footer.
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .heightIn(max = (maxDialogHeight - 160.dp).coerceAtLeast(64.dp))
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(DsSpace.m),
+                    ) {
+                        content?.invoke(this)
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = DsSpace.xs),
+                        horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (dismissLabel != null) {
+                            NeoButton(
+                                label = dismissLabel,
+                                onClick = onDismissRequest,
+                                tone = NeoButtonTone.Ghost,
+                                compact = true,
+                            )
+                        }
+                        if (confirmLabel != null && onConfirm != null) {
+                            NeoButton(
+                                label = confirmLabel,
+                                onClick = onConfirm,
+                                tone = if (destructive) NeoButtonTone.Danger else NeoButtonTone.Primary,
+                                enabled = confirmEnabled,
+                                compact = true,
+                            )
+                        }
                     }
                 }
             }
@@ -868,6 +1011,22 @@ fun NeoSnackbarBody(
     }
 }
 
+/** A quiet tag that makes the current interaction mode unmistakable (agent decisions vs SSH). */
+@Composable
+fun NeoModeTag(text: String, modifier: Modifier = Modifier) {
+    val colors = ds()
+    Text(
+        text,
+        style = DsTypography.micro,
+        color = colors.accent,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .background(colors.accentWash, RoundedCornerShape(DsRadius.key))
+            .padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
+    )
+}
+
 /**
  * One header for every page, so the top of the screen has the same height and rhythm everywhere.
  *
@@ -880,7 +1039,7 @@ fun NeoSnackbarBody(
  * - roots (no [onBack]) never show a chevron; sub-pages do;
  * - title is always [DsTypography.display] unless the page is compact or has a back button;
  * - subtitle is one caption line, ellipsised, so the header height cannot grow with long host lists;
- * - actions sit in a single 44dp row, so a page with three actions is not taller than one with none.
+ * - actions sit in a single 48dp row, so a page with three actions is not taller than one with none.
  */
 @Composable
 fun NeoPageHeader(
@@ -898,8 +1057,8 @@ fun NeoPageHeader(
         modifier = modifier
             .fillMaxWidth()
             .padding(
-                start = if (onBack != null) DsSpace.xs else DsSpace.xl,
-                end = DsSpace.m,
+                start = spacing().gutter,
+                end = spacing().gutter,
                 top = DsSpace.m,
                 bottom = DsSpace.s,
             ),
@@ -910,8 +1069,8 @@ fun NeoPageHeader(
             NeoIconButton(
                 glyph = NeoGlyph.Back,
                 onClick = onBack,
-                contentDescription = null,
-                modifier = Modifier.size(44.dp),
+                contentDescription = stringResource(R.string.common_back),
+                modifier = Modifier.size(48.dp),
             )
         }
         if (leading != null) {

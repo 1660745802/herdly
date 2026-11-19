@@ -11,6 +11,9 @@
     <string name="gallery_section_icons">Icons</string>
     <string name="gallery_section_type">Type</string>
     <string name="gallery_section_density">Density</string>
+    <string name="gallery_section_context">Context tags and empty states</string>
+    <string name="gallery_empty_title">Nothing needs you right now</string>
+    <string name="gallery_empty_body">New approvals show up here on their own.</string>
     <string name="gallery_raised_title">Raised · chassis</string>
     <string name="gallery_raised_body">Cards, buttons, and keys all rise off the panel; the shadow is two concentric rounded rectangles, dark at bottom-right and highlighted at top-left.</string>
     <string name="gallery_well_title">Recessed · milled</string>
@@ -30,6 +33,7 @@
     <string name="gallery_toggle_disabled_example">Disabled example</string>
     <string name="gallery_field_label">Send to p1</string>
     <string name="gallery_field_hint">Enter a command or note</string>
+    <string name="gallery_loading">Loading</string>
     <string name="gallery_status_waiting_you">Waiting on you</string>
     <string name="gallery_status_working">Working</string>
     <string name="gallery_status_idle">Idle</string>

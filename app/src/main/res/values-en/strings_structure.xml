@@ -69,8 +69,8 @@
     <string name="structure_start_pane">Start</string>
     <string name="structure_pane_idle_shell">idle shell</string>
     <string name="structure_pane_unverified">unverified pane</string>
-    <!-- %1$s: pane title; %2$s: pane kind or availability -->
-    <string name="structure_pane_meta">%1$s · %2$s</string>
+    <!-- %1$s: hierarchy label; %2$s: pane title; %3$s: pane kind or availability -->
+    <string name="structure_pane_meta">%1$s · %2$s · %3$s</string>
     <!-- %1$s: pane count phrase; %2$s: tab status -->
     <string name="structure_tab_meta">%1$s · %2$s</string>
 

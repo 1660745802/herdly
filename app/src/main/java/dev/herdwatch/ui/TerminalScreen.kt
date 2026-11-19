@@ -38,7 +38,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,11 +91,14 @@ import dev.herdwatch.ui.design.NeoIconButton
 import dev.herdwatch.ui.design.NeoMenu
 import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
+import dev.herdwatch.ui.design.NeoModeTag
+import dev.herdwatch.ui.design.NeoSpinner
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.term.VtSnapshot
 import dev.herdwatch.ui.theme.LocalTerminalTokens
 import kotlin.math.roundToInt
+import dev.herdwatch.ui.motionMillis
 
 /**
  * A real interactive SSH shell. Herdr is not involved: this renders the PTY stream directly,
@@ -161,6 +163,8 @@ fun TerminalScreen(
             onPaste = pasteFromClipboard,
             inputMode = inputMode,
             onInputMode = onInputMode,
+            keysExpanded = keyboardExpanded,
+            onToggleKeys = { keyboardExpanded = !keyboardExpanded },
         )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val snapshot = state.snapshot
@@ -182,7 +186,7 @@ fun TerminalScreen(
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircularProgressIndicator(Modifier.size(12.dp), color = term.accent, strokeWidth = 2.dp)
+                    NeoSpinner(Modifier.size(12.dp), color = term.accent, strokeWidth = 1.6.dp)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.terminal_connecting), color = term.text, style = DsTypography.caption)
                 }
@@ -224,8 +228,8 @@ fun TerminalScreen(
                 }
                 AnimatedVisibility(
                     visible = keyboardExpanded,
-                    enter = fadeIn(tween(120)) + expandVertically(tween(160)),
-                    exit = fadeOut(tween(100)) + shrinkVertically(tween(140)),
+                    enter = fadeIn(tween(motionMillis(120))) + expandVertically(tween(motionMillis(160))),
+                    exit = fadeOut(tween(motionMillis(100))) + shrinkVertically(tween(motionMillis(140))),
                 ) {
                     TerminalKeys(
                         onKey = onKey,
@@ -275,10 +279,11 @@ private fun TerminalBar(
     onPaste: () -> Unit,
     inputMode: InputMode,
     onInputMode: (InputMode) -> Unit,
+    keysExpanded: Boolean,
+    onToggleKeys: () -> Unit,
 ) {
     val term = LocalTerminalTokens.current
     var menu by remember { mutableStateOf(false) }
-    var showKeys by remember { mutableStateOf(false) }
     val alternateScreenSuffix = stringResource(R.string.terminal_subtitle_alt_screen, state.target)
     val fontSizeLabel = stringResource(R.string.terminal_font_size, state.fontSize.roundToInt())
     Row(
@@ -298,12 +303,18 @@ private fun TerminalBar(
                 style = DsTypography.headline,
                 maxLines = 1,
             )
-            Text(
-                if (state.snapshot?.alternateScreen == true) alternateScreenSuffix else state.target,
-                color = term.muted,
-                style = DsTypography.micro,
-                maxLines = 1,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NeoModeTag(stringResource(R.string.mode_terminal_tag))
+                Spacer(Modifier.width(DsSpace.xs))
+                Text(
+                    if (state.snapshot?.alternateScreen == true) alternateScreenSuffix else state.target,
+                    color = term.muted,
+                    style = DsTypography.micro,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         ConnectionPip(state)
         // Icon only: the word "Reconnect" between the pip and the overflow menu had no room at
@@ -338,10 +349,10 @@ private fun TerminalBar(
                 )
                 NeoMenuItem(
                     label = stringResource(
-                        if (showKeys) R.string.terminal_keys_hide_always else R.string.terminal_keys_show_always,
+                        if (keysExpanded) R.string.terminal_keys_hide_always else R.string.terminal_keys_show_always,
                     ),
-                    onClick = { showKeys = !showKeys; menu = false },
-                    checked = showKeys,
+                    onClick = { menu = false; onToggleKeys() },
+                    checked = keysExpanded,
                 )
                 NeoMenuItem(
                     label = stringResource(R.string.terminal_paste),
@@ -517,16 +528,16 @@ private fun TerminalGrid(
 /**
  * Small, quiet affordance that replaces the old full-width "Hide keys" row.
  *
- * It sits on the right edge of the dock, keeps a 44dp target and reads as part of the terminal
+ * It sits on the right edge of the dock, keeps a 48dp target and reads as part of the terminal
  * chrome instead of a page section.
  */
-/** Quiet action drawn on the terminal surface: 44dp tall, terminal ink, no Material chrome. */
+/** Quiet action drawn on the terminal surface: 48dp tall, terminal ink, no Material chrome. */
 @Composable
 private fun TerminalChromeButton(label: String, onClick: () -> Unit) {
     val tokens = LocalTerminalTokens.current
     Box(
         Modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(DsRadius.key))
             .background(tokens.background.copy(alpha = 0.88f))
             .clickable(role = Role.Button, onClick = onClick)
@@ -548,7 +559,7 @@ private fun TerminalKeysToggle(
     Row(Modifier.fillMaxWidth().padding(top = DsSpace.xxs), horizontalArrangement = Arrangement.End) {
         Row(
             modifier = Modifier
-                .heightIn(min = 44.dp)
+                .heightIn(min = 48.dp)
                 .clip(RoundedCornerShape(DsRadius.key))
                 .clickable(role = Role.Button, onClickLabel = description, onClick = onClick)
                 .padding(horizontal = DsSpace.m)
@@ -674,8 +685,8 @@ private fun TerminalKeyButton(
     val fill = if (latched) term.accent.copy(alpha = 0.24f) else term.text.copy(alpha = if (enabled) 0.07f else 0.03f)
     Box(
         modifier = Modifier
-            .heightIn(min = 44.dp)
-            .widthIn(min = 44.dp)
+            .heightIn(min = 48.dp)
+            .widthIn(min = 48.dp)
             .clip(RoundedCornerShape(DsRadius.key))
             .background(fill)
             .semantics {

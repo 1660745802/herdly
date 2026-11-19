@@ -1,10 +1,7 @@
 package dev.herdwatch.ui
 
 import android.os.Build
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
@@ -31,17 +28,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,6 +68,7 @@ import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.MonoStyle
 import kotlin.math.roundToInt
+import dev.herdwatch.ui.design.spacing
 
 /**
  * Settings is a control panel, not a manual: four groups of real switches, one danger action, and
@@ -106,6 +101,8 @@ fun SettingsScreen(
     onDismissUpdate: () -> Unit = {},
 ) {
     var confirmReset by remember { mutableStateOf(false) }
+    var showHostPrep by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
     val colors = ds()
     Column(
@@ -116,18 +113,14 @@ fun SettingsScreen(
         NeoPageHeader(
             title = stringResource(R.string.settings_title),
             subtitle = stringResource(R.string.settings_subtitle),
-            titleModifier = if (onOpenStyleGuide == null) {
-                Modifier
-            } else {
-                Modifier.combinedClickable(
-                    onClick = {},
-                    onLongClick = onOpenStyleGuide,
-                    onLongClickLabel = stringResource(R.string.settings_style_title),
-                )
-            },
         )
 
         SettingsGroup(stringResource(R.string.settings_group_appearance)) {
+            if (onOpenStyleGuide != null) EntryRow(
+                title = stringResource(R.string.settings_style_title),
+                subtitle = stringResource(R.string.settings_subtitle),
+                onClick = onOpenStyleGuide,
+            )
             LanguageRow(preferences.language, onLanguage)
             OptionRow(
                 title = stringResource(R.string.settings_theme_title),
@@ -212,6 +205,11 @@ fun SettingsScreen(
         // (foreground-only, credentials stay local, no telemetry) were unclickable text taking a
         // row each; they are now one caption at the very bottom of the page.
         SettingsGroup(stringResource(R.string.settings_group_security)) {
+            EntryRow(
+                title = stringResource(R.string.settings_hostprep_title),
+                subtitle = stringResource(R.string.settings_hostprep_summary),
+                onClick = { showHostPrep = true },
+            )
             DangerRow(
                 title = stringResource(R.string.settings_reset_fp_title),
                 subtitle = stringResource(R.string.settings_reset_fp_summary),
@@ -227,6 +225,11 @@ fun SettingsScreen(
                 onCheck = onCheckUpdate,
                 onOpenRelease = { url -> openUrl(uriHandler, url) },
             )
+            EntryRow(
+                title = stringResource(R.string.settings_about),
+                subtitle = stringResource(R.string.settings_about_summary),
+                onClick = { showAbout = true },
+            )
         }
 
         Text(
@@ -241,6 +244,17 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(DsSpace.xxl))
     }
+
+    if (showHostPrep) NeoDialog(
+        onDismissRequest = { showHostPrep = false },
+        title = stringResource(R.string.settings_hostprep_title),
+        dismissLabel = stringResource(R.string.common_close),
+    ) { HostPrepBody() }
+    if (showAbout) NeoDialog(
+        onDismissRequest = { showAbout = false },
+        title = stringResource(R.string.settings_about),
+        dismissLabel = stringResource(R.string.common_close),
+    ) { AboutBody() }
 
     (update.result as? UpdateChecker.Result.Newer)?.let { newer ->
         UpdateAvailableDialog(
@@ -269,7 +283,7 @@ fun SettingsScreen(
 /** Section label plus one raised panel: the only two levels this page needs. */
 @Composable
 private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = DsSpace.xl, end = DsSpace.xl, top = DsSpace.m)) {
+    Column(Modifier.fillMaxWidth().padding(start = spacing().gutter, end = spacing().gutter, top = spacing().block)) {
         NeoSection(title)
         NeoCard(Modifier.fillMaxWidth(), depth = DsElev.rest) {
             Column(
@@ -484,7 +498,7 @@ private fun DangerRow(title: String, subtitle: String, action: String, onClick: 
             )
         }
         Spacer(Modifier.width(DsSpace.s))
-        NeoChevron(expanded = false)
+        NeoChevron()
     }
 }
 
@@ -517,79 +531,21 @@ private fun EntryRow(title: String, subtitle: String, onClick: () -> Unit) {
 
 // ---------------------------------------------------------------- folded help
 
-/**
- * A folded shelf: the header row is the same 48dp row as everywhere else, the body animates in
- * place. Height animation keeps its token-based timing, so "reduced motion" still zeroes it out.
- */
 @Composable
-private fun DetailsCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
-    var expanded by rememberSaveable(title) { mutableStateOf(false) }
-    val colors = ds()
-    val expandedLabel = stringResource(R.string.settings_expanded)
-    val collapsedLabel = stringResource(R.string.settings_collapsed)
-    NeoCard(Modifier.fillMaxWidth(), depth = DsElev.rest) {
-        Column {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(role = Role.Button) { expanded = !expanded }
-                    .semantics { stateDescription = if (expanded) expandedLabel else collapsedLabel }
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = DsSpace.l, vertical = DsSpace.m),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = DsTypography.bodyStrong,
-                        color = colors.text,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        subtitle,
-                        style = DsTypography.caption,
-                        color = colors.textSoft,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(DsSpace.m))
-                NeoChevron(expanded)
-            }
-            ExpandableSection(expanded) {
-                Column(
-                    Modifier.padding(start = DsSpace.l, end = DsSpace.l, bottom = DsSpace.l),
-                    verticalArrangement = Arrangement.spacedBy(DsSpace.m),
-                ) { content() }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NeoChevron(expanded: Boolean) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(motionMillis(DsMotion.quick)),
-        label = "settings-chevron",
-    )
+private fun NeoChevron() {
     NeoIcon(
         NeoGlyph.ChevronDown,
-        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
+        modifier = Modifier.size(18.dp),
         tint = ds().textSoft,
         contentDescription = null,
     )
 }
 
 @Composable
-private fun HostPrepDetails() {
+private fun HostPrepBody() {
     val clipboard = LocalClipboardManager.current
     val command = "herdr remote-api-bridge --check"
-    DetailsCard(
-        title = stringResource(R.string.settings_hostprep_title),
-        subtitle = stringResource(R.string.settings_hostprep_summary),
-    ) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
         DetailBlock(stringResource(R.string.settings_row_hostprep), stringResource(R.string.settings_row_hostprep_body))
         NeoWell(Modifier.fillMaxWidth(), corner = DsRadius.control) {
             Column(Modifier.padding(DsSpace.m)) {
@@ -730,11 +686,8 @@ private fun openUrl(handler: UriHandler, url: String) {
 }
 
 @Composable
-private fun AboutDetails() {
-    DetailsCard(
-        title = stringResource(R.string.settings_about),
-        subtitle = stringResource(R.string.settings_about_summary),
-    ) {
+private fun AboutBody() {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
         DetailBlock(stringResource(R.string.settings_row_version), stringResource(R.string.settings_version_value))
         DetailBlock(stringResource(R.string.settings_row_purpose), stringResource(R.string.settings_row_purpose_body))
         DetailBlock(stringResource(R.string.settings_row_feedback), stringResource(R.string.settings_row_feedback_body))
