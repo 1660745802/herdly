@@ -10,7 +10,7 @@
     <string name="repo_fingerprint_not_clearable">The host fingerprint cannot be cleared. Check the new fingerprint.</string>
     <string name="repo_no_new_fingerprint">No new host fingerprint to verify</string>
 
-    <string name="repo_host_key_mismatch">Host key mismatch</string>
+    <string name="repo_host_key_mismatch">Host key changed — review it</string>
     <string name="repo_rpc_error">Herdr returned an error: %1$s</string>
     <string name="repo_auth_failed">Authentication failed. Check the username, password or private key.</string>
     <string name="repo_connection_refused">Connection refused. Is the SSH port open?</string>
@@ -22,4 +22,5 @@
     <string name="repo_unknown_error">unknown error</string>
     <string name="repo_request_timeout">Request timed out</string>
     <string name="repo_operation_timeout">Operation timed out</string>
+    <string name="repo_host_key_first">First connection: confirm the host key</string>
 </resources>

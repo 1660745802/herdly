@@ -57,7 +57,7 @@ class HerdrClient internal constructor(
 ) : HostConnection {
     constructor(initialConfig: HostConfig) : this(initialConfig, 20_000)
     @Volatile
-    var config: HostConfig = initialConfig
+    override var config: HostConfig = initialConfig
         private set
 
     private val mutex = Mutex()
@@ -73,6 +73,9 @@ class HerdrClient internal constructor(
     override var fingerprint: String? = null
         private set
 
+    @Volatile
+    private var lastSeenType: String? = null
+
     override fun updateConfig(updated: HostConfig) {
         config = updated
     }
@@ -84,16 +87,22 @@ class HerdrClient internal constructor(
             check(!closed) { Str.get(R.string.ssh_client_closed) }
             if (session?.isConnected == true) return@blockingIo
             val pinned = config.fingerprint?.takeIf { it.isNotBlank() }
-            // With a pin, strict checking runs *inside* the handshake: the password is never
-            // sent to a host whose key does not match. Without a pin we TOFU and store it.
+            // Strict checking always runs inside the handshake. With no pin the repository still
+            // rejects the key after recording it, so the bridge connection asks for confirmation
+            // exactly like the interactive shell does — credentials never leave before that.
             lastSeenFingerprint = null
+            lastSeenType = null
             val jsch = JSch()
             jsch.hostKeyRepository = object : HostKeyRepository {
                 override fun check(host: String, key: ByteArray): Int {
                     val observed = fingerprintOf(key)
                     lastSeenFingerprint = observed
-                    if (pinned == null) return HostKeyRepository.OK
-                    return if (observed == pinned) HostKeyRepository.OK else HostKeyRepository.NOT_INCLUDED
+                    lastSeenType = keyAlgorithm(key)
+                    return if (pinned != null && observed == pinned) {
+                        HostKeyRepository.OK
+                    } else {
+                        HostKeyRepository.NOT_INCLUDED
+                    }
                 }
                 override fun add(hostkey: HostKey?, ui: UserInfo?) = Unit
                 override fun remove(host: String?, type: String?) = Unit
@@ -120,7 +129,10 @@ class HerdrClient internal constructor(
             s.setConfig("PreferredAuthentications", if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey")
             s.serverAliveInterval = 30_000
             s.serverAliveCountMax = 3
-            s.setConfig("StrictHostKeyChecking", if (pinned == null) "no" else "yes")
+            s.setConfig("StrictHostKeyChecking", "yes")
+            // Same preference as the interactive shell: without it JSch picks an ECDSA key while
+            // OpenSSH shows the admin an Ed25519 one, so the two fingerprints never match.
+            s.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
             if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
             s.timeout = TIMEOUT_MS
             // Publish the connecting session too, so backgrounding/cancellation can abort
@@ -138,6 +150,9 @@ class HerdrClient internal constructor(
                 val observed = lastSeenFingerprint
                 if (pinned != null && observed != null && observed != pinned) {
                     throw HostKeyMismatchException(pinned, observed)
+                }
+                if (pinned == null && observed != null) {
+                    throw UnknownHostKeyException(observed, lastSeenType)
                 }
                 throw e
             }
@@ -174,8 +189,10 @@ class HerdrClient internal constructor(
             put("pane_id", paneId)
             put("source", source)
             put("lines", lines)
-            put("format", "text")
-            put("strip_ansi", true)
+            // Keep the colour the remote program wrote: reading plain text turned every pane —
+            // including Claude Code's own UI — into one shade of white on the phone.
+            put("format", "ansi")
+            put("strip_ansi", false)
         }
         return BridgeCodec.parsePaneRead(request("pane.read", params))
     }
@@ -187,6 +204,15 @@ class HerdrClient internal constructor(
             put("keys", buildJsonArray { keys.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
         }
         request("agent.send_keys", params)
+    }
+
+    override suspend fun sendInput(paneId: String, text: String?, keys: List<String>) {
+        val params = buildJsonObject {
+            put("pane_id", paneId)
+            if (!text.isNullOrEmpty()) put("text", text)
+            if (keys.isNotEmpty()) put("keys", buildJsonArray { keys.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+        }
+        request("pane.send_input", params)
     }
 
     override suspend fun createWorkspace(label: String?, cwd: String?): String? {

@@ -1,0 +1,32 @@
+<resources>
+    <string name="manage_title">Sessions · %1$s</string>
+    <string name="manage_subtitle">Workspaces, tabs and panes — create, rename, close</string>
+    <string name="manage_create_title">Create</string>
+    <string name="manage_new_workspace">Workspace</string>
+    <string name="manage_new_tab">Tab</string>
+    <string name="manage_connect_first">Connect to this machine before creating or editing sessions.</string>
+    <string name="manage_empty">No workspaces yet. Create one to start.</string>
+    <string name="manage_empty_offline">Not connected. Sessions appear once the machine is reachable.</string>
+    <string name="manage_rename">Rename</string>
+    <string name="manage_rename_title">Rename</string>
+    <string name="manage_rename_label">New name</string>
+    <string name="manage_close">Close</string>
+    <string name="manage_close_title">Close %1$s?</string>
+    <string name="manage_close_confirm">Close</string>
+    <string name="manage_split">Split right</string>
+    <string name="manage_close_pane_agent" formatted="false">This ends %AGENT% running in that pane.</string>
+    <string name="manage_close_pane_shell">This ends the shell running in that pane.</string>
+    <plurals name="manage_close_workspace_detail">
+        <item quantity="one">This closes the one pane in the workspace and ends what runs in it.</item>
+        <item quantity="other">This closes all %1$d panes in the workspace and ends what runs in them.</item>
+    </plurals>
+    <plurals name="manage_close_tab_detail">
+        <item quantity="one">This closes the one pane in the tab and ends what runs in it.</item>
+        <item quantity="other">This closes all %1$d panes in the tab and ends what runs in them.</item>
+    </plurals>
+    <string name="manage_browse">Browse tree</string>
+    <plurals name="manage_pane_count">
+        <item quantity="one">%1$d pane</item>
+        <item quantity="other">%1$d panes</item>
+    </plurals>
+</resources>

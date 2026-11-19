@@ -67,16 +67,15 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
-import dev.herdwatch.data.InputMode
 import dev.herdwatch.term.VtRun
 import dev.herdwatch.ui.design.DsElev
 import dev.herdwatch.ui.design.DsRadius
@@ -93,6 +92,7 @@ import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
 import dev.herdwatch.ui.design.NeoModeTag
 import dev.herdwatch.ui.design.NeoSpinner
+import dev.herdwatch.ui.design.NeoShadowBleed
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.term.VtSnapshot
@@ -122,20 +122,11 @@ fun TerminalScreen(
     onFontSize: (Float) -> Unit,
     onFollow: () -> Unit,
     onTrustFingerprint: () -> Unit,
-    /** LINE buffers a whole line in the composer; DIRECT streams every committed character. */
-    inputMode: InputMode = InputMode.LINE,
-    /** Reports a mode change; the host screen persists it (see App.kt wiring). */
-    onInputMode: (InputMode) -> Unit = {},
-    /** 1 = the classic single row; 2 adds a second row with ^C / ^D / ^Z / PgUp / PgDn. */
-    keyBarRows: Int = 1,
-    /** Hold an arrow key to repeat it (a short burst, not a stream). */
-    longPressRepeat: Boolean = true,
 ) {
     val term = LocalTerminalTokens.current
     val clipboard = LocalClipboardManager.current
     var keyboardExpanded by rememberSaveable { mutableStateOf(true) }
-    val collapseKeysLabel = stringResource(R.string.terminal_keys_collapse)
-    val expandKeysLabel = stringResource(R.string.terminal_keys_expand)
+    var gridScrolledUp by remember { mutableStateOf(false) }
     val hideKeysDesc = stringResource(R.string.terminal_keys_collapse_desc)
     val showKeysDesc = stringResource(R.string.terminal_keys_expand_desc)
 
@@ -155,14 +146,15 @@ fun TerminalScreen(
         Modifier.fillMaxSize().background(term.background)
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
+        // A full-screen application (vim/less/htop/tmux) owns the terminal, so typed characters go
+        // straight to the PTY. At a shell prompt the composer is a line editor and Send submits.
+        val direct = state.snapshot?.alternateScreen == true
         TerminalBar(
             state = state,
             onBack = onBack,
             onReconnect = onReconnect,
             onFontSize = onFontSize,
             onPaste = pasteFromClipboard,
-            inputMode = inputMode,
-            onInputMode = onInputMode,
             keysExpanded = keyboardExpanded,
             onToggleKeys = { keyboardExpanded = !keyboardExpanded },
         )
@@ -175,8 +167,11 @@ fun TerminalScreen(
                     followRequests = state.followRequests,
                     onResize = onResize,
                     onFollow = onFollow,
+                    onScrolledUp = { gridScrolledUp = it },
                 )
-            } else {
+            } else if (state.error == null || state.connected) {
+                // With a failure card in the middle, the empty-state text behind it printed the
+                // same target twice and left a stray cursor block at the top of the screen.
                 EmptyTerminal(state)
             }
             if (state.connecting) {
@@ -209,6 +204,21 @@ fun TerminalScreen(
                 }
             }
         }
+        // One 44dp strip, right-aligned, holding only what the grid cannot express itself.
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = DsSpace.s),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TerminalScrollPill(visible = gridScrolledUp, onFollow = onFollow)
+            Spacer(Modifier.width(DsSpace.xxs))
+            TerminalOverlayPill(
+                glyph = NeoGlyph.Keyboard,
+                description = if (keyboardExpanded) hideKeysDesc else showKeysDesc,
+                onClick = { keyboardExpanded = !keyboardExpanded },
+                active = keyboardExpanded,
+            )
+        }
         Box(Modifier.fillMaxWidth().background(term.background)) {
             Column(
                 Modifier.fillMaxWidth()
@@ -218,14 +228,6 @@ fun TerminalScreen(
                 // The key bar toggle lives in the overflow menu and a small floating action sits
                 // on the grid itself. A whole row above the keys ("Hide keys · 47×28") spent 48dp
                 // on a debug readout and pushed the terminal up for no benefit.
-                Box(Modifier.fillMaxWidth()) {
-                    TerminalKeysToggle(
-                        expanded = keyboardExpanded,
-                        label = if (keyboardExpanded) collapseKeysLabel else expandKeysLabel,
-                        description = if (keyboardExpanded) hideKeysDesc else showKeysDesc,
-                        onClick = { keyboardExpanded = !keyboardExpanded },
-                    )
-                }
                 AnimatedVisibility(
                     visible = keyboardExpanded,
                     enter = fadeIn(tween(motionMillis(120))) + expandVertically(tween(motionMillis(160))),
@@ -234,12 +236,16 @@ fun TerminalScreen(
                     TerminalKeys(
                         onKey = onKey,
                         enabled = state.connected,
-                        secondRow = keyBarRows >= 2,
-                        longPressRepeat = longPressRepeat,
+                        // Both rows, always: ^C / ^D / arrows are not an option the user should
+                        // have to discover, and a one-row bar hid the second row behind a default.
+                        secondRow = true,
                         applicationCursorKeys = state.snapshot?.applicationCursorKeys == true,
                     )
                 }
-                if (inputMode == InputMode.DIRECT) {
+                // A full-screen application owns the terminal: there is no line to edit, so
+                // every committed character goes straight to the PTY, exactly like a desktop
+                // terminal. At a shell prompt the field stays a line editor and Send submits it.
+                if (direct) {
                     Text(
                         stringResource(R.string.terminal_direct_hint),
                         color = term.muted,
@@ -249,7 +255,7 @@ fun TerminalScreen(
                 }
                 TerminalInputBar(
                     enabled = state.connected,
-                    inputMode = inputMode,
+                    direct = direct,
                     sessionNonce = state.sessionNonce,
                     onInput = onInput,
                     onKey = onKey,
@@ -263,6 +269,7 @@ fun TerminalScreen(
     state.pendingFingerprint?.let { fingerprint ->
         HostFingerprintDialog(
             fingerprint = fingerprint,
+            keyType = state.pendingKeyType,
             hostLabel = state.hostLabel.ifBlank { state.target },
             onCancel = onBack,
             onTrust = onTrustFingerprint,
@@ -277,14 +284,11 @@ private fun TerminalBar(
     onReconnect: () -> Unit,
     onFontSize: (Float) -> Unit,
     onPaste: () -> Unit,
-    inputMode: InputMode,
-    onInputMode: (InputMode) -> Unit,
     keysExpanded: Boolean,
     onToggleKeys: () -> Unit,
 ) {
     val term = LocalTerminalTokens.current
     var menu by remember { mutableStateOf(false) }
-    val alternateScreenSuffix = stringResource(R.string.terminal_subtitle_alt_screen, state.target)
     val fontSizeLabel = stringResource(R.string.terminal_font_size, state.fontSize.roundToInt())
     Row(
         Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
@@ -296,27 +300,23 @@ private fun TerminalBar(
             contentDescription = stringResource(R.string.terminal_back_desc),
             tint = term.text,
         )
+        // The title column owns all the leftover width and everything inside it ellipsises.
+        // Letting the column shrink to its content instead gave the target ~60dp ("li…"), because
+        // the pip and the two icon buttons were measured first.
         Column(Modifier.weight(1f)) {
             Text(
                 state.hostLabel.ifBlank { state.target },
                 color = term.text,
                 style = DsTypography.headline,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 NeoModeTag(stringResource(R.string.mode_terminal_tag))
                 Spacer(Modifier.width(DsSpace.xs))
-                Text(
-                    if (state.snapshot?.alternateScreen == true) alternateScreenSuffix else state.target,
-                    color = term.muted,
-                    style = DsTypography.micro,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                ConnectionPip(state, Modifier.weight(1f, fill = false))
             }
         }
-        ConnectionPip(state)
         // Icon only: the word "Reconnect" between the pip and the overflow menu had no room at
         // 360dp and wrapped into two overlapping lines.
         NeoIconButton(
@@ -358,31 +358,20 @@ private fun TerminalBar(
                     label = stringResource(R.string.terminal_paste),
                     onClick = { menu = false; onPaste() },
                 )
-                NeoMenuDivider()
-                NeoMenuItem(
-                    label = stringResource(R.string.terminal_input_line),
-                    onClick = { menu = false; onInputMode(InputMode.LINE) },
-                    checked = inputMode == InputMode.LINE,
-                )
-                NeoMenuItem(
-                    label = stringResource(R.string.terminal_input_direct),
-                    onClick = { menu = false; onInputMode(InputMode.DIRECT) },
-                    checked = inputMode == InputMode.DIRECT,
-                )
             }
         }
     }
 }
 
 @Composable
-private fun ConnectionPip(state: TerminalUiState) {
+private fun ConnectionPip(state: TerminalUiState, modifier: Modifier = Modifier) {
     val term = LocalTerminalTokens.current
     val color = when {
         state.connecting -> term.muted
         state.connected -> ds().ok
         else -> term.risk
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).background(color, RoundedCornerShape(DsRadius.pill)))
         Spacer(Modifier.width(5.dp))
         Text(
@@ -393,6 +382,7 @@ private fun ConnectionPip(state: TerminalUiState) {
             },
             color = term.muted,
             style = DsTypography.micro,
+            maxLines = 1,
         )
     }
 }
@@ -426,7 +416,11 @@ private fun TerminalGrid(
     followRequests: Long,
     onResize: (Int, Int) -> Unit,
     onFollow: () -> Unit,
+    onScrolledUp: (Boolean) -> Unit,
 ) {
+    // Reserve one strip at the bottom for the corner controls. Overlaying them on the grid looked
+    // lighter but hid real characters (the RES column in top, the last line of a shell prompt).
+    val chromeStrip = 44.dp
     val term = LocalTerminalTokens.current
     val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
@@ -452,7 +446,7 @@ private fun TerminalGrid(
 
     // Inset OUTSIDE the measuring box so maxWidth is already the usable width, and the same inset
     // is not applied again inside the scroller (doing both hid the last columns permanently).
-    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp).padding(bottom = chromeStrip)) {
         val charWidth = with(density) { charWidthPx.toDp() }
         // No horizontal inset here: any inset has to be panned past, and a fractional column left
         // over would clip the final character. Edge breathing room comes from the glyph box itself.
@@ -470,20 +464,28 @@ private fun TerminalGrid(
         }
 
         val gridScroll = rememberScrollState()
-        val lastIndex = snapshot.lines.lastIndex
         val stickToBottom by remember { derivedStateOf { !listState.canScrollForward } }
-
-        suspend fun scrollToEnd() {
-            if (lastIndex >= 0) listState.scrollToItem(lastIndex)
-        }
+        LaunchedEffect(stickToBottom) { onScrolledUp(!stickToBottom) }
 
         // Follow new output only while the user is already at the bottom.
-        LaunchedEffect(snapshot.revision, stickToBottom) {
-            if (stickToBottom && lastIndex >= 0) {
-                listState.scrollToItem(lastIndex)
+        //
+        // A full-screen program (vim, less, htop, tmux) owns the viewport: its grid is exactly the
+        // PTY size, and "scroll to the last row" pushed the whole screen off the top so the app
+        // looked blank. While the alternate screen is up we therefore render ONLY that grid, with
+        // no scrollback above it — which is what a real terminal does — and keep the top row pinned.
+        val fullScreen = snapshot.alternateScreen
+        val visibleLines = if (fullScreen) snapshot.lines.takeLast(snapshot.rows) else snapshot.lines
+        val visibleLast = visibleLines.lastIndex
+        LaunchedEffect(snapshot.revision, stickToBottom, fullScreen) {
+            if (fullScreen) {
+                if (listState.firstVisibleItemIndex != 0) listState.scrollToItem(0)
+            } else if (stickToBottom && visibleLast >= 0) {
+                listState.scrollToItem(visibleLast)
             }
         }
-        LaunchedEffect(followRequests) { scrollToEnd() }
+        LaunchedEffect(followRequests, fullScreen) {
+            if (fullScreen) listState.scrollToItem(0) else if (visibleLast >= 0) listState.scrollToItem(visibleLast)
+        }
 
         // Long lines must stay readable: the grid is as wide as the PTY, which on a phone is wider
         // than the viewport, so the whole grid pans horizontally instead of clipping the right edge.
@@ -496,7 +498,7 @@ private fun TerminalGrid(
                 state = listState,
                 modifier = Modifier.fillMaxSize().horizontalScroll(gridScroll),
             ) {
-                itemsIndexed(snapshot.lines) { _, line ->
+                itemsIndexed(visibleLines) { _, line ->
                     Text(
                         text = line.annotated(term.text, term.background),
                         style = textStyle,
@@ -508,14 +510,7 @@ private fun TerminalGrid(
             }
         }
 
-        if (!stickToBottom) {
-            Box(Modifier.align(Alignment.BottomCenter).padding(8.dp)) {
-                TerminalChromeButton(
-                    label = stringResource(R.string.terminal_scroll_to_bottom),
-                    onClick = onFollow,
-                )
-            }
-        }
+
     }
 }
 
@@ -525,55 +520,46 @@ private fun TerminalGrid(
  * so a long hold cannot flood a remote prompt.
  */
 @OptIn(ExperimentalFoundationApi::class)
-/**
- * Small, quiet affordance that replaces the old full-width "Hide keys" row.
- *
- * It sits on the right edge of the dock, keeps a 48dp target and reads as part of the terminal
- * chrome instead of a page section.
- */
-/** Quiet action drawn on the terminal surface: 48dp tall, terminal ink, no Material chrome. */
+/** Jump-to-latest, shown only while the user is reading further up. */
 @Composable
-private fun TerminalChromeButton(label: String, onClick: () -> Unit) {
-    val tokens = LocalTerminalTokens.current
-    Box(
-        Modifier
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(DsRadius.key))
-            .background(tokens.background.copy(alpha = 0.88f))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = DsSpace.m),
-        contentAlignment = Alignment.Center,
+private fun TerminalScrollPill(visible: Boolean, onFollow: () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(motionMillis(120))),
+        exit = fadeOut(tween(motionMillis(100))),
     ) {
-        Text(label, style = DsTypography.body, color = tokens.accent, maxLines = 1)
+        TerminalOverlayPill(
+            glyph = NeoGlyph.ChevronDown,
+            description = stringResource(R.string.terminal_scroll_to_bottom),
+            onClick = onFollow,
+        )
     }
 }
 
+/**
+ * One 40dp control in the strip under the grid: icon only, translucent terminal ink.
+ *
+ * Icon-only is safe because both actions also exist in the overflow menu with words, and the pill
+ * carries a full contentDescription for TalkBack.
+ */
 @Composable
-private fun TerminalKeysToggle(
-    expanded: Boolean,
-    label: String,
+private fun TerminalOverlayPill(
+    glyph: NeoGlyph,
     description: String,
     onClick: () -> Unit,
+    active: Boolean = false,
 ) {
     val tokens = LocalTerminalTokens.current
-    Row(Modifier.fillMaxWidth().padding(top = DsSpace.xxs), horizontalArrangement = Arrangement.End) {
-        Row(
-            modifier = Modifier
-                .heightIn(min = 48.dp)
-                .clip(RoundedCornerShape(DsRadius.key))
-                .clickable(role = Role.Button, onClickLabel = description, onClick = onClick)
-                .padding(horizontal = DsSpace.m)
-                .semantics { contentDescription = description },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(DsSpace.xs),
-        ) {
-            NeoIcon(
-                glyph = if (expanded) NeoGlyph.ChevronDown else NeoGlyph.Keyboard,
-                modifier = Modifier.size(16.dp),
-                tint = tokens.muted,
-            )
-            Text(label, style = DsTypography.caption, color = tokens.muted, maxLines = 1)
-        }
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(DsRadius.key))
+            .background(tokens.text.copy(alpha = if (active) 0.14f else 0.07f))
+            .clickable(role = Role.Button, onClickLabel = description, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        NeoIcon(glyph = glyph, modifier = Modifier.size(18.dp), tint = if (active) tokens.accent else tokens.muted)
     }
 }
 
@@ -582,12 +568,13 @@ private fun TerminalKeys(
     onKey: (String) -> Unit,
     enabled: Boolean,
     secondRow: Boolean,
-    longPressRepeat: Boolean,
     applicationCursorKeys: Boolean,
 ) {
     var ctrl by rememberSaveable { mutableStateOf(false) }
     val ctrlDesc = stringResource(R.string.terminal_key_ctrl)
     val shiftTabLabel = stringResource(R.string.terminal_key_shift_tab)
+    // A key bar that scrolls sideways hid PgDn behind the screen edge with no hint that anything
+    // was there. Keys now share the row width, so every key is visible and tappable at once.
 
     // Split so each row fits a 360dp screen without scrolling: row 1 edits the line,
     // row 2 sends signals and moves through history/scrolling. Ctrl lives at the head of row 1.
@@ -620,10 +607,16 @@ private fun TerminalKeys(
         }
     }
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Keys are lifted surfaces sitting side by side. With a 4dp gap the next key's fill painted
+    // over the previous key's highlight, so the second row looked cut off; the gap now includes the
+    // shadow's own bleed.
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = NeoShadowBleed),
+        verticalArrangement = Arrangement.spacedBy(NeoShadowBleed + 2.dp),
+    ) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
         ) {
             TerminalKeyButton(
                 label = "Ctrl",
@@ -631,8 +624,8 @@ private fun TerminalKeys(
                 enabled = enabled,
                 latched = ctrl,
                 repeatable = false,
-                longPressRepeat = false,
                 onPress = { ctrl = !ctrl },
+                modifier = Modifier.weight(1f),
             )
             primary.forEach { key ->
                 val description = stringResource(key.descriptionRes)
@@ -642,15 +635,15 @@ private fun TerminalKeys(
                     enabled = enabled,
                     latched = false,
                     repeatable = key.repeatable,
-                    longPressRepeat = longPressRepeat,
                     onPress = { fire(key.sequence) },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
         if (secondRow) {
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
             ) {
                 secondary.forEach { key ->
                     val description = stringResource(key.descriptionRes)
@@ -660,8 +653,8 @@ private fun TerminalKeys(
                         enabled = enabled,
                         latched = false,
                         repeatable = key.repeatable,
-                        longPressRepeat = longPressRepeat,
                         onPress = { fire(key.sequence) },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -677,16 +670,16 @@ private fun TerminalKeyButton(
     enabled: Boolean,
     latched: Boolean,
     repeatable: Boolean,
-    longPressRepeat: Boolean,
     onPress: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val term = LocalTerminalTokens.current
     val scope = rememberCoroutineScope()
     val fill = if (latched) term.accent.copy(alpha = 0.24f) else term.text.copy(alpha = if (enabled) 0.07f else 0.03f)
     Box(
-        modifier = Modifier
+        modifier = modifier
             .heightIn(min = 48.dp)
-            .widthIn(min = 48.dp)
+            .widthIn(min = 40.dp)
             .clip(RoundedCornerShape(DsRadius.key))
             .background(fill)
             .semantics {
@@ -696,7 +689,7 @@ private fun TerminalKeyButton(
             .combinedClickable(
                 enabled = enabled,
                 onLongClick = {
-                    if (repeatable && longPressRepeat) {
+                    if (repeatable) {
                         scope.launch {
                             repeat(6) {
                                 onPress()
@@ -707,10 +700,16 @@ private fun TerminalKeyButton(
                 },
                 onClick = onPress,
             )
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 2.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = DsTypography.micro, color = if (enabled) term.text else term.muted)
+        Text(
+            label,
+            style = DsTypography.micro,
+            color = if (enabled) term.text else term.muted,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -728,120 +727,133 @@ internal fun arrowKeySequence(final: Char, applicationCursorKeys: Boolean): Stri
     return if (applicationCursorKeys) "\u001bO$final" else "\u001b[$final"
 }
 
-private const val DIRECT_INPUT_SENTINEL = "\u2060"
+/** What a terminal line editor erases with: DEL (0x7f), not backspace (0x08). */
+private const val DIRECT_DELETE = "\u007f"
 
-private fun emptyDirectInput(): TextFieldValue =
-    TextFieldValue(DIRECT_INPUT_SENTINEL, selection = TextRange(DIRECT_INPUT_SENTINEL.length))
+/**
+ * How much of the line the composer keeps as a mirror of the remote one.
+ *
+ * The mirror only exists so the next edit has something to diff against; past a few dozen
+ * characters the extra copy buys nothing and only grows the IME's editing buffer. When the mirror
+ * exceeds this budget the field and the watermark are cleared in the same step, so the following
+ * edit diffs against an empty mirror (a shorter, safer epoch rather than an unbounded one).
+ */
+internal const val DIRECT_MIRROR_BUDGET = 24
 
-internal data class DirectInputDelta(
+/**
+ * One direct-mode edit translated into PTY bytes.
+ *
+ * [text] is what the connection must write (DEL bytes for removed characters, then new text),
+ * [sent] is the watermark to remember for the next edit — the text the PTY now holds — and
+ * [clearField] says the caller must reset both the field and the watermark to empty.
+ */
+internal data class DirectInputEdit(
     val text: String,
-    val deleteBackward: Boolean,
-    val remaining: TextFieldValue,
+    val sent: String,
+    val clearField: Boolean,
 )
 
-private data class DirectInputParts(
-    val prefix: String,
-    val composing: String,
-    val suffix: String,
-    val selection: TextRange,
-)
+/** Length of the shared leading run of two strings. */
+private fun commonPrefixLength(a: String, b: String): Int {
+    val limit = minOf(a.length, b.length)
+    var index = 0
+    while (index < limit && a[index] == b[index]) index++
+    return index
+}
 
-/** Removes one synthetic sentinel and separates safe committed prefix from active composition. */
-private fun directInputParts(value: TextFieldValue): DirectInputParts {
-    val raw = value.text
-    val sentinelIndex = raw.indexOf(DIRECT_INPUT_SENTINEL)
-    val clean = if (sentinelIndex >= 0) raw.removeRange(sentinelIndex, sentinelIndex + 1) else raw
-    fun mappedIndex(index: Int): Int {
-        val bounded = index.coerceIn(0, raw.length)
-        return bounded - if (sentinelIndex >= 0 && bounded > sentinelIndex) 1 else 0
+/**
+ * Direct-mode transmission is a diff, never a replay.
+ *
+ * [sent] is the watermark: the text the PTY already holds for the current field epoch. Only what
+ * the field now shows beyond the longest common prefix with [sent] is new, and a shortened field
+ * means that many characters have to be erased first. An IME that re-delivers a value we already
+ * transmitted therefore produces an empty diff instead of a second copy of those characters — the
+ * old sentinel code sent the whole committed prefix on every edit, so any repeat of an already
+ * transmitted value was transmitted again.
+ *
+ * Nothing here rewrites the field's text, which is what kept the IME's editing session intact:
+ * replacing the value with a truncated one made the IME re-deliver its pre-reset buffer.
+ *
+ * An unfinished composition is never transmitted: while `next.composition != null` the watermark
+ * stays put and the committed characters go out on the edit that clears the composition.
+ */
+internal fun directInputEdit(sent: String, next: TextFieldValue): DirectInputEdit {
+    if (next.composition != null) return DirectInputEdit(text = "", sent = sent, clearField = false)
+    val text = next.text
+    val shared = commonPrefixLength(sent, text)
+    val outgoing = DIRECT_DELETE.repeat(sent.length - shared) + text.substring(shared)
+    return if (text.length > DIRECT_MIRROR_BUDGET) {
+        DirectInputEdit(text = outgoing, sent = "", clearField = true)
+    } else {
+        DirectInputEdit(text = outgoing, sent = text, clearField = false)
     }
-    val selection = TextRange(
-        mappedIndex(value.selection.start).coerceIn(0, clean.length),
-        mappedIndex(value.selection.end).coerceIn(0, clean.length),
-    )
-    val composition = value.composition
-        ?: return DirectInputParts(clean, "", "", selection)
-    val start = mappedIndex(composition.min).coerceIn(0, clean.length)
-    val end = mappedIndex(composition.max).coerceIn(start, clean.length)
-    return DirectInputParts(
-        prefix = clean.substring(0, start),
-        composing = clean.substring(start, end),
-        suffix = clean.substring(end),
-        selection = selection,
-    )
 }
 
-private fun remainingDirectInput(parts: DirectInputParts): TextFieldValue {
-    val held = parts.composing + parts.suffix
-    if (held.isEmpty()) return emptyDirectInput()
-    val text = DIRECT_INPUT_SENTINEL + held
-    val compositionEnd = DIRECT_INPUT_SENTINEL.length + parts.composing.length
-    fun retained(index: Int): Int = (DIRECT_INPUT_SENTINEL.length + index - parts.prefix.length)
-        .coerceIn(DIRECT_INPUT_SENTINEL.length, text.length)
-    return TextFieldValue(
-        text = text,
-        selection = TextRange(retained(parts.selection.start), retained(parts.selection.end)),
-        composition = if (parts.composing.isEmpty()) null else
-            TextRange(DIRECT_INPUT_SENTINEL.length, compositionEnd),
-    )
+/** The committed part of a field value: everything the IME is not still composing. */
+private fun committedInputText(value: TextFieldValue): String {
+    val composition = value.composition ?: return value.text
+    val start = composition.min.coerceIn(0, value.text.length)
+    val end = composition.max.coerceIn(start, value.text.length)
+    return value.text.removeRange(start, end)
 }
 
-/** Interprets one IME edit and retains active composition plus any later committed suffix. */
-internal fun directInputDelta(
-    previous: TextFieldValue,
-    next: TextFieldValue,
-): DirectInputDelta {
-    val parts = directInputParts(next)
-    val remaining = remainingDirectInput(parts)
-    val heldIsEmpty = parts.composing.isEmpty() && parts.suffix.isEmpty()
-    return DirectInputDelta(
-        text = parts.prefix,
-        deleteBackward = parts.prefix.isEmpty() && heldIsEmpty &&
-            previous.composition == null && next.text.length < previous.text.length,
-        remaining = remaining,
-    )
+/**
+ * Enter in direct mode: flush only what the user actually committed, then press return.
+ *
+ * Unfinished pinyin is not text the user has chosen yet, so with a live composition nothing is
+ * sent and the composition is kept for the next Enter. The committed part is diffed like any other
+ * edit, so a mirror that already matches cannot duplicate it, and an empty mirror still sends the
+ * bare carriage return.
+ */
+internal fun directSubmitEdit(sent: String, next: TextFieldValue): DirectInputEdit {
+    val committed = committedInputText(next)
+    val shared = commonPrefixLength(sent, committed)
+    val flushed = DIRECT_DELETE.repeat(sent.length - shared) + committed.substring(shared)
+    return if (next.composition != null) {
+        DirectInputEdit(text = flushed, sent = committed, clearField = false)
+    } else {
+        DirectInputEdit(text = flushed + "\r", sent = "", clearField = true)
+    }
 }
-
-/** Enter may send only text before an unfinished composition without changing character order. */
-internal fun directSubmitText(value: TextFieldValue): String = directInputParts(value).prefix
 
 @Composable
 private fun TerminalInputBar(
     enabled: Boolean,
-    inputMode: InputMode,
+    direct: Boolean,
     sessionNonce: Long,
     onInput: (String, Boolean) -> Unit,
     onKey: (String) -> Unit,
     onFollow: () -> Unit,
 ) {
     val term = LocalTerminalTokens.current
-    val direct = inputMode == InputMode.DIRECT
     // TextFieldValue (not String) so direct mode can see `composition` and hold back pinyin that
     // the IME has not committed yet: sending half-formed glyphs would garble the remote line.
     var lineEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
     var directEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(emptyDirectInput())
+        mutableStateOf(TextFieldValue(""))
     }
+    // Watermark for the current composer epoch: the text the PTY already holds. Surviving
+    // recomposition (and restore) matters here — replaying characters on restore would duplicate
+    // them at the remote prompt.
+    var directSent by rememberSaveable(sessionNonce) { mutableStateOf("") }
     val entry = if (direct) directEntry else lineEntry
     val inputDesc = stringResource(R.string.terminal_input_desc)
-    val placeholder = stringResource(R.string.terminal_input_placeholder)
+    // A disabled field that still says "type a command" reads as broken: say why it is dead.
+    val placeholder = stringResource(
+        if (enabled) R.string.terminal_input_placeholder else R.string.terminal_input_offline,
+    )
     val sendDesc = stringResource(R.string.terminal_send)
 
     fun submit() {
-        // In direct mode the field normally contains only an active IME composition. Send any
-        // committed prefix/suffix before Enter, but never leak unfinished pinyin to the PTY.
+        // Direct mode streams committed characters, so Enter only has to flush what is already
+        // committed. Unfinished pinyin is never leaked to the PTY and never gets an Enter.
         if (direct) {
-            val parts = directInputParts(directEntry)
-            if (parts.composing.isNotEmpty()) {
-                if (parts.prefix.isNotEmpty()) onInput(parts.prefix, false)
-                directEntry = remainingDirectInput(parts)
-                onFollow()
-                return
-            }
-            onInput(directSubmitText(directEntry) + "\r", false)
-            directEntry = emptyDirectInput()
+            val edit = directSubmitEdit(directSent, directEntry)
+            directSent = edit.sent
+            if (edit.clearField) directEntry = TextFieldValue("")
+            if (edit.text.isNotEmpty()) onInput(edit.text, false)
             onFollow()
             return
         }
@@ -867,17 +879,14 @@ private fun TerminalInputBar(
                     lineEntry = next
                     return@onChange
                 }
-                val delta = directInputDelta(directEntry, next)
-                directEntry = delta.remaining
-                when {
-                    delta.text.isNotEmpty() -> {
-                        onInput(delta.text, false)
-                        onFollow()
-                    }
-                    delta.deleteBackward -> {
-                        onKey("\u007f")
-                        onFollow()
-                    }
+                val edit = directInputEdit(directSent, next)
+                directSent = edit.sent
+                // Only a budget reset touches the value: rewriting it on every keystroke truncates
+                // the IME's buffer, which is what made it re-deliver already transmitted text.
+                directEntry = if (edit.clearField) TextFieldValue("") else next
+                if (edit.text.isNotEmpty()) {
+                    onInput(edit.text, false)
+                    onFollow()
                 }
             },
             enabled = enabled,
@@ -930,6 +939,7 @@ internal fun bracketedPastePayload(text: String, bracketedPaste: Boolean): Strin
 @Composable
 private fun HostFingerprintDialog(
     fingerprint: String,
+    keyType: String?,
     hostLabel: String,
     onCancel: () -> Unit,
     onTrust: () -> Unit,
@@ -945,7 +955,10 @@ private fun HostFingerprintDialog(
             color = colors.textSoft,
         )
         Text(
-            stringResource(R.string.terminal_fingerprint_fingerprint_label),
+            // Name the algorithm: a host has several keys and ssh-keygen prints this word too.
+            dev.herdwatch.ssh.hostKeyLabel(keyType).takeIf { it.isNotBlank() }?.let {
+                stringResource(R.string.terminal_fingerprint_label_typed, it)
+            } ?: stringResource(R.string.terminal_fingerprint_fingerprint_label),
             style = DsTypography.micro,
             color = colors.textSoft,
         )
@@ -964,22 +977,23 @@ private fun HostFingerprintDialog(
             style = DsTypography.body,
             color = colors.textSoft,
         )
-        Row(
+        // Same rule as the key-change dialog: a security decision gets full-width buttons so the
+        // label is never ellipsised in English or at a large font scale.
+        Column(
             Modifier.fillMaxWidth().padding(top = DsSpace.xs),
-            horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(DsSpace.xs),
         ) {
-            NeoButton(
-                label = stringResource(R.string.terminal_fingerprint_cancel),
-                onClick = onCancel,
-                tone = NeoButtonTone.Ghost,
-                compact = true,
-            )
             NeoButton(
                 label = stringResource(R.string.terminal_fingerprint_trust),
                 onClick = onTrust,
                 tone = NeoButtonTone.Primary,
-                compact = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            NeoButton(
+                label = stringResource(R.string.terminal_fingerprint_cancel),
+                onClick = onCancel,
+                tone = NeoButtonTone.Ghost,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }

@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
 import dev.herdwatch.model.Agent
+import dev.herdwatch.model.HerdPane
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostRuntime
@@ -91,6 +92,7 @@ import dev.herdwatch.ui.design.NeoSegmented
 import dev.herdwatch.ui.design.NeoLamp
 import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoSkeleton
+import dev.herdwatch.ui.design.NeoSection
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import kotlinx.coroutines.delay
@@ -98,25 +100,19 @@ import dev.herdwatch.ui.theme.agentStatusColor
 import dev.herdwatch.ui.theme.connStatusColor
 import dev.herdwatch.ui.design.spacing
 
-/**
- * Height cap of the queue panel. Beyond this the panel scrolls on its own, so a long queue does
- * not push the rest of the page off the screen and only the visible rows are composed.
- */
-private val QueuePanelMaxHeight = 420.dp
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InboxScreen(
     ui: UiState,
     onRefresh: () -> Unit,
     onOpenAgent: (Agent, String?) -> Unit,
-    onFilter: (InboxFilter) -> Unit,
     onQuery: (String) -> Unit,
     onToggleSearch: (Boolean) -> Unit,
     onAddHost: () -> Unit,
     onReconnect: (String) -> Unit,
     onNewTask: (() -> Unit)? = null,
     onOpenHost: ((String) -> Unit)? = null,
+    onOpenPane: ((String, String) -> Unit)? = null,
 ) {
     val agents = ui.repo.agents
     val configuration = LocalConfiguration.current
@@ -130,9 +126,29 @@ fun InboxScreen(
     }
 
     var selectedHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    // One list: every pane the fleet has. A pane running an agent shows that agent's name, lamp
+    // and clock in the same row, so a second "agents" list was the same data twice.
     val hostScope = selectedHostId.takeIf { ui.repo.hosts.size > 1 }
-    val scopedAgents = hostScope?.let { hostId -> agents.filter { it.hostId == hostId } } ?: agents
-    val filtered = inboxQueue(scopedAgents, ui.filter, ui.query)
+    val scopedHosts = hostScope?.let { id -> ui.repo.hosts.filter { it.host.id == id } } ?: ui.repo.hosts
+    val scopedAgents = scopedHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
+    // Agents get their own section whenever the host reports any: "who is working" is a different
+    // question from "what is running where", and a section that vanishes when everyone is idle makes
+    // the page look like it lost half its content.
+    // Same queue definition as the detail traversal: urgency first, then the search query. Sorting
+    // here separately meant searching filtered the panes but left every agent on screen.
+    val agentGroup = inboxQueue(scopedAgents, ui.query)
+    val panes = scopedHosts.flatMap { runtime ->
+        runtime.structure.panes.map { pane -> runtime to pane }
+    }.filter { (runtime, pane) ->
+        ui.query.isBlank() || listOf(
+            pane.id, pane.title, pane.agentKind.orEmpty(), pane.cwd.orEmpty(),
+            runtime.host.label,
+            runtime.structure.workspaces.firstOrNull { it.id == pane.workspaceId }?.label.orEmpty(),
+            runtime.structure.tabs.firstOrNull { it.id == pane.tabId }?.label.orEmpty(),
+        ).any { it.contains(ui.query, ignoreCase = true) }
+    }
+    // Only environment facts live above the list; nothing here describes urgency for the user.
+    val failedHosts = scopedHosts.filter { it.conn is ConnState.Failed }
     val keyboard = LocalSoftwareKeyboardController.current
     val syncingLabel = stringResource(R.string.inbox_state_syncing)
     val refreshLabel = stringResource(R.string.inbox_cd_refresh)
@@ -141,23 +157,22 @@ fun InboxScreen(
     Column(Modifier.fillMaxSize()) {
         // Header describes the whole queue, not the current search/filter result; otherwise
         // typing a query would make the task summary appear to change.
-        val attentionForHeader = scopedAgents.count { isAttention(it) }
         NeoPageHeader(
             title = "Herdly",
-            // Connection state stays on the host strip and duty summary; repeating it here
-            // made the home header look like a status dashboard instead of a task list.
+            // Connection state stays on the host strip; the header describes the fleet, never a
+            // "mode" the user has to manage.
             subtitle = when {
                 ui.repo.hosts.isEmpty() -> stringResource(R.string.inbox_subtitle_pocket)
-                scopedAgents.isEmpty() -> stringResource(R.string.inbox_empty_none_title)
-                else -> stringResource(
-                    R.string.inbox_header_summary,
-                    pluralStringResource(
-                        R.plurals.inbox_attention_count, attentionForHeader, attentionForHeader,
+                // The host section below already names the machine and its state. Repeating it in
+                // the header was the same fact twice, one line apart.
+                scopedHosts.size == 1 -> stringResource(R.string.inbox_subtitle_single)
+                else -> listOf(
+                    pluralStringResource(R.plurals.inbox_count_hosts, scopedHosts.size, scopedHosts.size),
+                    stringResource(
+                        R.string.inbox_connected_hosts,
+                        scopedHosts.count { it.conn is ConnState.Connected },
                     ),
-                    pluralStringResource(
-                        R.plurals.inbox_count_agents, scopedAgents.size, scopedAgents.size,
-                    ),
-                )
+                ).joinToString(stringResource(R.string.inbox_list_separator))
             },
             compact = compact,
             leading = if (compact) null else ({ BrandMark() }),
@@ -281,15 +296,8 @@ fun InboxScreen(
                         }
                     }
                 }
-                item {
-                    DutySummary(
-                        agents = scopedAgents,
-                        hosts = ui.repo.hosts,
-                        now = now,
-                        onOpen = { agent -> onOpenAgent(agent, hostScope) },
-                        onReconnect = onReconnect,
-                        selectedHostId = hostScope,
-                    )
+                if (failedHosts.isNotEmpty()) {
+                    item { EnvironmentRow(failedHosts, onReconnect) }
                 }
                 if (scopedAgents.isEmpty() && (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })) {
                     item {
@@ -389,62 +397,169 @@ fun InboxScreen(
                 return@LazyColumn
             }
 
-            item {
-                // The count drops to its own line instead of squeezing the filter track: at 1.3x
-                // font "Needs attention" would ellipsize inside a half-width segment.
-                Column(Modifier.fillMaxWidth().padding(top = DsSpace.s, bottom = DsSpace.xs)) {
-                    NeoSegmented(
-                        // 「全部」在前，「需要处理」在后：先给全量，再给聚焦视图。
-                        options = listOf(
-                            stringResource(R.string.inbox_filter_all),
-                            stringResource(R.string.inbox_filter_attention),
-                        ),
-                        selectedIndex = if (ui.filter == InboxFilter.ATTENTION) 1 else 0,
-                        onSelect = { index -> onFilter(if (index == 0) InboxFilter.ALL else InboxFilter.ATTENTION) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        if (ui.query.isNotBlank())
-                            pluralStringResource(R.plurals.inbox_count_items_matched, filtered.size, filtered.size)
-                        else pluralStringResource(R.plurals.inbox_count_items, filtered.size, filtered.size),
-                        style = DsTypography.caption,
-                        color = colors.textSoft,
-                        maxLines = 1,
-                        modifier = Modifier.padding(start = DsSpace.xs, top = DsSpace.xxs),
+            // Hierarchy, in this order: machine → tab → pane. Agents are their own group above the
+            // panes, because "who needs me" is a different question from "what is running where".
+            // A flat list of eleven rows told you neither, and a panel with a fixed height left half
+            // the screen empty while the rest of the list hid behind an inner scroll.
+            // Agents are grouped the same way the panes below them are: workspace, then tab. Five
+            // rows called "π - hyper" with a bare p1/pF told you nothing about which is which; the
+            // group heading carries the machine and project so the row only has to name the agent.
+            if (agentGroup.isNotEmpty()) {
+                val waitingTotal = agentGroup.count { isAttention(it) }
+                item(key = "agents-header") {
+                    NeoSection(
+                        title = pluralStringResource(R.plurals.inbox_group_agents, agentGroup.size, agentGroup.size),
+                        trailing = if (waitingTotal > 0) ({
+                            Text(
+                                pluralStringResource(R.plurals.inbox_group_waiting, waitingTotal, waitingTotal),
+                                style = DsTypography.micro,
+                                color = colors.warn,
+                            )
+                        }) else null,
                     )
                 }
-            }
-
-            // One panel holding the queue. Extruding every row made a five-item list look like
-            // five separate objects glued to the screen; rows are now lines on a single surface.
-            //
-            // The rows are composed lazily inside the panel: a busy fleet used to build one row per
-            // agent on every frame, whether or not the row was on screen. The inner list is capped
-            // in height so it never asks for an infinite box, and hands scrolling back to the page
-            // once the visible part of the queue is reached.
-            item(key = "queue") {
-                NeoCard(modifier = Modifier.fillMaxWidth().padding(top = DsSpace.s), depth = DsElev.soft) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = QueuePanelMaxHeight),
-                    ) {
-                        items(
-                            count = filtered.size,
-                            key = { index -> filtered[index].key },
-                        ) { index ->
-                            val agent = filtered[index]
-                            AgentRow(
-                                agent,
-                                now,
-                                ui.repo.hosts.firstOrNull { it.host.id == agent.hostId },
-                                hostScoped = hostScope != null,
-                            ) { onOpenAgent(agent, hostScope) }
-                            if (index != filtered.lastIndex) NeoDivider(inset = DsSpace.l)
+                val byHost = agentGroup.groupBy { it.hostId }
+                byHost.forEach { (hostId, hostAgents) ->
+                    val hostRuntime = ui.repo.hosts.firstOrNull { it.host.id == hostId }
+                    if (hostScope == null && byHost.size > 1) {
+                        item(key = "agents-host:$hostId") {
+                            Text(
+                                hostAgents.first().hostLabel,
+                                style = DsTypography.bodyStrong,
+                                color = colors.text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
+                            )
+                        }
+                    }
+                    val byWorkspace = hostAgents.groupBy { it.workspaceLabel ?: it.repo ?: "" }
+                    byWorkspace.forEach { (workspaceLabel, workspaceAgents) ->
+                        if (workspaceLabel.isNotBlank()) {
+                            item(key = "agents-ws:$hostId:$workspaceLabel") {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    NeoIcon(NeoGlyph.Workspace, modifier = Modifier.size(14.dp), tint = colors.textFaint)
+                                    Spacer(Modifier.width(DsSpace.xs))
+                                    Text(
+                                        workspaceLabel,
+                                        style = DsTypography.caption,
+                                        color = colors.textSoft,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                        item(key = "agents-card:$hostId:$workspaceLabel") {
+                            NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    workspaceAgents.forEachIndexed { index, agent ->
+                                        AgentRow(
+                                            agent,
+                                            now,
+                                            hostRuntime,
+                                            hostScoped = true,
+                                            compact = true,
+                                        ) { onOpenAgent(agent, hostScope) }
+                                        if (index != workspaceAgents.lastIndex) NeoDivider(inset = DsSpace.l)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            if (filtered.isEmpty() && scopedAgents.isNotEmpty()) {
+            scopedHosts.forEach { runtime ->
+                val hostPanes = panes.filter { it.first.host.id == runtime.host.id }.map { it.second }
+                if (hostPanes.isEmpty()) return@forEach
+                val tabs = runtime.structure.tabs
+                val paneCount = hostPanes.size
+                item(key = "host:" + runtime.host.id) {
+                    NeoSection(
+                        title = runtime.host.label + "  ·  " +
+                            pluralStringResource(R.plurals.inbox_group_panes, paneCount, paneCount),
+                        trailing = {
+                            Text(
+                                stringResource(
+                                    if (runtime.conn is ConnState.Connected) R.string.inbox_host_up
+                                    else R.string.inbox_host_down,
+                                ),
+                                style = DsTypography.micro,
+                                color = if (runtime.conn is ConnState.Connected) colors.ok else colors.danger,
+                            )
+                        },
+                    )
+                }
+                // Group by tab so the path and the tab a pane belongs to are structural facts, not
+                // three dots of text squeezed into a caption.
+                // Workspace first, then its tabs: repeating "hyper" above every tab made the same
+                // level look like three different machines.
+                val byWorkspace = hostPanes.groupBy { it.workspaceId }
+                byWorkspace.forEach { (workspaceId, workspacePanes) ->
+                    val workspace = runtime.structure.workspaces.firstOrNull { it.id == workspaceId }
+                    if (workspace?.label != null) {
+                        item(key = "ws:" + runtime.host.id + ":" + workspaceId) {
+                            Text(
+                                workspace.label,
+                                style = DsTypography.bodyStrong,
+                                color = colors.text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.m, bottom = DsSpace.xxs),
+                            )
+                        }
+                    }
+                val groups = workspacePanes.groupBy { it.tabId }
+                groups.forEach { (tabId, group) ->
+                    val tab = tabs.firstOrNull { it.id == tabId }
+                    val workspace = runtime.structure.workspaces.firstOrNull { it.id == group.first().workspaceId }
+                    // The tab is a sub-level of the workspace heading above: a small glyph and a
+                    // caption, indented one step so the tree reads without a rail.
+                    val tabLabel = tab?.label ?: tabId.substringAfterLast(':')
+                    item(key = "tab:" + runtime.host.id + ":" + tabId) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = DsSpace.m, top = DsSpace.s, bottom = DsSpace.xxs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            NeoIcon(NeoGlyph.Tab, modifier = Modifier.size(13.dp), tint = colors.textFaint)
+                            Spacer(Modifier.width(DsSpace.xs))
+                            Text(
+                                tabLabel,
+                                style = DsTypography.caption,
+                                color = colors.textSoft,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    item(key = "panes:" + runtime.host.id + ":" + tabId) {
+                        NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
+                            Column(Modifier.fillMaxWidth()) {
+                                group.forEachIndexed { index, pane ->
+                                    PaneRow(
+                                        pane = pane,
+                                        runtime = runtime,
+                                        agent = scopedAgents.firstOrNull { it.hostId == runtime.host.id && it.paneId == pane.id },
+                                        hostScoped = true,
+                                    ) {
+                                        if (onOpenPane != null) onOpenPane(runtime.host.id, pane.id)
+                                        else runtimeHostAgent(scopedAgents, pane, runtime)
+                                            ?.let { onOpenAgent(it, hostScope) }
+                                    }
+                                    if (index != group.lastIndex) NeoDivider(inset = DsSpace.l)
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
+
+            if (panes.isEmpty() && agentGroup.isEmpty() && (scopedAgents.isNotEmpty() || ui.query.isNotBlank())) {
                 item {
                     NeoEmptyState(
                         icon = NeoGlyph.Search,
@@ -452,29 +567,50 @@ fun InboxScreen(
                         body = stringResource(
                             when {
                                 ui.query.isNotBlank() -> R.string.inbox_no_match_search_body
-                                ui.filter == InboxFilter.ATTENTION -> R.string.inbox_no_match_attention_body
                                 hostScope != null -> R.string.inbox_no_match_host_body
                                 else -> R.string.inbox_no_match_none_body
                             },
                         ),
                     ) {
+                        if (ui.query.isNotBlank()) {
+                            NeoButton(
+                                label = stringResource(R.string.inbox_clear_search),
+                                onClick = { onQuery("") },
+                                tone = NeoButtonTone.Ghost,
+                                compact = true,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (panes.isEmpty() && scopedHosts.isNotEmpty()) {
+                item {
+                    NeoEmptyState(
+                        icon = NeoGlyph.Pane,
+                        title = stringResource(R.string.inbox_panes_empty_title),
+                        body = stringResource(
+                            if (ui.query.isNotBlank()) R.string.inbox_no_match_search_body
+                            else R.string.inbox_panes_empty_body,
+                        ),
+                    ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
-                            if (ui.filter == InboxFilter.ATTENTION) {
+                            if (onOpenHost != null) {
                                 NeoButton(
-                                    label = stringResource(R.string.inbox_show_all_agents),
-                                    onClick = { onFilter(InboxFilter.ALL) },
+                                    label = stringResource(R.string.inbox_check_host_sessions, scopedHosts.first().host.label),
+                                    onClick = { onOpenHost(scopedHosts.first().host.id) },
                                     tone = NeoButtonTone.Ghost,
+                                    icon = NeoGlyph.Server,
                                     compact = true,
                                 )
                             }
-                            if (ui.query.isNotBlank()) {
-                                NeoButton(
-                                    label = stringResource(R.string.inbox_clear_search),
-                                    onClick = { onQuery("") },
-                                    tone = NeoButtonTone.Ghost,
-                                    compact = true,
-                                )
-                            }
+                            NeoButton(
+                                label = stringResource(R.string.inbox_recheck_agents),
+                                onClick = onRefresh,
+                                tone = NeoButtonTone.Ghost,
+                                icon = NeoGlyph.Refresh,
+                                compact = true,
+                            )
                         }
                     }
                 }
@@ -633,187 +769,124 @@ private fun HostFilterChip(
 }
 
 @Composable
-private fun DutySummary(
-    agents: List<Agent>,
-    hosts: List<HostRuntime>,
-    now: Long,
-    onOpen: (Agent) -> Unit,
-    onReconnect: (String) -> Unit,
-    selectedHostId: String?,
+private fun EnvironmentRow(failedHosts: List<HostRuntime>, onReconnect: (String) -> Unit) {
+    val colors = ds()
+    Row(
+        Modifier.fillMaxWidth().padding(top = DsSpace.m, bottom = DsSpace.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NeoLamp(color = colors.warn, size = 7.dp)
+        Spacer(Modifier.width(DsSpace.m))
+        Text(
+            stringResource(
+                R.string.inbox_env_offline,
+                failedHosts.joinToString(stringResource(R.string.inbox_list_separator)) { it.host.label },
+            ),
+            style = DsTypography.caption,
+            color = colors.textSoft,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        NeoButton(
+            label = stringResource(R.string.inbox_env_retry),
+            onClick = { failedHosts.forEach { onReconnect(it.host.id) } },
+            tone = NeoButtonTone.Ghost,
+            icon = NeoGlyph.Refresh,
+            compact = true,
+        )
+    }
+}
+
+/** One row per pane: the whole fleet, agent or not, in the same shape as an agent row. */
+@Composable
+private fun PaneRow(
+    pane: HerdPane,
+    runtime: HostRuntime,
+    agent: Agent?,
+    hostScoped: Boolean,
+    onClick: () -> Unit,
 ) {
     val colors = ds()
-    val attention = agents.filter { isAttention(it) }
-    val waiting = attention.filter { it.status == AgentStatus.WAITING }
-    val unknownCount = agents.count { it.status == AgentStatus.UNKNOWN }
-    val workingCount = agents.count { it.status == AgentStatus.WORKING }
-    val reviewCount = agents.count { it.status == AgentStatus.REVIEW }
-    val idleCount = agents.count { it.status == AgentStatus.IDLE }
-    val longest = waiting.minByOrNull { it.sinceMillis }
-    val failures = hosts.filter { (selectedHostId == null || it.host.id == selectedHostId) && it.conn is ConnState.Failed }
-    val offline = hosts.filter { selectedHostId == null || it.host.id == selectedHostId }.any { it.conn !is ConnState.Connected }
-    var showFailures by remember { mutableStateOf(false) }
-    val failuresStateLabel = stringResource(
-        if (showFailures) R.string.inbox_state_expanded else R.string.inbox_state_collapsed,
-    )
-    val failuresToggleLabel = pluralStringResource(
-        if (showFailures) R.plurals.inbox_failures_hide else R.plurals.inbox_failures_show,
-        failures.size,
-        failures.size,
-    )
-    val failuresSummary = pluralStringResource(R.plurals.inbox_failures_short, failures.size, failures.size)
-    NeoCard(
-        modifier = Modifier.fillMaxWidth().padding(top = DsSpace.xs, bottom = DsSpace.xs),
-        depth = DsElev.soft,
+    // A shell pane has no agent status to report; calling it "unknown" reads as a fault.
+    val isShell = agent == null && pane.agentKind.isNullOrBlank()
+    val statusLabel = if (isShell) {
+        stringResource(R.string.inbox_pane_shell)
+    } else {
+        stringResource((agent?.status ?: pane.status).labelRes)
+    }
+    val lamp = when {
+        agent != null -> agentStatusColor(agent.status)
+        isShell -> connStatusColor(runtime.conn)
+        else -> agentStatusColor(pane.status)
+    }
+    // Terminal titles for a shell are the whole "user@host" string; the directory is the useful name.
+    val name = if (isShell) {
+        pane.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: pane.title
+    } else {
+        pane.title
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) { stateDescription = statusLabel }
+            .padding(horizontal = DsSpace.l, vertical = spacing().row),
     ) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = DsSpace.l, vertical = DsSpace.m),
-            verticalArrangement = Arrangement.spacedBy(DsSpace.s),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (attention.isNotEmpty()) {
-                    NeoLamp(color = colors.danger, size = 7.dp)
-                    Spacer(Modifier.width(DsSpace.s))
-                    // Count and label live in one plural so locales can place the space themselves
-                    // ("2 need attention" vs "2需要处理"); concatenating them leaked "2Needs attention".
-                    Text(
-                        pluralStringResource(
-                            R.plurals.inbox_attention_count, attention.size, attention.size,
-                        ),
-                        style = DsTypography.bodyStrong,
-                        color = colors.text,
-                        modifier = Modifier.weight(1f).semantics { heading() },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    longest?.let { oldest ->
-                        NeoButton(
-                            label = stringResource(R.string.inbox_view_oldest, oldest.name),
-                            onClick = { onOpen(oldest) },
-                            tone = NeoButtonTone.Ghost,
-                            compact = true,
-                        )
-                    }
-                    // The wait duration keeps its own line: inline it used to ellipsize the whole row.
-                } else {
-                    NeoLamp(color = if (failures.isNotEmpty()) colors.warn else colors.ok, size = 7.dp)
-                    Spacer(Modifier.width(DsSpace.s))
-                    Text(
-                        stringResource(if (failures.isNotEmpty()) R.string.inbox_some_hosts_offline else R.string.inbox_nothing_pending),
-                        style = DsTypography.bodyStrong,
-                        color = colors.text,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val other = listOfNotNull(
-                        unknownCount.takeIf { it > 0 }?.let {
-                            pluralStringResource(R.plurals.inbox_count_unverified, it, it)
-                        },
-                        reviewCount.takeIf { it > 0 }?.let {
-                            pluralStringResource(R.plurals.inbox_count_review, it, it)
-                        },
-                        workingCount.takeIf { it > 0 }?.let {
-                            pluralStringResource(R.plurals.inbox_count_working, it, it)
-                        },
-                        idleCount.takeIf { it > 0 }?.let {
-                            pluralStringResource(R.plurals.inbox_count_idle, it, it)
-                        },
-                    ).joinToString(" · ")
-                    if (other.isNotBlank()) {
-                        Text(
-                            other,
-                            style = DsTypography.caption,
-                            color = colors.textSoft,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            if (longest != null) {
-                // Second line of the same block, flush left with the count above it. Inline it used
-                // to ellipsize the whole row, and a leading "·" here read as a stray bullet.
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (offline) {
-                            stringResource(
-                                R.string.inbox_longest_waiting_snapshot,
-                                formatElapsed(longest!!.sinceMillis, now),
-                            )
-                        } else {
-                            stringResource(R.string.inbox_longest_waiting, formatElapsed(longest!!.sinceMillis, now))
-                        },
-                        style = DsTypography.caption,
-                        color = colors.textSoft,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (unknownCount > 0) {
-                        Text(
-                            "  ·  " + pluralStringResource(R.plurals.inbox_count_unverified, unknownCount, unknownCount),
-                            style = DsTypography.caption,
-                            color = colors.textSoft,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-            if (failures.isNotEmpty()) {
-                NeoDivider()
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    NeoLamp(color = colors.danger, size = 5.dp)
-                    Text(
-                        failuresSummary,
-                        style = DsTypography.caption,
-                        color = colors.text,
-                        modifier = Modifier.weight(1f).padding(start = DsSpace.s).clearAndSetSemantics { },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    NeoIconButton(
-                        glyph = if (showFailures) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
-                        onClick = { showFailures = !showFailures },
-                        contentDescription = failuresToggleLabel,
-                        modifier = Modifier.semantics { stateDescription = failuresStateLabel },
-                    )
-                }
-                ExpandableSection(expanded = showFailures) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(DsSpace.m),
-                        modifier = Modifier.padding(top = DsSpace.s),
-                    ) {
-                        failures.forEach { runtime ->
-                            Column(verticalArrangement = Arrangement.spacedBy(DsSpace.xxs)) {
-                                Text(
-                                    stringResource(
-                                        R.string.inbox_host_error_line,
-                                        runtime.host.label,
-                                        (runtime.conn as ConnState.Failed).message,
-                                    ),
-                                    style = DsTypography.body,
-                                    color = colors.text,
-                                )
-                                Text(
-                                    stringResource(R.string.inbox_last_synced, formatAgo(runtime.lastSyncAt, now)),
-                                    style = DsTypography.caption,
-                                    color = colors.textSoft,
-                                )
-                                NeoButton(
-                                    label = stringResource(R.string.inbox_reconnect_host, runtime.host.label),
-                                    onClick = { onReconnect(runtime.host.id) },
-                                    tone = NeoButtonTone.Ghost,
-                                    icon = NeoGlyph.Refresh,
-                                    compact = true,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NeoLamp(color = lamp, pulse = agent?.status == AgentStatus.WORKING)
+            Spacer(Modifier.width(DsSpace.m))
+            Text(
+                name.ifBlank { pane.id },
+                style = DsTypography.bodyStrong,
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                pane.id.substringAfterLast(':'),
+                style = DsTypography.mono,
+                color = colors.textFaint,
+                maxLines = 1,
+                modifier = Modifier.padding(start = DsSpace.s),
+            )
+            Spacer(Modifier.width(DsSpace.s))
+            Text(statusLabel, style = DsTypography.caption, color = colors.textSoft, maxLines = 1)
+            // The destination is part of the row: an agent pane opens a conversation, a shell pane
+            // opens a terminal. Saying so beats making the user tap to find out.
+            NeoIcon(
+                if (agent != null || !pane.agentKind.isNullOrBlank()) NeoGlyph.Agent else NeoGlyph.Terminal,
+                modifier = Modifier.size(15.dp).padding(start = DsSpace.xs),
+                tint = colors.textFaint,
+            )
+        }
+        // The workspace and tab are the group heading above this card, so the row itself carries
+        // only what is unique inside that tab: the pane id (next to the name) and the directory.
+        val cwd = agent?.cwd?.takeIf { it.isNotBlank() } ?: pane.cwd?.takeIf { it.isNotBlank() }
+        if (cwd != null) {
+            Text(
+                cwd.replace(Regex("^/home/[^/]+"), "~"),
+                style = DsTypography.micro,
+                color = colors.textFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
+            )
+        } else if (!hostScoped) {
+            Text(
+                runtime.host.label,
+                style = DsTypography.micro,
+                color = colors.textFaint,
+                maxLines = 1,
+                modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
+            )
         }
     }
 }
+
+private fun runtimeHostAgent(agents: List<Agent>, pane: HerdPane, runtime: HostRuntime): Agent? =
+    agents.firstOrNull { it.paneId == pane.id && it.hostId == runtime.host.id }
 
 @Composable
 private fun AgentRow(
@@ -821,6 +894,7 @@ private fun AgentRow(
     now: Long,
     runtime: HostRuntime?,
     hostScoped: Boolean,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = ds()
@@ -831,7 +905,7 @@ private fun AgentRow(
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { stateDescription = statusDescription }
-            .padding(horizontal = DsSpace.l, vertical = spacing().row),
+            .padding(horizontal = DsSpace.l, vertical = if (compact) DsSpace.s + DsSpace.xxs else spacing().row),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             NeoLamp(color = lamp, pulse = agent.status == AgentStatus.WORKING)
@@ -844,6 +918,20 @@ private fun AgentRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (compact) {
+                // Tab and pane, not the workspace: the group heading above already names the
+                // project, and "main · p1" is what tells two same-named agents apart.
+                Text(
+                    listOfNotNull(
+                        agent.tabLabel?.takeIf { it.isNotBlank() },
+                        agent.paneId.substringAfterLast(':'),
+                    ).joinToString(" · "),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = DsSpace.s),
+                )
+            }
             Spacer(Modifier.width(DsSpace.s))
             Text(
                 if (agent.status == AgentStatus.WAITING) formatElapsed(agent.sinceMillis, now) else statusDescription,
@@ -852,21 +940,23 @@ private fun AgentRow(
                 maxLines = 1,
             )
         }
-        // Pane id first: it is the shortest, most stable identifier and must survive a long
-        // English repo name. The tab label is redundant with the pane id, so it is dropped here.
-        val location = listOfNotNull(
-            agent.paneId.takeIf { it.isNotBlank() },
-            agent.workspaceLabel ?: agent.repo,
-            if (hostScoped) null else agent.hostLabel,
-        ).distinct().joinToString("  ·  ")
-        Text(
-            location,
-            style = DsTypography.caption,
-            color = colors.textSoft,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
-        )
+        // Compact rows (the agent section) put the location on the name's own line: five agents
+        // then fit above the fold instead of pushing the pane list off the screen.
+        if (!compact) {
+            val location = listOfNotNull(
+                agent.paneId.substringAfterLast(':').takeIf { it.isNotBlank() },
+                agent.workspaceLabel ?: agent.repo,
+                if (hostScoped) null else agent.hostLabel,
+            ).distinct().joinToString("  ·  ")
+            Text(
+                location,
+                style = DsTypography.caption,
+                color = colors.textSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
+            )
+        }
         val lastSync = runtime?.lastSyncAt
         val stale = runtime?.conn !is ConnState.Connected || lastSync == null || now - lastSync > 15_000
         if (stale) {

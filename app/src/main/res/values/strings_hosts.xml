@@ -11,9 +11,6 @@
     <string name="hosts_empty_action">添加机器</string>
     <string name="hosts_footer">没有通知、没有后台常驻：离开 App 就断开，回来先显示上次快照，再刷新。</string>
     <string name="hosts_open_terminal">打开终端</string>
-    <string name="hosts_check_sessions">检查会话</string>
-    <string name="hosts_connect_bridge">连接会话</string>
-    <string name="hosts_connecting">连接中</string>
     <string name="hosts_details">详情</string>
     <string name="hosts_state_connected">已连接</string>
     <string name="hosts_state_connecting">连接中</string>
@@ -23,11 +20,9 @@
         <item quantity="other">已连接 · %1$d 个 agent</item>
     </plurals>
     <string name="hosts_connecting_ellipsis">连接中…</string>
-    <string name="hosts_failed_short">连接失败 · 详情里看原因</string>
     <string name="hosts_failed_reason">连接失败：%1$s</string>
     <string name="hosts_last_sync">最后成功同步：%1$s</string>
     <string name="hosts_failure_hint">检查网络与 SSH 凭据；若 SSH 正常，检查主机上的 Herdr 命令。</string>
-    <string name="hosts_manage">管理 %1$s</string>
     <string name="hosts_menu_edit">编辑连接</string>
     <string name="hosts_menu_delete">移除机器</string>
     <string name="hosts_delete_title">移除 %1$s？</string>
@@ -39,4 +34,21 @@
     <string name="hosts_detail_fingerprint_line">%1$s\n%2$s</string>
     <string name="hosts_detail_copy">复制连接诊断</string>
     <string name="hosts_session_default">默认</string>
+    <string name="hosts_key_changed_hint">主机密钥变了。确认是不是你换了机器，再决定是否信任新密钥。</string>
+    <string name="hosts_key_review">核对新密钥</string>
+    <string name="hosts_key_changed_title">%1$s 的密钥变了</string>
+    <string name="hosts_key_changed_body">这台主机给出的密钥和上次保存的不一样。可能是系统重装或换了机器，也可能有人在中间冒充它。请在主机上核对下面的新指纹。</string>
+    <string name="hosts_key_expected">上次保存</string>
+    <string name="hosts_key_actual">这次给出</string>
+    <string name="hosts_key_changed_warning">信任后旧密钥会被替换。只有你确认这台机器确实换过，才继续。</string>
+    <string name="hosts_key_trust">确认换机，信任新密钥</string>
+    <string name="hosts_manage_a11y">管理 %1$s</string>
+    <string name="hosts_sessions">会话</string>
+    <string name="hosts_key_first_hint">首次连接需要确认这台机器的密钥。</string>
+    <string name="hosts_key_confirm">确认主机密钥</string>
+    <string name="hosts_key_first_title">确认 %1$s 的密钥</string>
+    <string name="hosts_key_first_body">这是第一次连接这台机器。请在主机上执行 ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub，把下面的指纹和管理员给你的对上，再决定信任。确认之前不会发送任何账号信息。</string>
+    <string name="hosts_key_first_label">这台机器给出（%1$s）</string>
+    <string name="hosts_key_first_warning">信任后这个指纹会被保存；以后它变了，连接会停下来等你再确认。</string>
+    <string name="hosts_key_first_trust">核对无误，信任并连接</string>
 </resources>

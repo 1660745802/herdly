@@ -6,6 +6,8 @@ import kotlinx.serialization.json.JsonObject
 
 /** The connection operations used by the repository; one instance belongs to one host lease. */
 interface HostConnection : AutoCloseable {
+    /** The config this lease was built from; the pin is updated in place after a confirmation. */
+    val config: HostConfig
     val fingerprint: String?
     val isConnected: Boolean
     fun updateConfig(updated: HostConfig)
@@ -15,6 +17,9 @@ interface HostConnection : AutoCloseable {
     suspend fun explain(target: String): JsonObject
     suspend fun readPane(paneId: String, lines: Int = 400, source: String = "recent"): PaneText
     suspend fun sendKeys(paneId: String, keys: List<String>)
+
+    /** Types literal text into a pane's PTY (optionally followed by key tokens such as Enter). */
+    suspend fun sendInput(paneId: String, text: String?, keys: List<String>)
     suspend fun createWorkspace(label: String?, cwd: String? = null): String?
     suspend fun createTab(workspaceId: String, label: String?, cwd: String? = null): String?
     suspend fun splitPane(paneId: String, direction: String)

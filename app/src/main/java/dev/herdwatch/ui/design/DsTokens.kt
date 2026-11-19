@@ -173,15 +173,17 @@ data class Spacing(
 )
 
 object DsSpacing {
-    /** Default rhythm: one clear gutter, breathing room between rows. */
-    val comfortable = Spacing(gutter = 16.dp, block = 12.dp, row = 12.dp)
-
-    /** Tight rhythm for long queues: more rows on the same screen, same tap targets. */
-    val compact = Spacing(gutter = 12.dp, block = 8.dp, row = 8.dp)
+    /**
+     * One rhythm for the whole app. There is deliberately no compact variant: rhythm is a design
+     * decision, and handing it to a switch means shipping two half-tuned layouts instead of one
+     * that reads well. 16dp gutter / 12dp between blocks / 12dp inside a row fits a phone at 1.0x
+     * and still holds at 1.3x font scale, which is the stress case that matters.
+     */
+    val base = Spacing(gutter = 16.dp, block = 12.dp, row = 12.dp)
 }
 
-/** Rhythm in effect for the current density preference. */
-val LocalSpacing = staticCompositionLocalOf { DsSpacing.comfortable }
+/** Rhythm in effect. A composition local so pages read `spacing().gutter` and never hardcode. */
+val LocalSpacing = staticCompositionLocalOf { DsSpacing.base }
 
 @Composable
 @androidx.compose.runtime.ReadOnlyComposable
@@ -207,17 +209,19 @@ data class DsType(
     val headline: TextStyle = TextStyle(
         fontFamily = Sans, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 22.sp,
     ),
+    // Reading text gets 1.55x line height: agent prose arrives in long paragraphs of mixed
+    // Chinese and Latin, and 14/20 was tight enough that three lines read as one block.
     val body: TextStyle = TextStyle(
-        fontFamily = Sans, fontSize = 14.sp, fontWeight = FontWeight.Normal,
-        lineHeight = 20.sp, letterSpacing = 0.1.sp,
+        fontFamily = Sans, fontSize = 15.sp, fontWeight = FontWeight.Normal,
+        lineHeight = 23.sp, letterSpacing = 0.1.sp,
     ),
     val bodyStrong: TextStyle = TextStyle(
-        fontFamily = Sans, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-        lineHeight = 20.sp, letterSpacing = 0.1.sp,
+        fontFamily = Sans, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+        lineHeight = 23.sp, letterSpacing = 0.1.sp,
     ),
     val caption: TextStyle = TextStyle(
         fontFamily = Sans, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-        lineHeight = 16.sp, letterSpacing = 0.2.sp,
+        lineHeight = 17.sp, letterSpacing = 0.2.sp,
     ),
     val micro: TextStyle = TextStyle(
         fontFamily = Sans, fontSize = 11.sp, fontWeight = FontWeight.Medium,

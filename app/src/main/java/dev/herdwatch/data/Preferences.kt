@@ -8,12 +8,6 @@ import kotlinx.coroutines.flow.update
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-enum class MotionMode { FULL, REDUCED }
-
-enum class DensityMode { COMFORTABLE, COMPACT }
-
-enum class InputMode { LINE, DIRECT }
-
 /** App language. SYSTEM follows the device; the rest override it per app. */
 enum class LanguageMode { SYSTEM, ZH, EN }
 
@@ -24,18 +18,11 @@ enum class LanguageMode { SYSTEM, ZH, EN }
 data class AppPreferences(
     val language: LanguageMode = LanguageMode.SYSTEM,
     val theme: ThemeMode = ThemeMode.SYSTEM,
-    val motion: MotionMode = MotionMode.FULL,
-    val density: DensityMode = DensityMode.COMFORTABLE,
     val terminalFontSize: Float = 13f,
-    val snapshotLines: Int = 400,
-    val keyBarRows: Int = 2,
-    val longPressRepeat: Boolean = true,
-    val inputMode: InputMode = InputMode.LINE,
 ) {
     companion object {
         const val MIN_FONT = 9f
         const val MAX_FONT = 22f
-        val SNAPSHOT_CHOICES = listOf(400, 1200)
     }
 }
 
@@ -56,22 +43,10 @@ class PreferencesStore private constructor(
 
     fun setTheme(mode: ThemeMode) = write(KEY_THEME, mode.name) { it.copy(theme = mode) }
 
-    fun setMotion(mode: MotionMode) = write(KEY_MOTION, mode.name) { it.copy(motion = mode) }
-
-    fun setDensity(mode: DensityMode) = write(KEY_DENSITY, mode.name) { it.copy(density = mode) }
-
     fun setTerminalFontSize(size: Float) = write(
         KEY_FONT,
         size.coerceIn(AppPreferences.MIN_FONT, AppPreferences.MAX_FONT),
     ) { it.copy(terminalFontSize = size.coerceIn(AppPreferences.MIN_FONT, AppPreferences.MAX_FONT)) }
-
-    fun setSnapshotLines(lines: Int) = write(KEY_SNAPSHOT, lines) { it.copy(snapshotLines = lines) }
-
-    fun setKeyBarRows(rows: Int) = write(KEY_KEY_ROWS, rows.coerceIn(1, 2)) { it.copy(keyBarRows = rows.coerceIn(1, 2)) }
-
-    fun setLongPressRepeat(enabled: Boolean) = write(KEY_REPEAT, enabled) { it.copy(longPressRepeat = enabled) }
-
-    fun setInputMode(mode: InputMode) = write(KEY_INPUT_MODE, mode.name) { it.copy(inputMode = mode) }
 
 
     private fun <T> write(key: String, value: T, update: (AppPreferences) -> AppPreferences) {
@@ -85,14 +60,8 @@ class PreferencesStore private constructor(
         return AppPreferences(
             language = backend.get(KEY_LANGUAGE)?.let { name -> enumOrNull<LanguageMode>(name) } ?: defaults.language,
             theme = backend.get(KEY_THEME)?.let { name -> enumOrNull<ThemeMode>(name) } ?: defaults.theme,
-            motion = backend.get(KEY_MOTION)?.let { name -> enumOrNull<MotionMode>(name) } ?: defaults.motion,
-            density = backend.get(KEY_DENSITY)?.let { name -> enumOrNull<DensityMode>(name) } ?: defaults.density,
             terminalFontSize = backend.get(KEY_FONT)?.toFloatOrNull()
                 ?.coerceIn(AppPreferences.MIN_FONT, AppPreferences.MAX_FONT) ?: defaults.terminalFontSize,
-            snapshotLines = backend.get(KEY_SNAPSHOT)?.toIntOrNull() ?: defaults.snapshotLines,
-            keyBarRows = backend.get(KEY_KEY_ROWS)?.toIntOrNull() ?: defaults.keyBarRows,
-            longPressRepeat = backend.get(KEY_REPEAT)?.toBooleanStrictOrNull() ?: defaults.longPressRepeat,
-            inputMode = backend.get(KEY_INPUT_MODE)?.let { name -> enumOrNull<InputMode>(name) } ?: defaults.inputMode,
         )
     }
 
@@ -127,12 +96,6 @@ class PreferencesStore private constructor(
         const val FILE = "herdwatch.prefs"
         const val KEY_LANGUAGE = "language"
         const val KEY_THEME = "theme"
-        const val KEY_MOTION = "motion"
-        const val KEY_DENSITY = "density"
         const val KEY_FONT = "terminal.fontSize"
-        const val KEY_SNAPSHOT = "pane.snapshotLines"
-        const val KEY_KEY_ROWS = "terminal.keyBarRows"
-        const val KEY_REPEAT = "terminal.longPressRepeat"
-        const val KEY_INPUT_MODE = "terminal.inputMode"
     }
 }

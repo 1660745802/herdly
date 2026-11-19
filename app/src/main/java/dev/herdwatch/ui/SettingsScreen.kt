@@ -41,10 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
 import dev.herdwatch.data.AppPreferences
-import dev.herdwatch.data.DensityMode
-import dev.herdwatch.data.InputMode
 import dev.herdwatch.data.LanguageMode
-import dev.herdwatch.data.MotionMode
 import dev.herdwatch.data.ThemeMode
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.design.DsElev
@@ -52,7 +49,6 @@ import dev.herdwatch.ui.design.DsMotion
 import dev.herdwatch.ui.design.DsRadius
 import dev.herdwatch.ui.design.DsSpace
 import dev.herdwatch.ui.design.DsTypography
-import dev.herdwatch.data.UpdateChecker
 import dev.herdwatch.ui.design.NeoButton
 import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoPageHeader
@@ -63,7 +59,6 @@ import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoSection
 import dev.herdwatch.ui.design.NeoSegmented
-import dev.herdwatch.ui.design.NeoToggle
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.MonoStyle
@@ -83,27 +78,13 @@ import dev.herdwatch.ui.design.spacing
 fun SettingsScreen(
     hosts: List<HostRuntime>,
     preferences: AppPreferences = AppPreferences(),
-    onBack: () -> Unit,
-    onOpenStyleGuide: (() -> Unit)? = null,
     onLanguage: (LanguageMode) -> Unit = {},
     onTheme: (ThemeMode) -> Unit = {},
-    onMotion: (MotionMode) -> Unit = {},
-    onDensity: (DensityMode) -> Unit = {},
     onFontSize: (Float) -> Unit = {},
-    onSnapshotLines: (Int) -> Unit = {},
-    onKeyBarRows: (Int) -> Unit = {},
-    onLongPressRepeat: (Boolean) -> Unit = {},
-    onInputMode: (InputMode) -> Unit = {},
     onResetFingerprints: () -> Unit = {},
     version: String = "",
-    update: UpdateUi = UpdateUi(),
-    onCheckUpdate: () -> Unit = {},
-    onDismissUpdate: () -> Unit = {},
 ) {
     var confirmReset by remember { mutableStateOf(false) }
-    var showHostPrep by remember { mutableStateOf(false) }
-    var showAbout by remember { mutableStateOf(false) }
-    val uriHandler = LocalUriHandler.current
     val colors = ds()
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
@@ -116,11 +97,6 @@ fun SettingsScreen(
         )
 
         SettingsGroup(stringResource(R.string.settings_group_appearance)) {
-            if (onOpenStyleGuide != null) EntryRow(
-                title = stringResource(R.string.settings_style_title),
-                subtitle = stringResource(R.string.settings_subtitle),
-                onClick = onOpenStyleGuide,
-            )
             LanguageRow(preferences.language, onLanguage)
             OptionRow(
                 title = stringResource(R.string.settings_theme_title),
@@ -134,82 +110,18 @@ fun SettingsScreen(
                 selected = preferences.theme,
                 onSelect = onTheme,
             )
-            OptionRow(
-                title = stringResource(R.string.settings_motion_title),
-                subtitle = stringResource(R.string.settings_motion_summary),
-                options = listOf(
-                    stringResource(R.string.settings_motion_full),
-                    stringResource(R.string.settings_motion_reduced),
-                ),
-                modes = listOf(MotionMode.FULL, MotionMode.REDUCED),
-                selected = preferences.motion,
-                onSelect = onMotion,
-            )
-            OptionRow(
-                title = stringResource(R.string.settings_density_title),
-                subtitle = stringResource(R.string.settings_density_summary),
-                options = listOf(
-                    stringResource(R.string.settings_density_comfortable),
-                    stringResource(R.string.settings_density_compact),
-                ),
-                modes = listOf(DensityMode.COMFORTABLE, DensityMode.COMPACT),
-                selected = preferences.density,
-                onSelect = onDensity,
-            )
         }
 
+        // One habit: how big the text is. Everything else that used to live here (输入模式, 按键栏
+        // 行数, 长按连发) was a switch for a decision the app should have made itself.
         SettingsGroup(stringResource(R.string.settings_group_terminal)) {
             FontSizeRow(preferences.terminalFontSize, onFontSize)
-            OptionRow(
-                title = stringResource(R.string.settings_snapshot_title),
-                subtitle = stringResource(R.string.settings_snapshot_summary),
-                options = listOf(
-                    stringResource(R.string.settings_snapshot_400),
-                    stringResource(R.string.settings_snapshot_1200),
-                ),
-                modes = AppPreferences.SNAPSHOT_CHOICES,
-                selected = preferences.snapshotLines,
-                onSelect = onSnapshotLines,
-            )
-            OptionRow(
-                title = stringResource(R.string.settings_keyrows_title),
-                subtitle = stringResource(R.string.settings_keyrows_summary),
-                options = listOf(
-                    stringResource(R.string.settings_keyrows_one),
-                    stringResource(R.string.settings_keyrows_two),
-                ),
-                modes = listOf(1, 2),
-                selected = preferences.keyBarRows.coerceIn(1, 2),
-                onSelect = onKeyBarRows,
-            )
-            ToggleRow(
-                title = stringResource(R.string.settings_longpress_title),
-                subtitle = stringResource(R.string.settings_longpress_summary),
-                checked = preferences.longPressRepeat,
-                onCheckedChange = onLongPressRepeat,
-            )
-            OptionRow(
-                title = stringResource(R.string.settings_input_title),
-                subtitle = stringResource(R.string.settings_input_summary),
-                options = listOf(
-                    stringResource(R.string.settings_input_line),
-                    stringResource(R.string.settings_input_direct),
-                ),
-                modes = listOf(InputMode.LINE, InputMode.DIRECT),
-                selected = preferences.inputMode,
-                onSelect = onInputMode,
-            )
         }
 
         // Only interactive rows here. The three static statements that used to live in this group
         // (foreground-only, credentials stay local, no telemetry) were unclickable text taking a
         // row each; they are now one caption at the very bottom of the page.
         SettingsGroup(stringResource(R.string.settings_group_security)) {
-            EntryRow(
-                title = stringResource(R.string.settings_hostprep_title),
-                subtitle = stringResource(R.string.settings_hostprep_summary),
-                onClick = { showHostPrep = true },
-            )
             DangerRow(
                 title = stringResource(R.string.settings_reset_fp_title),
                 subtitle = stringResource(R.string.settings_reset_fp_summary),
@@ -218,53 +130,13 @@ fun SettingsScreen(
             )
         }
 
-        SettingsGroup(stringResource(R.string.settings_group_about)) {
-            VersionRow(
-                version = version,
-                update = update,
-                onCheck = onCheckUpdate,
-                onOpenRelease = { url -> openUrl(uriHandler, url) },
-            )
-            EntryRow(
-                title = stringResource(R.string.settings_about),
-                subtitle = stringResource(R.string.settings_about_summary),
-                onClick = { showAbout = true },
-            )
-        }
-
         Text(
-            listOf(
-                stringResource(R.string.settings_boundaries_foreground),
-                stringResource(R.string.settings_boundaries_credentials),
-                stringResource(R.string.settings_rows_privacy_short),
-            ).joinToString("  ·  "),
+            "Herdly $version",
             style = DsTypography.micro,
             color = colors.textFaint,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl, vertical = DsSpace.m),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl, vertical = DsSpace.l),
         )
         Spacer(Modifier.height(DsSpace.xxl))
-    }
-
-    if (showHostPrep) NeoDialog(
-        onDismissRequest = { showHostPrep = false },
-        title = stringResource(R.string.settings_hostprep_title),
-        dismissLabel = stringResource(R.string.common_close),
-    ) { HostPrepBody() }
-    if (showAbout) NeoDialog(
-        onDismissRequest = { showAbout = false },
-        title = stringResource(R.string.settings_about),
-        dismissLabel = stringResource(R.string.common_close),
-    ) { AboutBody() }
-
-    (update.result as? UpdateChecker.Result.Newer)?.let { newer ->
-        UpdateAvailableDialog(
-            release = newer.release,
-            onDismiss = onDismissUpdate,
-            onOpen = { url ->
-                onDismissUpdate()
-                openUrl(uriHandler, url)
-            },
-        )
     }
 
     if (confirmReset) {
@@ -384,22 +256,6 @@ private fun <T> OptionRow(
             onSelect = { i -> modes.getOrNull(i)?.let(onSelect) },
             modifier = Modifier.fillMaxWidth(),
         )
-    }
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    SettingRow(
-        title = title,
-        subtitle = subtitle,
-        onClick = { onCheckedChange(!checked) },
-    ) {
-        NeoToggle(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -542,97 +398,6 @@ private fun NeoChevron() {
 }
 
 @Composable
-private fun HostPrepBody() {
-    val clipboard = LocalClipboardManager.current
-    val command = "herdr remote-api-bridge --check"
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
-        DetailBlock(stringResource(R.string.settings_row_hostprep), stringResource(R.string.settings_row_hostprep_body))
-        NeoWell(Modifier.fillMaxWidth(), corner = DsRadius.control) {
-            Column(Modifier.padding(DsSpace.m)) {
-                SelectionContainer {
-                    Text(stringResource(R.string.settings_check_block), style = MonoStyle, color = ds().text)
-                }
-            }
-        }
-        NeoButton(
-            label = stringResource(R.string.settings_copy_check),
-            onClick = { clipboard.setText(AnnotatedString(command)) },
-            icon = NeoGlyph.Copy,
-            compact = true,
-        )
-        DetailBlock(stringResource(R.string.settings_row_missing), stringResource(R.string.settings_row_missing_body))
-        DetailBlock(stringResource(R.string.settings_row_connfail), stringResource(R.string.settings_row_connfail_body))
-    }
-}
-
-/**
- * Version + the only network feature in the app the user has to ask for.
- *
- * The result lives inline instead of behind another dialog: "already latest" is a five-word
- * answer, and pushing it into a sheet would be heavier than the information it carries.
- */
-@Composable
-private fun VersionRow(
-    version: String,
-    update: UpdateUi,
-    onCheck: () -> Unit,
-    onOpenRelease: (String) -> Unit,
-) {
-    val colors = ds()
-    val result = update.result
-    val status: String = when {
-        update.checking -> stringResource(R.string.settings_update_checking)
-        result is UpdateChecker.Result.Current -> stringResource(R.string.settings_update_current, result.version)
-        result is UpdateChecker.Result.Newer ->
-            stringResource(R.string.settings_update_available, result.release.version)
-
-        result is UpdateChecker.Result.Failed -> stringResource(R.string.settings_update_failed, failureText(result.reason))
-        else -> stringResource(R.string.settings_version_summary)
-    }
-    Column(Modifier.fillMaxWidth().padding(vertical = DsSpace.m), verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.settings_version_title, version),
-                    style = DsTypography.bodyStrong,
-                    color = colors.text,
-                    maxLines = 2,
-                )
-                Text(
-                    status,
-                    style = DsTypography.caption,
-                    color = if (result is UpdateChecker.Result.Failed) colors.danger else colors.textSoft,
-                    maxLines = 3,
-                )
-            }
-            NeoButton(
-                label = if (update.checking) {
-                    stringResource(R.string.settings_update_checking_short)
-                } else {
-                    stringResource(R.string.settings_update_action)
-                },
-                onClick = onCheck,
-                tone = NeoButtonTone.Quiet,
-                enabled = !update.checking,
-                compact = true,
-            )
-        }
-        val newer = result as? UpdateChecker.Result.Newer
-        if (newer != null) {
-            NeoButton(
-                label = stringResource(R.string.settings_update_open),
-                onClick = { onOpenRelease(newer.release.pageUrl) },
-                tone = NeoButtonTone.Primary,
-                compact = true,
-                icon = NeoGlyph.Play,
-            )
-        }
-    }
-    NeoDivider(inset = 0.dp)
-}
-
-/** Turns transport failures into something a person can act on. */
-@Composable
 private fun failureText(reason: String): String = when {
     reason.contains("rate limited", ignoreCase = true) ->
         stringResource(R.string.settings_update_failed_rate)
@@ -644,56 +409,6 @@ private fun failureText(reason: String): String = when {
         stringResource(R.string.settings_update_failed_http, reason)
 
     else -> stringResource(R.string.settings_update_failed_network)
-}
-
-@Composable
-private fun UpdateAvailableDialog(
-    release: UpdateChecker.Release,
-    onDismiss: () -> Unit,
-    onOpen: (String) -> Unit,
-) {
-    val colors = ds()
-    NeoDialog(
-        onDismissRequest = onDismiss,
-        title = stringResource(R.string.settings_update_dialog_title, release.version),
-        confirmLabel = stringResource(
-            if (release.apkUrl != null) R.string.settings_update_download else R.string.settings_update_open,
-        ),
-        onConfirm = { onOpen(release.apkUrl ?: release.pageUrl) },
-        dismissLabel = stringResource(R.string.settings_update_later),
-    ) {
-        if (release.publishedAt.isNotBlank()) {
-            Text(release.publishedAt.take(10), style = DsTypography.caption, color = colors.textSoft)
-        }
-        Column(
-            Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
-        ) {
-            SelectionContainer {
-                Text(
-                    release.notes.ifBlank { stringResource(R.string.settings_update_no_notes) },
-                    style = DsTypography.body,
-                    color = colors.text,
-                )
-            }
-        }
-    }
-}
-
-/** Opens a release page or APK in whatever the device uses; failures are silent by design. */
-private fun openUrl(handler: UriHandler, url: String) {
-    if (url.isBlank()) return
-    runCatching { handler.openUri(url) }
-}
-
-@Composable
-private fun AboutBody() {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.m)) {
-        DetailBlock(stringResource(R.string.settings_row_version), stringResource(R.string.settings_version_value))
-        DetailBlock(stringResource(R.string.settings_row_purpose), stringResource(R.string.settings_row_purpose_body))
-        DetailBlock(stringResource(R.string.settings_row_feedback), stringResource(R.string.settings_row_feedback_body))
-        DetailBlock(stringResource(R.string.settings_row_connection), stringResource(R.string.settings_row_connection_body))
-        DetailBlock(stringResource(R.string.settings_row_privacy), stringResource(R.string.settings_row_privacy_body))
-    }
 }
 
 @Composable

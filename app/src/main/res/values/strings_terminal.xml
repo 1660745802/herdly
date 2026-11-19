@@ -5,7 +5,6 @@
     <string name="terminal_connection_lost">连接中断</string>
     <string name="terminal_back_desc">返回机器列表</string>
     <!-- %1$s：user@host 形式的目标；副标题在进入全屏程序时追加后缀 -->
-    <string name="terminal_subtitle_alt_screen">%1$s · 全屏程序</string>
     <string name="terminal_reconnect_short">重连</string>
     <string name="terminal_options_desc">终端选项</string>
     <string name="terminal_font_larger">放大字号</string>
@@ -20,16 +19,13 @@
     <string name="terminal_ssh_starting">正在建立 SSH 会话…</string>
     <string name="terminal_no_output">还没有输出。</string>
     <string name="terminal_scroll_to_bottom">回到底部</string>
-    <string name="terminal_keys_expand">终端按键</string>
-    <string name="terminal_keys_collapse">收起按键</string>
     <string name="terminal_keys_expand_desc">展开终端按键</string>
     <string name="terminal_keys_collapse_desc">收起终端按键</string>
     <string name="terminal_input_desc">终端命令输入</string>
     <string name="terminal_input_placeholder">输入命令，回车执行</string>
+    <string name="terminal_input_offline">未连接，重连后才能输入</string>
     <string name="terminal_send">发送</string>
     <string name="terminal_paste">粘贴</string>
-    <string name="terminal_input_line">行输入</string>
-    <string name="terminal_input_direct">直通输入</string>
     <string name="terminal_direct_hint">直通：每个字符立即发送（适合 vim/tmux）</string>
     <!-- 按键标签保持英文原样，只本地化无障碍描述 -->
     <string name="terminal_key_escape">Esc 键</string>
@@ -50,6 +46,7 @@
     <string name="terminal_fingerprint_body">这是首次连接 %1$s。信任后，该主机的主机密钥指纹会被保存，之后的连接会自动核对。</string>
     <string name="terminal_fingerprint_security">在确认指纹之前，应用不会把密码或其他凭据发送给这台主机，因此现在中断连接不会有任何凭据泄漏。只有指纹与主机管理员给出的一致时才继续；指纹不符可能意味着有人在中间人攻击。</string>
     <string name="terminal_fingerprint_fingerprint_label">主机密钥指纹</string>
+    <string name="terminal_fingerprint_label_typed">主机密钥指纹（%1$s）</string>
     <string name="terminal_fingerprint_cancel">取消连接</string>
     <string name="terminal_fingerprint_trust">信任并连接</string>
     <string name="terminal_key_page_up">上翻一页</string>

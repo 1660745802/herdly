@@ -13,11 +13,9 @@
     <string name="vm_renamed_workspace">Workspace renamed</string>
     <string name="vm_renamed_tab">Tab renamed</string>
     <string name="vm_renamed_pane">Pane renamed</string>
-    <string name="vm_mutation_accepted">%1$s (request accepted; verify the sync state)</string>
 
     <string name="vm_start_accepted">Start request accepted; check the new task.</string>
     <string name="vm_start_accepted_named">Start request accepted: %1$s. Check the remote state.</string>
-    <string name="vm_restore_accepted">Resume request accepted: %1$s. Check the remote state.</string>
 
     <string name="vm_host_not_found">This machine could not be found.</string>
     <string name="vm_host_added">Added %1$s</string>
@@ -56,10 +54,7 @@
     <string name="vm_approval_verify_cancelled">The approval check was cancelled; nothing was sent.</string>
     <string name="vm_approval_uncertain">The approval result is uncertain. Check the remote state; do not resend. %1$s</string>
 
-    <string name="vm_key_accepted">Key request accepted: %1$s. The remote result still needs verification.</string>
-    <string name="vm_key_accepted_truncated">Key request accepted, but the follow-up screen was incomplete; verify the result and do not approve again.</string>
     <string name="vm_key_accepted_unchanged">Key request accepted, but the screen has not changed yet; verify the result and do not approve again.</string>
-    <string name="vm_key_accepted_changed">Key request accepted and a screen change was observed. This does not mean the remote task succeeded.</string>
     <string name="vm_key_accepted_verify_cancelled">Key request accepted, but the follow-up check was cancelled; the result is uncertain, so do not approve again.</string>
     <string name="vm_key_accepted_read_failed">Key request accepted, but the follow-up read failed; verify the result. %1$s</string>
     <string name="vm_reread_failed_not_sent">Could not re-read the screen; nothing was sent. %1$s</string>
@@ -67,10 +62,12 @@
     <string name="vm_label_keys">Key</string>
     <string name="vm_label_reply">Reply</string>
     <string name="vm_send_cancelled">%1$s cancelled; nothing was sent.</string>
-    <string name="vm_send_accepted">%1$s request accepted; the remote result still needs verification.</string>
     <string name="vm_send_accepted_verify_cancelled">%1$s request accepted; the follow-up check was cancelled.</string>
     <string name="vm_send_interrupted">%1$s request interrupted; whether it was accepted is unknown. Check the remote state.</string>
     <string name="vm_send_accepted_followup_failed">%1$s request accepted, but the follow-up failed: %2$s</string>
     <string name="vm_send_uncertain">%1$s result uncertain; check before acting again: %2$s</string>
     <string name="vm_send_not_sent">%1$s was not sent: %2$s</string>
+    <string name="vm_pane_not_found">That pane is gone.</string>
+    <string name="vm_label_input">terminal input</string>
+    <string name="vm_trust_failed">Could not accept the new key. Try again.</string>
 </resources>

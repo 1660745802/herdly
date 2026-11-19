@@ -10,6 +10,7 @@ import dev.herdwatch.ui.theme.StatusPalette
 import dev.herdwatch.ui.theme.statusColor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.unit.dp
 import org.junit.Test
 
 /**
@@ -54,10 +55,13 @@ class DesignTokensTest {
     }
 
     @Test
-    fun `compact density is tighter than comfortable`() {
-        assertTrue(DsSpacing.compact.gutter < DsSpacing.comfortable.gutter)
-        assertTrue(DsSpacing.compact.row < DsSpacing.comfortable.row)
-        assertTrue(DsSpacing.compact.block < DsSpacing.comfortable.block)
+    fun `one rhythm, tuned for reading`() {
+        // Rhythm is a design decision, not a preference: there is exactly one spacing set, and the
+        // gutter must stay wide enough for a 15sp reading column at 1.3x font scale.
+        val base = DsSpacing.base
+        assertTrue(base.gutter >= 16.dp)
+        assertTrue(base.block >= 12.dp)
+        assertTrue(base.row >= 12.dp)
     }
 
     @Test

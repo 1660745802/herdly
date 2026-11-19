@@ -20,7 +20,7 @@
     <string name="addhost_session_placeholder">Default session</string>
     <string name="addhost_herdr_command">Herdr command</string>
     <string name="addhost_herdr_command_hint">Non-interactive SSH may have a short PATH; an absolute path works here</string>
-    <string name="addhost_fingerprint_note">The fingerprint is recorded on first connect; the connection stops if a saved fingerprint changes.</string>
+    <string name="addhost_fingerprint_note">On first connect you confirm the host fingerprint before any credentials are sent; the connection stops if a saved fingerprint changes.</string>
     <string name="addhost_check_hint">Tip: run herdr remote-api-bridge --check on the host and confirm it prints herdr-api-bridge-v1.</string>
     <string name="addhost_saving">Saving…</string>
     <string name="addhost_err_host_required">Host cannot be empty</string>

@@ -252,18 +252,18 @@ val MonoStyle: TextStyle = DsTypography.mono
 @Composable
 fun HerdwatchTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    reduceMotion: Boolean = false,
-    spacing: Spacing = DsSpacing.comfortable,
     content: @Composable () -> Unit,
 ) {
     val status = if (darkTheme) DarkStatusPalette else LocalStatusPalette.current
-    val reducedMotion = reduceMotion || rememberReducedMotion()
+    // Motion always follows the system accessibility switch. There is no in-app full/reduced
+    // toggle: a user who asked the OS for less motion has already answered that question.
+    val reducedMotion = rememberReducedMotion()
     androidx.compose.runtime.CompositionLocalProvider(
         LocalStatusPalette provides status,
         LocalMotion provides MotionTokens(),
         LocalReducedMotion provides reducedMotion,
         LocalDs provides if (darkTheme) DsDark else DsLight,
-        LocalSpacing provides spacing,
+        LocalSpacing provides DsSpacing.base,
         LocalGlassTokens provides if (darkTheme) DarkGlass else LightGlass,
         LocalTerminalTokens provides if (darkTheme) {
             TerminalTokens(Color(0xFF090B0F), Color(0xFFE8EBF2), Color(0xFFA8B0C0), Color(0xFFB6C3FF), Color(0xFFFF9A8B))

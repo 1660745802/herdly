@@ -7,9 +7,11 @@ import dev.herdwatch.ssh.Snapshot
 import kotlinx.serialization.json.JsonObject
 
 internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Snapshot) : HostConnection {
-    var config = initialConfig
+    override var config = initialConfig
         private set
-    override val fingerprint = "SHA256:test"
+    /** What this machine presents in the handshake; tests rotate it to model a reinstall. */
+    var presentedKey = "SHA256:test"
+    override val fingerprint: String? get() = presentedKey
     override var isConnected = false
         private set
     var closed = false
@@ -42,6 +44,7 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     override suspend fun explain(target: String): JsonObject = unexpected()
     override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = unexpected()
     override suspend fun sendKeys(paneId: String, keys: List<String>): Unit = unexpected()
+    override suspend fun sendInput(paneId: String, text: String?, keys: List<String>): Unit = unexpected()
     override suspend fun createWorkspace(label: String?, cwd: String?): String? = unexpected()
     override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): String? = unexpected()
     override suspend fun splitPane(paneId: String, direction: String): Unit = unexpected()

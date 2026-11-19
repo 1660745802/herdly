@@ -1,0 +1,67 @@
+[0m[48;2;30;46;28m                                                                                                                        [0m
+
+[0m[48;2;30;46;28m                                                                                                                        [0m
+[0m[48;2;30;46;28m [0m[1m[48;2;30;46;28m$ cd /mnt/data/hyper/vendor/xiaomi/frameworks/base && timeout 180 git push origin                                      [0m
+[0m[48;2;30;46;28m [0m[1m[48;2;30;46;28mHEAD:refs/for/xm-main%topic=font-decouple 2>&1 | tail -25[0m[48;2;30;46;28m                                                              [0m
+[0m[48;2;30;46;28m                                                                                                                        [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28m... (17 earlier lines,[0m[48;2;30;46;28m [0m[38;2;126;126;126m[48;2;30;46;28mctrl+o[0m[38;2;156;156;156m[48;2;30;46;28m to expand)[0m[48;2;30;46;28m                                                                               [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28mremote: * Master-Cherry-Pick-Check+1 by gerrit-admin        [0m[48;2;30;46;28m                                                           [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28mremote: [0m[48;2;30;46;28m                                                                                                               [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28mremote: [0m[48;2;30;46;28m                                                                                                               [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28mTo ssh://gerrit.pt.mioffice.cn:29418/vendor/xiaomi/frameworks/base[0m[48;2;30;46;28m                                                     [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28m * [new reference]   HEAD -> refs/for/xm-main%topic=font-decouple[0m[48;2;30;46;28m                                                      [0m
+[0m[48;2;30;46;28m                                                                                                                        [0m
+[0m[48;2;30;46;28m [0m[38;2;156;156;156m[48;2;30;46;28mTook 1.0s[0m[48;2;30;46;28m                                                                                                              [0m
+[0m[48;2;30;46;28m                                                                                                                        [0m
+
+ [0m[3m[38;2;149;149;149mPushed successfully as a new patch set on CL 11219044. Note gerrit warns about subject length / long lines             [0m
+ [0m[3m[38;2;149;149;149m(pre-existing style, same as other CLs).[0m                                                                               
+                                                                                                                        
+ [0m[3m[38;2;149;149;149mReport: commit amended (dbf6444), pushed to refs/for/xm-main?topic=font-decouple, new PS on 11219044. Also mention     [0m
+ [0m[3m[38;2;149;149;149mthat approvals got outdated (normal for new PS) and the CI will re-run; the other 4 CLs untouched.[0m                     
+                                                                                                                        
+ [0m[3m[38;2;149;149;149mShould I also verify the labels? Not needed. But mention the AI-Code-Review etc were reset and need to re-pass, plus   [0m
+ [0m[3m[38;2;149;149;149mmy earlier note that Baseline-Lock/MSG-Check were already -1.[0m                                                          
+                                                                                                                        
+ [0m[3m[38;2;149;149;149mAlso mention it's a new patch set — PS number? Not returned. Could query quickly but rate limits. Skip.[0m                
+
+ 已 amend 并推送完成。                                                                                                  
+                                                                                                                        
+ [0m[1mAmend[0m                                                                                                                  
+                                                                                                                        
+ [0m[38;2;156;156;156m```[0m                                                                                                                    
+   [0m[38;2;88;181;81mcommit dbf6444 (原 db5764f)[0m                                                                                          
+   [0m[38;2;88;181;81mChange-Id: I13c469deb1bfc5dd82343043e820d950d91b9025   ← 未变[0m                                                        
+   [0m[38;2;88;181;81m7 files changed, 437 insertions(+)[0m                                                                                   
+ [0m[38;2;156;156;156m```[0m                                                                                                                    
+                                                                                                                        
+ 提交信息里同步更新了一句（第 3 条）：                                                                                  
+                                                                                                                        
+ [0m[38;2;156;156;156m│ [0m[3m[38;2;211;108;227m参数收 Java 对象, 指针经 fieldID 注册期解析并缓存, 并对空 RenderProxy 做判空保护)[0m                                    
+                                                                                                                        
+ （原来的"懒缓存"描述已不准确，顺手改了。）工作区现在干净。                                                             
+                                                                                                                        
+ [0m[1mPush[0m                                                                                                                   
+                                                                                                                        
+ [0m[38;2;156;156;156m```[0m                                                                                                                    
+   [0m[38;2;88;181;81mgit push origin HEAD:refs/for/xm-main%topic=font-decouple[0m                                                            
+   [0m[38;2;88;181;81mremote: SUCCESS[0m                                                                                                      
+   [0m[38;2;88;181;81mhttps://gerrit.pt.mioffice.cn/c/vendor/xiaomi/frameworks/base/+/11219044[0m                                             
+ [0m[38;2;156;156;156m```[0m                                                                                                                    
+                                                                                                                        
+ [0m[1m注意两点[0m                                                                                                               
+ [0m[38;2;211;108;227m1. [0m新 patch set 让之前的投票全部作废，需要重新跑/重新投：[0m[38;2;211;108;227mCI-Build-Check[0m(miui-hyena)、[0m[38;2;211;108;227mBaseline-Lock[0m、                   
+    [0m[38;2;211;108;227mCommit-MSG-Check[0m/[0m[38;2;211;108;227mV2[0m、[0m[38;2;211;108;227mAI-Code-Review[0m、[0m[38;2;211;108;227mFeature-ID-Check[0m、[0m[38;2;211;108;227mMaster-Cherry-Pick-Check[0m。                                   
+ [0m[38;2;211;108;227m2. [0mGerrit 给了两条 pre-upload 提醒：subject 超过 50 字符、部分行超过 72 字符 —— 这是这套 CL 原来的提交信息风格（5 个   
+    CL 都一样），门禁 [0m[38;2;211;108;227mCommit-MSG-Check[0m 一直在 -1 可能和这个有关，需要的话我可以把 5 个 CL 的 message 一起按 72 列折行、 
+    subject 压缩一下再各自 amend+push。                                                                                 
+                                                                                                                        
+ 另外 4 个 CL（frameworks/base、miui/frameworks/interface、miui/frameworks/base、toolchain）本地没有改动，未推送。      
+
+ [0m[38;2;126;126;126mModel: xiaomi/mimo-v2.6-pro[0m                                                                                            
+
+[0m[38;2;187;80;203m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[7m [0m                                                                                                                       
+[0m[38;2;187;80;203m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[38;2;126;126;126m/mnt/data/hyper[0m
+[0m[38;2;126;126;126m↑88k ↓61k R8.2M CH99.7% $0.075 13.5%/1.0M (auto)                                             xiaomi/mimo-v2.6-pro • high[0m

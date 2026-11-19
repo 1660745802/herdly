@@ -66,9 +66,9 @@ BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REV
 
 ## 6. 审批和发送
 
-`pane.read(recent, 400)` 默认提供原始证据；可在详情设为 1200 行并恢复 400 行，请求范围在 ViewModel 内按 agent 记忆（至多 80 个）。刷新、重进和审批前后读屏均使用当前范围；它不代表实际返回行数。`ReadSource` 没有历史游标或 scrollback 分页，扩展最近快照不等于加载完整历史。读取失败保留旧原文并标注错误、过期状态。
+读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`，`lines` 由 `AppViewModel.PANE_READ_LINES = 1200` 起步，上滑到顶时按 `historyLines` 翻倍（上限 `MAX_HISTORY_LINES = 19_200`），直到服务端返回 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能靠请求更长的尾部，每次响应都是上一次的超集；界面不显示请求行数，只在截断时给一句轻提示。读取失败保留旧原文并标注错误与过期状态。
 
-终端使用独立权重视口，状态提示压缩成一行（错误 > 操作结果 > 陈旧 > 读取时间），底部回复与审批入口固定；小高度时收起面包屑和前后导航。页面骨架契约见 [design/style-direction.md](design/style-direction.md) 第 11 节。审批面板暂停轮询；发送启动后关闭，校验拒绝则保留并展示原因。恢复阅读时若正在发送，不触发竞争读请求。
+终端使用独立权重视口；状态条只在错误、操作结果、主机断开、证据过期或 TalkBack 暂停时出现，正常阅读不显示时钟与暂停开关。底部回复与审批入口固定，小高度时收起页头细节。页面骨架契约见 [design/interaction-spec.md](design/interaction-spec.md)。审批面板暂停轮询；发送启动后关闭，校验拒绝则保留并展示原因。恢复阅读时若正在发送，不触发竞争读请求。
 
 AskParser 去 ANSI / 控制字符后，仅解析末尾的连续编号菜单、y/n、Enter/Esc。编号必须从 1 连续开始；菜单后出现新的业务输出时不复用旧选项。英文意图按词匹配，避免把 token 等文本当作 ok。问题与所有选项完整展示。
 
@@ -82,11 +82,20 @@ AskParser 去 ANSI / 控制字符后，仅解析末尾的连续编号菜单、y/
 
 发送结果区分 RPC 请求已接受、屏幕变化、未变化和后续读取失败。屏幕未变化不能证明没送到，变化也不能证明任务成功。已接受的同一份审批证据禁止重复辅助提交；结果不确定时阻止继续写入，需要刷新、阅读并显式核对远端后解除。长期授权独立二次确认，中断始终确认 Ctrl-C。
 
-回复草稿只在 RPC 接受后清除同一版本；失败或用户已经编辑新草稿时保留。界面聚焦模式只折叠装饰线和多余空行，不影响审批证据或复制原文。全屏阅读器使用打开时捕获的不可变原始快照，查找与高亮只影响展示，不参与审批证据。
+回复草稿只在 RPC 接受后清除同一版本；失败或用户已经编辑新草稿时保留。终端模式默认显示原始屏幕（`ui/AnsiText.kt` 渲染 SGR 颜色，并裁掉快照为对齐补的行尾空格）；聚焦模式只额外折叠装饰线与多余空行。审批证据、复制与核对始终使用原始文本。
+
+### 对话视图的诚实边界
+
+`domain/AgentTranscript.kt` 把一屏快照拆成 user / assistant / tool / system / approval 块。它是**启发式**，因此宁可拒绝也不猜：
+
+- `>` 开头的行只有在整行没有制表符（│ ┃ ├ ┼ 等）、长度 ≤160、不是 `$ ` 命令、也不含 `405 ~ 105` 这类区间时才认作用户发言；引用的表格行因此不会被标成「你」。
+- ``` 围栏内的内容是字面代码，不再做任何角色识别（否则命令行注释会被拆成新的一段对话）。
+- 只有 `coverage ≥ 0.6 && 块数 ≥ 2 && 至少一个 user 或 assistant 块` 才置 `reliable`；不可信时对话视图退化成一整块正文（去掉装饰行），不再弹「无法识别」的提示——切到终端模式随时能看到原文。
+- 审批、复制、看原文永远使用原始证据，绝不使用拆分结果。
 
 **剩余限制**：读屏与发送是两次 RPC，无法消除其中的远端状态变化窗口。严格原子审批需要 Herdr 提供带 expected revision / evidence 的条件写入 API。解析器仍是启发式，无法识别时提供原文、手动按键和回复。
 
-界面材质由 `ui/design` 的 `DsTokens` + `neoRaised` / `neoInset` / `neoState` 统一实现：单一光源的同心圆角矩形合成阴影，兼容 API 26，不使用系统 backdrop blur。`GlassBackdrop` 只画底盘色与左上角极淡提亮。终端与全屏阅读器共用 `LocalTerminalTokens`，保持不透明和高对比。
+界面材质由 `ui/design` 的 `DsTokens` + `neoRaised` / `neoInset` / `neoState` 统一实现：单一光源的同心圆角矩形合成阴影，兼容 API 26，不使用系统 backdrop blur。`GlassBackdrop` 只画底盘色与左上角极淡提亮。终端表面共用 `LocalTerminalTokens`，保持不透明和高对比。
 
 ## 7. 结构与任务
 
@@ -96,7 +105,8 @@ resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 使用 `--con
 
 ## 8. 信任与存储
 
-- 首次连接不再静默 TOFU：没有已保存指纹时，SSH 层在握手阶段中止并抛出 `UnknownHostKeyException`（携带观察到的 SHA-256 指纹），凭证不会发给未确认的主机；界面必须展示指纹、由用户显式确认后才以 `allowUnknownKey=true` 重连，成功后再把指纹持久化。已有指纹在握手阶段校验，`StrictHostKeyChecking=yes`；JSch 认证与校验配置按 session 设置。
+- 首次连接不再静默 TOFU，终端和 Herdr 桥两条连接一致：没有已保存指纹时 SSH 层在握手阶段中止并抛出 `UnknownHostKeyException`（携带 SHA-256 指纹与算法名），凭证不会发给未确认的主机。终端页弹出指纹确认框，确认后以 `allowUnknownKey=true` 重连；桥连接把待确认指纹放进 `HostRuntime.pendingKey`，机器卡片显示「确认主机密钥」，确认后 `trustNewFingerprint` 先落盘再重连。已有指纹在握手阶段校验，`StrictHostKeyChecking=yes`；JSch 认证与校验配置按 session 设置。
+- 主机密钥算法固定为 `ssh-ed25519, rsa-sha2-512/256, ecdsa-sha2-nistp256/384/521`（`HostKeyPolicy`），与 OpenSSH 默认顺序一致，用户核对的指纹能和 `ssh-keygen -lf` 对上；不提供 SHA-1 的 `ssh-rsa`/`ssh-dss`。
 - 首次指纹必须同步持久化成功，再发布连接就绪。保存失败会暴露错误，不能只在内存中信任。
 - 密钥变化展示保存值与本次观察值，显式确认后更新；认证错误不会伪装成密钥变化。
 - 主机列表、密码 / 私钥 / passphrase 加密保存。配置使用 `commit()`，主副恢复副本保存同一代信任状态，防止回退旧副本复活已删凭据或旧 pin。
@@ -110,7 +120,7 @@ resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 使用 `--con
 
 构建、安装与测试命令见 [development.md](development.md)。
 
-JVM 单元测试共 92 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ReadingPause、DailyWorkflow、VtScreen（VT 解析器）与 UpdateChecker（Release 解析与版本比较）。DailyWorkflow 覆盖队列顺序与 pane ID 搜索、收起搜索保留查询与导航队列、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接尝试挂起期间重复重连合并。Repository 测试覆盖编辑后迟到连接、后台迟到快照、返回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败，使用虚拟时间与 `runTest` 的 `backgroundScope`。
+JVM 单元测试共 150 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ReadingPause、SentMessage、PageStack、DesignTokens、NeoGlyph、DailyWorkflow、AgentTranscript（对话/终端两种读法的启发式拆分与真实快照夹具）、VtScreen（VT 解析器，含备用屏幕与 2004 括号粘贴）与 UpdateChecker（Release 解析与版本比较）。DailyWorkflow 覆盖队列顺序与 pane ID 搜索、收起搜索保留查询与导航队列、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接尝试挂起期间重复重连合并。Repository 测试覆盖编辑后迟到连接、后台迟到快照、返回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败，使用虚拟时间与 `runTest` 的 `backgroundScope`。
 
 Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性、方法级延迟、聚合状态发布，以及无回复 / 不执行 shell 就关闭传输；其中包含真实 Paramiko socket-pair 传输。JVM 传输测试直接运行 JSch → 回环 Paramiko SSH，验证自身请求超时与外部取消的区别、取消关闭 socket 与新连接恢复、写入已提交但回包丢失且不自动重发、认证失败和 pin 不匹配。无 Python / Paramiko 时相关传输测试明确跳过；使用 `HERDR_TEST_PYTHON` 指定可用解释器，详见 [tools/README.md](../tools/README.md)。
 

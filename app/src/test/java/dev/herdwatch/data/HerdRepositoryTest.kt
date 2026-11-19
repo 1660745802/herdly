@@ -1,5 +1,6 @@
 package dev.herdwatch.data
 
+import dev.herdwatch.i18n.TestStrings
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
@@ -7,6 +8,8 @@ import dev.herdwatch.model.HerdPane
 import dev.herdwatch.model.HerdStructure
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.ssh.HostConnection
+import dev.herdwatch.ssh.HostKeyMismatchException
+import dev.herdwatch.ssh.UnknownHostKeyException
 import dev.herdwatch.ssh.Snapshot
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -265,6 +269,92 @@ class HerdRepositoryTest {
         assertNull(prefs.store.load().single().fingerprint)
         assertTrue(repo.state.value.agents.isEmpty())
         assertTrue(prefs.store.loadAgents(host.id).isEmpty())
+    }
+
+    @Test fun `first connection asks before any credential and trusting pins it`() = runTest {
+        TestStrings.install()
+        val unpinned = host.copy(fingerprint = null)
+        val prefs = preferences(unpinned)
+        var confirmed = false
+        // One client per attempt, as in production: a refused connection is closed and the next
+        // attempt is built from the stored config, which now carries the confirmed pin.
+        val clients = mutableListOf<FakeHostConnection>()
+        val repo = repository(prefs) { config ->
+            connection(config).apply {
+                // Once confirmed, the same machine presents the key the user just accepted.
+                presentedKey = if (confirmed) "SHA256:first" else "SHA256:test"
+                onConnect = { if (!confirmed) throw UnknownHostKeyException("SHA256:first", "ssh-ed25519") }
+            }.also { clients += it }
+        }
+        repo.connectHost(host.id)
+
+        val runtime = repo.state.value.hosts.single()
+        assertEquals("SHA256:first", runtime.pendingKey?.fingerprint)
+        assertEquals("ssh-ed25519", runtime.pendingKey?.keyType)
+        // Nothing was sent to a machine the user has not confirmed yet.
+        assertEquals(0, clients.sumOf { it.pingCalls })
+        assertEquals(0, clients.sumOf { it.snapshotCalls })
+        assertNull(prefs.store.load().single().fingerprint)
+
+        confirmed = true
+        repo.trustNewFingerprint(host.id)
+        advanceUntilIdle()
+
+        assertEquals("SHA256:first", prefs.store.load().single().fingerprint)
+        assertNull(repo.state.value.hosts.single().pendingKey)
+        repo.refreshHost(host.id)
+        advanceUntilIdle()
+        assertEquals(ConnState.Connected, repo.state.value.hosts.single().conn)
+        // Trusting reconnects on its own; the explicit refresh is the page's usual poll.
+        assertTrue(clients.sumOf { it.snapshotCalls } >= 1)
+    }
+
+    @Test fun `key change exposes both fingerprints and trusting it pins only that host`() = runTest {
+        val other = host.copy(id = "other", label = "other", fingerprint = "SHA256:other")
+        val prefs = preferences(host, other)
+        val client = connection(host).apply {
+            onConnect = { throw HostKeyMismatchException("SHA256:test", "SHA256:new") }
+        }
+        // Only the mismatching host is contacted in this test.
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        val runtime = repo.state.value.hosts.single { it.host.id == host.id }
+        assertTrue(runtime.conn is ConnState.Failed)
+        assertEquals("SHA256:test", runtime.keyMismatch?.expected)
+        assertEquals("SHA256:new", runtime.keyMismatch?.actual)
+        assertNull(repo.state.value.hosts.single { it.host.id == other.id }.keyMismatch)
+
+        repo.trustNewFingerprint(host.id)
+        advanceUntilIdle()
+
+        // Durable first: the new pin must survive a restart, and the other host keeps its own.
+        assertEquals("SHA256:new", prefs.store.load().single { it.id == host.id }.fingerprint)
+        assertEquals("SHA256:other", prefs.store.load().single { it.id == other.id }.fingerprint)
+    }
+
+    @Test fun `successful snapshot clears a previous key mismatch`() = runTest {
+        val prefs = preferences(host)
+        val repo = repository(prefs) { connection(it) }
+        repo.connectHost(host.id)
+        assertEquals(ConnState.Connected, repo.state.value.hosts.single().conn)
+
+        // The machine is reinstalled: the same client now presents a different key.
+        repo.updateHost(host.copy(fingerprint = "SHA256:rotated"))
+        repo.refreshHost(host.id)
+        advanceUntilIdle()
+        assertEquals("SHA256:rotated", repo.state.value.hosts.single().keyMismatch?.expected)
+        assertEquals("SHA256:test", repo.state.value.hosts.single().keyMismatch?.actual)
+
+        repo.trustNewFingerprint(host.id)
+        advanceUntilIdle()
+        repo.refreshHost(host.id)
+        advanceUntilIdle()
+
+        val runtime = repo.state.value.hosts.single()
+        assertEquals(ConnState.Connected, runtime.conn)
+        assertNull(runtime.keyMismatch)
+        assertEquals("SHA256:test", prefs.store.load().single().fingerprint)
     }
 
     private fun preferences(vararg hosts: HostConfig) = RepositoryPreferences().also {

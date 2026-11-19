@@ -122,7 +122,7 @@ class HerdrClientTransportTest {
             assertEquals(1, fixture.count("mutations"))
             assertFalse(client.isConnected)
         }
-        HerdrClient(fixture.config().copy(fingerprint = fixture.fingerprint)).use { fresh ->
+        HerdrClient(fixture.config()).use { fresh ->
             fresh.connect()
             val snapshot = fresh.snapshot()
             val agent = snapshot.agents.single { it.paneId == "w1:p1" }
@@ -141,8 +141,8 @@ class HerdrClientTransportTest {
     }
 
     @Test(timeout = 20_000)
-    fun `interactive shell rejects an unpinned key before password authentication`() = withFixture { fixture ->
-        ShellSession(fixture.config()).use { shell ->
+    fun `interactive shell rejects an unpinned key before password authentication`() = withFixture("--canned") { fixture ->
+        ShellSession(fixture.unpinnedConfig()).use { shell ->
             val failure = requestFailure { shell.connect() }
             assertTrue("expected unknown host key, got ${failure.javaClass.simpleName}", failure is UnknownHostKeyException)
             failure as UnknownHostKeyException
@@ -154,8 +154,21 @@ class HerdrClientTransportTest {
     }
 
     @Test(timeout = 20_000)
+    fun `bridge rejects an unpinned key before password authentication`() = withFixture("--canned") { fixture ->
+        HerdrClient(fixture.unpinnedConfig()).use { client ->
+            val failure = requestFailure { client.connect() }
+            assertTrue("expected unknown host key, got ${failure.javaClass.simpleName}", failure is UnknownHostKeyException)
+            failure as UnknownHostKeyException
+            assertEquals(fixture.fingerprint, failure.fingerprint)
+            assertFalse(client.isConnected)
+        }
+        fixture.awaitCount("active_transports", 0)
+        assertEquals("credentials must not reach an unconfirmed host", 0, fixture.count("auth_attempts"))
+    }
+
+    @Test(timeout = 20_000)
     fun `matching pin with wrong password stays an authentication failure`() = withFixture { fixture ->
-        HerdrClient(fixture.config().copy(fingerprint = fixture.fingerprint, secret = "wrong-password")).use { client ->
+        HerdrClient(fixture.config().copy(secret = "wrong-password")).use { client ->
             val failure = requestFailure { client.connect() }
             assertTrue("expected JSch authentication failure, got ${failure.javaClass.simpleName}", failure is JSchException)
             assertTrue("JSch must report auth failure", failure.message.orEmpty().contains("Auth fail", ignoreCase = true))
@@ -164,7 +177,7 @@ class HerdrClientTransportTest {
         }
         fixture.awaitCount("active_transports", 0)
         assertTrue(fixture.count("auth_attempts") >= 1)
-        HerdrClient(fixture.config().copy(fingerprint = fixture.fingerprint)).use { fresh ->
+        HerdrClient(fixture.config()).use { fresh ->
             fresh.connect()
             assertEquals("0.9.5" to 22, fresh.ping())
         }
@@ -185,7 +198,7 @@ class HerdrClientTransportTest {
         }
         fixture.awaitCount("active_transports", 0)
         assertEquals("password authentication must never reach the mismatched host", 0, fixture.count("auth_attempts"))
-        HerdrClient(fixture.config().copy(fingerprint = fixture.fingerprint)).use { fresh ->
+        HerdrClient(fixture.config()).use { fresh ->
             fresh.connect()
             assertEquals("0.9.5" to 22, fresh.ping())
         }
@@ -243,7 +256,11 @@ class HerdrClientTransportTest {
         fun config() = HostConfig(
             id = "transport-test", label = "loopback fixture", host = "127.0.0.1",
             port = ready.getValue("port").jsonPrimitive.int, user = "fixture", secret = password,
+            fingerprint = fingerprint,
         )
+
+        /** A host the user has never confirmed: no pin at all. */
+        fun unpinnedConfig() = config().copy(fingerprint = null)
 
         fun count(name: String): Int = readJson(statusFile).getValue(name).jsonPrimitive.int
 

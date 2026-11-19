@@ -64,7 +64,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -203,6 +205,9 @@ fun NeoButton(
                 role = Role.Button,
                 onClick = onClick,
             )
+            // Without this a disabled button is indistinguishable from a broken one to TalkBack,
+            // and the grey fill alone is easy to miss on a bright screen.
+            .semantics { if (!enabled) disabled() }
             .padding(horizontal = horizontal, vertical = vertical),
         horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
@@ -516,6 +521,7 @@ fun NeoKey(
     onPress: () -> Unit,
     modifier: Modifier = Modifier,
     wide: Boolean = false,
+    stretch: Boolean = false,
     active: Boolean = false,
 ) {
     val colors = ds()
@@ -533,8 +539,12 @@ fun NeoKey(
     )
     Box(
         modifier = modifier
-            .height(48.dp)
-            .then(if (wide) Modifier.width(64.dp) else Modifier.width(48.dp))
+            .height(44.dp)
+            // A key bar is a compromise with the keyboard it replaces: the target stays above the
+            // 40dp floor while the row costs 44dp of terminal rows instead of 48.
+            // Free-standing keys keep a fixed width (56dp when wide); inside a weighted row the
+            // caller passes stretch so the key fills its slot instead of leaving dead space.
+            .then(if (stretch) Modifier else Modifier.width(if (wide) 56.dp else 44.dp))
             .neoState(DsRadius.key, DsElev.soft, fill, colors, sink)
             .clip(RoundedCornerShape(DsRadius.key))
             .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onPress),

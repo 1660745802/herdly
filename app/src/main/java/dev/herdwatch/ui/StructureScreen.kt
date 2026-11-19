@@ -7,7 +7,6 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -15,9 +14,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,7 +26,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,7 +48,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
 import dev.herdwatch.model.Agent
@@ -70,12 +68,13 @@ import dev.herdwatch.ui.design.NeoCard
 import dev.herdwatch.ui.design.NeoEmptyState
 import dev.herdwatch.ui.design.NeoChip
 import dev.herdwatch.ui.design.NeoDialog
-import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoField
 import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
+import dev.herdwatch.ui.design.NeoLamp
 import dev.herdwatch.ui.design.NeoMenu
+import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
 import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoSheet
@@ -86,6 +85,19 @@ import dev.herdwatch.ui.theme.statusColor
 import dev.herdwatch.ui.design.spacing
 import androidx.compose.ui.semantics.Role
 
+/**
+ * Workspace > tab > pane tree.
+ *
+ * One card per workspace; tabs and panes nest behind a hairline rail instead of repeating the
+ * words "tab"/"pane" on every row. Workspaces default to collapsed except the focused one, so a
+ * 3-workspace / 7-tab / 11-pane host fits on one phone screen. Each level has exactly one
+ * overflow menu; destructive entries go through a NeoDialog that names the target and counts
+ * what will end.
+ *
+ * [onOpenAgent] is optional: App.kt does not wire it yet, so pane rows fall back to focusing the
+ * pane and the "Open agent" menu entry renders disabled with a reason. When a caller supplies it,
+ * agent panes get a trailing chevron and tapping opens the agent instead.
+ */
 @Composable
 fun StructureScreen(
     runtime: HostRuntime,
@@ -105,18 +117,36 @@ fun StructureScreen(
     onRenameTab: (String, String) -> Unit,
     onRenamePane: (String, String) -> Unit,
     currentAgents: List<Agent>? = null,
+    onOpenAgent: ((Agent) -> Unit)? = null,
 ) {
     val structure = runtime.structure
     val colors = ds()
     var pendingClose by remember { mutableStateOf<CloseTarget?>(null) }
     var renaming by remember { mutableStateOf<RenameTarget?>(null) }
-    var showShells by rememberSaveable(runtime.host.id) { mutableStateOf(false) }
     val availablePaneIds = structure.panes.filter { it.isAvailableShell(runtime, currentAgents) }.map { it.id }.toSet()
+    val occupancyAvailable = currentAgents != null
     fun targetPath(paneId: String? = null, tabId: String? = null, workspaceId: String? = null): String {
         val pane = structure.panes.firstOrNull { it.id == paneId }
         val tab = structure.tabs.firstOrNull { it.id == (tabId ?: pane?.tabId) }
         val workspace = structure.workspaces.firstOrNull { it.id == (workspaceId ?: tab?.workspaceId ?: pane?.workspaceId) }
         return listOfNotNull(runtime.host.label, workspace?.label, tab?.label, pane?.let { "${it.title.ifBlank { it.id }} (${it.id})" }, pane?.cwd ?: workspace?.worktreePath).joinToString("\n")
+    }
+    // Cards resolve the consequence sentence (counts, agent name) during composition where
+    // string resources are available, then hand it up with the target id.
+    val requestClose: (String, String, String) -> Unit = { type, id, detail ->
+        pendingClose = CloseTarget(
+            type = type,
+            id = id,
+            path = targetPath(
+                paneId = id.takeIf { type == "pane" },
+                tabId = id.takeIf { type == "tab" },
+                workspaceId = id.takeIf { type == "workspace" },
+            ),
+            detail = detail,
+        )
+    }
+    val requestRename: (String, String, String) -> Unit = { type, id, label ->
+        renaming = RenameTarget(type, id, label)
     }
     Column(Modifier.fillMaxSize()) {
         NeoPageHeader(
@@ -164,23 +194,31 @@ fun StructureScreen(
             verticalArrangement = Arrangement.spacedBy(spacing().block),
         ) {
             item {
-                SummaryCard(runtime, showShells, availablePaneIds.size, currentAgents != null, onCreateWorkspace, onStartAgent) { showShells = !showShells }
+                SummaryCard(runtime, availablePaneIds.size, occupancyAvailable, onCreateWorkspace, onStartAgent)
             }
             if (structure.workspaces.isEmpty()) {
                 item {
-                    // 空状态也用同一套组件：图标、标题、说明、主行动按钮。
-                    NeoEmptyState(
-                        icon = NeoGlyph.Tray,
-                        title = stringResource(R.string.structure_empty_title),
-                        body = stringResource(R.string.structure_empty_body),
-                    ) {
-                        NeoButton(
-                            label = stringResource(R.string.structure_new_workspace),
-                            onClick = onCreateWorkspace,
-                            tone = NeoButtonTone.Primary,
-                            icon = NeoGlyph.Plus,
-                            enabled = runtime.conn is ConnState.Connected,
+                    if (runtime.conn is ConnState.Connecting || runtime.conn is ConnState.Idle) {
+                        // Loading reads as a state with a next step, not a spinner in a list.
+                        NeoEmptyState(
+                            icon = NeoGlyph.Server,
+                            title = stringResource(R.string.structure_loading_title),
+                            body = stringResource(R.string.structure_loading_body),
                         )
+                    } else {
+                        NeoEmptyState(
+                            icon = NeoGlyph.Tray,
+                            title = stringResource(R.string.structure_empty_title),
+                            body = stringResource(R.string.structure_empty_body),
+                        ) {
+                            NeoButton(
+                                label = stringResource(R.string.structure_new_workspace),
+                                onClick = onCreateWorkspace,
+                                tone = NeoButtonTone.Primary,
+                                icon = NeoGlyph.Plus,
+                                enabled = runtime.conn is ConnState.Connected,
+                            )
+                        }
                     }
                 }
             }
@@ -189,21 +227,23 @@ fun StructureScreen(
                     workspace = workspace,
                     modifier = animateItemMotion(),
                     structure = structure,
+                    hostId = runtime.host.id,
+                    currentAgents = currentAgents,
+                    occupancyAvailable = occupancyAvailable,
+                    availablePaneIds = availablePaneIds,
+                    // Focused workspace opens by default; if Herdr reports no focus at all,
+                    // open the first one so the page never loads as a wall of collapsed cards.
+                    defaultExpanded = workspace.focused ||
+                        (structure.workspaces.none { it.focused } && workspace == structure.workspaces.first()),
                     onFocusWorkspace = { onFocusWorkspace(workspace.id) },
                     onCreateTab = { onCreateTab(workspace.id) },
-                    onCloseWorkspace = { pendingClose = CloseTarget("workspace", workspace.id, targetPath(workspaceId = workspace.id)) },
                     onFocusTab = onFocusTab,
-                    onCloseTab = { id -> pendingClose = CloseTarget("tab", id, targetPath(tabId = id)) },
                     onFocusPane = onFocusPane,
                     onSplit = onSplit,
-                    onClosePane = { id -> pendingClose = CloseTarget("pane", id, targetPath(paneId = id)) },
                     onStartAgent = onStartAgent,
-                    availablePaneIds = availablePaneIds,
-                    showShells = showShells,
-                    onShowShells = { showShells = true },
-                    onRenameWorkspace = { renaming = RenameTarget("workspace", workspace.id, workspace.label) },
-                    onRenameTab = { tab -> renaming = RenameTarget("tab", tab.id, tab.label) },
-                    onRenamePane = { pane -> renaming = RenameTarget("pane", pane.id, pane.title) },
+                    onOpenAgent = onOpenAgent,
+                    onRequestClose = requestClose,
+                    onRequestRename = requestRename,
                 )
             }
             item {
@@ -244,15 +284,10 @@ fun StructureScreen(
     }
 
     pendingClose?.let { target ->
-        val closeBody = when (target.type) {
-            "workspace" -> stringResource(R.string.structure_close_workspace_body)
-            "tab" -> stringResource(R.string.structure_close_tab_body)
-            else -> stringResource(R.string.structure_close_pane_body)
-        }
         NeoDialog(
             onDismissRequest = { pendingClose = null },
             title = stringResource(R.string.structure_close_title, typeName(target.type)),
-            subtitle = stringResource(R.string.structure_close_message, target.label, closeBody),
+            subtitle = stringResource(R.string.structure_close_message, target.path, target.detail),
             confirmLabel = stringResource(R.string.common_close),
             onConfirm = {
                 when (target.type) {
@@ -268,7 +303,7 @@ fun StructureScreen(
     }
 }
 
-private data class CloseTarget(val type: String, val id: String, val label: String)
+private data class CloseTarget(val type: String, val id: String, val path: String, val detail: String)
 
 private data class RenameTarget(val type: String, val id: String, val label: String)
 
@@ -288,15 +323,44 @@ private fun HerdPane.isAvailableShell(host: HostRuntime, currentAgents: List<Age
         currentAgents != null && currentAgents.none { it.hostId == host.host.id && it.paneId == id } &&
         agentKind == null && status == AgentStatus.IDLE && sessionKind == null && sessionValue == null && restoreError == null
 
+/** Agent count prefers live occupancy data; falls back to the pane's reported kind. */
+private fun countAgents(panes: List<HerdPane>, hostId: String, currentAgents: List<Agent>?): Int =
+    if (currentAgents != null) {
+        panes.count { pane -> currentAgents.any { it.hostId == hostId && it.paneId == pane.id } }
+    } else {
+        panes.count { it.agentKind != null }
+    }
+
+/** Caption-sized mono: ids and paths must never drop below the caption token. */
+private val captionMono
+    @Composable get() = DsTypography.mono.copy(
+        fontSize = DsTypography.caption.fontSize,
+        lineHeight = DsTypography.caption.lineHeight,
+    )
+
+/**
+ * The hairline rail that carries the tree: one 1dp line in the divider ink, indented per level.
+ * Must live inside a Row with IntrinsicSize.Min height so fillMaxHeight measures against content.
+ */
+@Composable
+private fun TreeRail() {
+    val colors = ds()
+    Box(
+        Modifier
+            .width(1.dp)
+            .fillMaxHeight()
+            .padding(vertical = DsSpace.xs)
+            .background(colors.shadowDark.copy(alpha = if (colors.isDark) 0.35f else 0.18f)),
+    )
+}
+
 @Composable
 private fun SummaryCard(
     runtime: HostRuntime,
-    showShells: Boolean,
     availableShellCount: Int,
     occupancyAvailable: Boolean,
     onCreateWorkspace: () -> Unit,
     onStartAgent: (String?) -> Unit,
-    onToggleShells: () -> Unit,
 ) {
     val s = runtime.structure
     val colors = ds()
@@ -312,26 +376,20 @@ private fun SummaryCard(
                         pluralStringResource(R.plurals.structure_tab_count, s.tabs.size, s.tabs.size),
                         pluralStringResource(R.plurals.structure_pane_count, s.panes.size, s.panes.size),
                     ),
-                    style = DsTypography.headline,
+                    // Body size, not headline: at 20sp these counts wrapped and collided with the
+                    // actions in English and at 1.3x font scale.
+                    style = DsTypography.body,
                     color = colors.text,
+                    maxLines = 2,
                     modifier = Modifier.weight(1f),
                 )
-                val shells = s.panes.count { it.agentKind == null }
-                if (shells > 0) {
-                    NeoButton(
-                        label = if (showShells) {
-                            stringResource(R.string.structure_collapse_shells)
-                        } else {
-                            pluralStringResource(R.plurals.structure_other_panes, shells, shells)
-                        },
-                        onClick = onToggleShells,
-                        tone = NeoButtonTone.Ghost,
-                        compact = true,
-                    )
-                }
             }
             Spacer(Modifier.height(DsSpace.m))
-            Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 NeoButton(
                     label = stringResource(R.string.structure_add_workspace),
                     onClick = onCreateWorkspace,
@@ -346,6 +404,14 @@ private fun SummaryCard(
                     tone = NeoButtonTone.Quiet,
                     enabled = availableShellCount > 0,
                     compact = true,
+                )
+            }
+            if (runtime.conn !is ConnState.Connected) {
+                Text(
+                    stringResource(R.string.structure_connect_first),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                    modifier = Modifier.padding(top = DsSpace.s),
                 )
             }
             if (availableShellCount == 0) {
@@ -376,58 +442,84 @@ private fun SummaryCard(
 private fun WorkspaceCard(
     workspace: HerdWorkspace,
     structure: HerdStructure,
+    hostId: String,
+    currentAgents: List<Agent>?,
+    occupancyAvailable: Boolean,
+    availablePaneIds: Set<String>,
+    defaultExpanded: Boolean,
     modifier: Modifier = Modifier,
     onFocusWorkspace: () -> Unit,
     onCreateTab: () -> Unit,
-    onCloseWorkspace: () -> Unit,
     onFocusTab: (String) -> Unit,
-    onCloseTab: (String) -> Unit,
     onFocusPane: (String) -> Unit,
     onSplit: (String, String) -> Unit,
-    onClosePane: (String) -> Unit,
     onStartAgent: (String?) -> Unit,
-    showShells: Boolean,
-    onShowShells: () -> Unit,
-    onRenameWorkspace: () -> Unit,
-    onRenameTab: (HerdTab) -> Unit,
-    onRenamePane: (HerdPane) -> Unit,
-    availablePaneIds: Set<String>,
+    onOpenAgent: ((Agent) -> Unit)?,
+    onRequestClose: (String, String, String) -> Unit,
+    onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    var expanded by rememberSaveable(workspace.id) { mutableStateOf(true) }
+    var expanded by rememberSaveable(workspace.id) { mutableStateOf(defaultExpanded) }
     val expandedState = stringResource(R.string.structure_state_expanded)
     val collapsedState = stringResource(R.string.structure_state_collapsed)
     val tabs = structure.tabsOf(workspace.id)
+    val panes = structure.panes.filter { it.workspaceId == workspace.id }
+    val agentCount = countAgents(panes, hostId, currentAgents)
     val colors = ds()
+    val closeDetail = stringResource(
+        R.string.structure_close_workspace_detail,
+        pluralStringResource(R.plurals.structure_tab_count, tabs.size, tabs.size),
+        pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
+        pluralStringResource(R.plurals.structure_agent_count, agentCount, agentCount),
+    )
     NeoCard(modifier = modifier.fillMaxWidth(), depth = DsElev.soft) {
         Column(Modifier.padding(DsSpace.l)) {
-            Text(stringResource(R.string.structure_type_workspace), style = DsTypography.micro, color = colors.textFaint)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "W${workspace.number}",
-                    style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
-                    color = colors.textFaint,
-                )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = if (expanded) stringResource(R.string.common_collapse) else stringResource(R.string.common_expand),
+                    ) { expanded = !expanded }
+                    .semantics { stateDescription = if (expanded) expandedState else collapsedState },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RotatingChevron(expanded = expanded, contentDescription = null)
                 Spacer(Modifier.width(DsSpace.s))
-                Text(
-                    workspace.label,
-                    style = DsTypography.headline,
-                    color = colors.text,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                NeoIconButton(
-                    glyph = NeoGlyph.Edit,
-                    onClick = onRenameWorkspace,
-                    contentDescription = stringResource(R.string.structure_rename_workspace_desc, workspace.label),
-                )
-                if (workspace.linkedWorktree) FocusPill("worktree")
-                AnimatedVisibility(
-                    visible = workspace.focused,
-                    enter = fadeIn(tween(motionMillis(160))) + expandHorizontally(tween(motionMillis(200))),
-                    exit = fadeOut(tween(motionMillis(120))) + shrinkHorizontally(tween(motionMillis(160))),
-                ) { FocusPill(stringResource(R.string.structure_pill_current), active = workspace.focused) }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            workspace.label,
+                            style = DsTypography.headline,
+                            color = colors.text,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        AnimatedVisibility(
+                            visible = workspace.focused,
+                            enter = fadeIn(tween(motionMillis(160))) + expandHorizontally(tween(motionMillis(200))),
+                            exit = fadeOut(tween(motionMillis(120))) + shrinkHorizontally(tween(motionMillis(160))),
+                        ) {
+                            Row {
+                                Spacer(Modifier.width(DsSpace.s))
+                                FocusPill(stringResource(R.string.structure_pill_current))
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(
+                            R.string.structure_summary_line,
+                            stringResource(R.string.structure_ws_number, workspace.number),
+                            pluralStringResource(R.plurals.structure_tab_count, tabs.size, tabs.size),
+                            pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
+                        ),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                        maxLines = 2,
+                    )
+                }
                 Box {
                     NeoIconButton(
                         glyph = NeoGlyph.More,
@@ -436,54 +528,66 @@ private fun WorkspaceCard(
                     )
                     NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         NeoMenuItem(label = stringResource(R.string.structure_focus), onClick = { menu = false; onFocusWorkspace() })
-                        NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenameWorkspace() })
-                        NeoMenuItem(label = stringResource(R.string.structure_new_tab), onClick = { menu = false; onCreateTab() })
-                        NeoMenuItem(label = stringResource(R.string.structure_close_workspace), onClick = { menu = false; onCloseWorkspace() })
+                        NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("workspace", workspace.id, workspace.label) })
+                        NeoMenuItem(label = stringResource(R.string.structure_new_tab), icon = NeoGlyph.Plus, onClick = { menu = false; onCreateTab() })
+                        NeoMenuDivider()
+                        NeoMenuItem(label = stringResource(R.string.structure_close_workspace), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("workspace", workspace.id, closeDetail) })
                     }
                 }
             }
-            workspace.repoName?.let { repo ->
-                Text(
-                    buildString {
-                        append(repo)
-                        workspace.worktreePath?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
-                    },
-                    style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
-                    color = colors.textFaint,
-                    modifier = Modifier.padding(top = DsSpace.xxs),
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                NeoButton(
-                    label = if (expanded) {
-                        pluralStringResource(R.plurals.structure_collapse_tabs, tabs.size, tabs.size)
-                    } else {
-                        pluralStringResource(R.plurals.structure_expand_tabs, tabs.size, tabs.size)
-                    },
-                    onClick = { expanded = !expanded },
-                    tone = NeoButtonTone.Ghost,
-                    compact = true,
-                    modifier = Modifier.semantics { stateDescription = if (expanded) expandedState else collapsedState },
-                )
-                ExpandChevron(expanded = expanded)
-            }
             ExpandableSection(expanded) {
-                tabs.forEach { tab ->
-                    TabBlock(
-                        tab = tab,
-                        panes = structure.panesOf(tab.id),
-                        onFocusTab = { onFocusTab(tab.id) },
-                        onCloseTab = { onCloseTab(tab.id) },
-                        onFocusPane = onFocusPane,
-                        onSplit = onSplit,
-                        onClosePane = onClosePane,
-                        onStartAgent = onStartAgent,
-                        showShells = showShells,
-                        onShowShells = onShowShells,
-                        onRenameTab = { onRenameTab(tab) },
-                        onRenamePane = onRenamePane,
-                        availablePaneIds = availablePaneIds,
-                    )
+                if (workspace.linkedWorktree || workspace.repoName != null) {
+                    Row(
+                        Modifier.padding(top = DsSpace.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (workspace.linkedWorktree) {
+                            FocusPill(stringResource(R.string.structure_pill_worktree), active = false)
+                            Spacer(Modifier.width(DsSpace.s))
+                        }
+                        workspace.repoName?.let { repo ->
+                            Text(
+                                buildString {
+                                    append(repo)
+                                    workspace.worktreePath?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+                                },
+                                style = captionMono,
+                                color = colors.textFaint,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+                tabs.forEachIndexed { index, tab ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = DsSpace.s)
+                            .height(IntrinsicSize.Min),
+                    ) {
+                        TreeRail()
+                        Spacer(Modifier.width(DsSpace.m))
+                        Column(Modifier.weight(1f)) {
+                            TabBlock(
+                                tab = tab,
+                                panes = structure.panesOf(tab.id),
+                                hostId = hostId,
+                                currentAgents = currentAgents,
+                                occupancyAvailable = occupancyAvailable,
+                                availablePaneIds = availablePaneIds,
+                                defaultExpanded = tab.focused || (tabs.none { it.focused } && index == 0),
+                                onFocusTab = { onFocusTab(tab.id) },
+                                onFocusPane = onFocusPane,
+                                onSplit = onSplit,
+                                onStartAgent = onStartAgent,
+                                onOpenAgent = onOpenAgent,
+                                onRequestClose = onRequestClose,
+                                onRequestRename = onRequestRename,
+                            )
+                        }
+                    }
                 }
                 NeoButton(
                     label = if (tabs.isEmpty()) stringResource(R.string.structure_no_tabs) else stringResource(R.string.structure_new_tab_plus),
@@ -491,6 +595,7 @@ private fun WorkspaceCard(
                     tone = NeoButtonTone.Ghost,
                     icon = NeoGlyph.Plus,
                     compact = true,
+                    modifier = Modifier.padding(top = DsSpace.xs),
                 )
             }
         }
@@ -501,52 +606,74 @@ private fun WorkspaceCard(
 private fun TabBlock(
     tab: HerdTab,
     panes: List<HerdPane>,
+    hostId: String,
+    currentAgents: List<Agent>?,
+    occupancyAvailable: Boolean,
+    availablePaneIds: Set<String>,
+    defaultExpanded: Boolean,
     onFocusTab: () -> Unit,
-    onCloseTab: () -> Unit,
     onFocusPane: (String) -> Unit,
     onSplit: (String, String) -> Unit,
-    onClosePane: (String) -> Unit,
     onStartAgent: (String?) -> Unit,
-    showShells: Boolean,
-    onShowShells: () -> Unit,
-    onRenameTab: () -> Unit,
-    onRenamePane: (HerdPane) -> Unit,
-    availablePaneIds: Set<String>,
+    onOpenAgent: ((Agent) -> Unit)?,
+    onRequestClose: (String, String, String) -> Unit,
+    onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    var expanded by rememberSaveable(tab.id) { mutableStateOf(true) }
+    var expanded by rememberSaveable(tab.id) { mutableStateOf(defaultExpanded) }
     val expandedState = stringResource(R.string.structure_state_expanded)
     val collapsedState = stringResource(R.string.structure_state_collapsed)
     val colors = ds()
-    Column(
-        Modifier.fillMaxWidth().padding(top = DsSpace.s, start = DsSpace.s),
-    ) {
-        Text(stringResource(R.string.structure_type_tab), style = DsTypography.micro, color = colors.textFaint)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AnimatedStatusDot(tab.status, 6.dp)
+    val agentCount = countAgents(panes, hostId, currentAgents)
+    val tabShell = panes.firstOrNull { it.id in availablePaneIds }
+    val closeDetail = stringResource(
+        R.string.structure_close_tab_detail,
+        pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
+        pluralStringResource(R.plurals.structure_agent_count, agentCount, agentCount),
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (expanded) stringResource(R.string.common_collapse) else stringResource(R.string.common_expand),
+                ) { expanded = !expanded }
+                .semantics { stateDescription = if (expanded) expandedState else collapsedState },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NeoLamp(
+                color = statusColor(tab.status, statusPalette()),
+                pulse = tab.status == AgentStatus.WORKING,
+                size = 7.dp,
+            )
             Spacer(Modifier.width(DsSpace.s))
-            Text(
-                "T${tab.number} ${tab.label}",
-                style = DsTypography.headline,
-                color = colors.text,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            NeoIconButton(
-                    glyph = NeoGlyph.Edit,
-                onClick = onRenameTab,
-                contentDescription = stringResource(R.string.structure_rename_tab_desc, tab.label),
-            )
-            Text(
-                stringResource(
-                    R.string.structure_tab_meta,
-                    pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
-                    stringResource(tab.status.labelRes),
-                ),
-                style = DsTypography.micro,
-                color = colors.textFaint,
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(
+                        R.string.structure_tab_title,
+                        stringResource(R.string.structure_tab_number, tab.number),
+                        tab.label,
+                    ),
+                    style = DsTypography.headline,
+                    color = colors.text,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    stringResource(
+                        R.string.structure_summary_line,
+                        pluralStringResource(R.plurals.structure_agent_count, agentCount, agentCount),
+                        pluralStringResource(R.plurals.structure_pane_count, panes.size, panes.size),
+                        stringResource(tab.status.labelRes),
+                    ),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                    maxLines = 2,
+                )
+            }
+            RotatingChevron(expanded = expanded, contentDescription = null)
             Box {
                 NeoIconButton(
                     glyph = NeoGlyph.More,
@@ -555,46 +682,58 @@ private fun TabBlock(
                 )
                 NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     NeoMenuItem(label = stringResource(R.string.structure_focus_tab), onClick = { menu = false; onFocusTab() })
-                    NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenameTab() })
-                    NeoMenuItem(label = stringResource(R.string.structure_close_tab), onClick = { menu = false; onCloseTab() })
+                    if (tabShell != null) {
+                        NeoMenuItem(label = stringResource(R.string.structure_start_agent), icon = NeoGlyph.Play, onClick = { menu = false; onStartAgent(tabShell.id) })
+                    } else {
+                        // Disabled with the reason in the label: a greyed "Start agent" alone
+                        // would read as a bug instead of a safety gate.
+                        NeoMenuItem(
+                            label = if (!occupancyAvailable) stringResource(R.string.structure_start_agent_unverified)
+                            else stringResource(R.string.structure_start_agent_no_shell),
+                            icon = NeoGlyph.Play,
+                            enabled = false,
+                            onClick = {},
+                        )
+                    }
+                    NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("tab", tab.id, tab.label) })
+                    NeoMenuDivider()
+                    NeoMenuItem(label = stringResource(R.string.structure_close_tab), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("tab", tab.id, closeDetail) })
                 }
             }
         }
-        NeoDivider(Modifier.padding(top = DsSpace.xxs, bottom = DsSpace.xxs))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            NeoButton(
-                label = if (expanded) {
-                    stringResource(R.string.structure_collapse_panes)
-                } else {
-                    pluralStringResource(R.plurals.structure_expand_panes, panes.size, panes.size)
-                },
-                onClick = { expanded = !expanded },
-                tone = NeoButtonTone.Ghost,
-                compact = true,
-                modifier = Modifier.semantics { stateDescription = if (expanded) expandedState else collapsedState },
-            )
-            ExpandChevron(expanded = expanded)
-        }
-        val visible = if (showShells) panes else panes.filter { it.agentKind != null || it.status == AgentStatus.UNKNOWN || it.sessionKind != null || it.sessionValue != null }
-        val hiddenShells = panes.size - visible.size
         ExpandableSection(expanded) {
-            visible.forEach { pane ->
-                PaneRow(pane, onFocusPane, onSplit, onClosePane, onStartAgent, onRenamePane, pane.id in availablePaneIds)
-            }
-            if (!showShells && hiddenShells > 0) {
-                Row(Modifier.fillMaxWidth().padding(vertical = DsSpace.xs), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        pluralStringResource(R.plurals.structure_hidden_panes, hiddenShells, hiddenShells),
-                        style = DsTypography.caption,
-                        color = colors.textSoft,
-                        modifier = Modifier.weight(1f),
-                    )
-                    NeoButton(
-                        label = stringResource(R.string.structure_show),
-                        onClick = onShowShells,
-                        tone = NeoButtonTone.Ghost,
-                        compact = true,
-                    )
+            if (panes.isEmpty()) {
+                Text(
+                    stringResource(R.string.structure_no_panes),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                    modifier = Modifier.padding(start = DsSpace.l, top = DsSpace.xs, bottom = DsSpace.xs),
+                )
+            } else {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = DsSpace.s)
+                        .height(IntrinsicSize.Min),
+                ) {
+                    TreeRail()
+                    Spacer(Modifier.width(DsSpace.m))
+                    Column(Modifier.weight(1f)) {
+                        panes.forEach { pane ->
+                            PaneRow(
+                                pane = pane,
+                                agent = currentAgents?.firstOrNull { it.hostId == hostId && it.paneId == pane.id },
+                                availableShell = pane.id in availablePaneIds,
+                                occupancyAvailable = occupancyAvailable,
+                                onFocusPane = onFocusPane,
+                                onSplit = onSplit,
+                                onStartAgent = onStartAgent,
+                                onOpenAgent = onOpenAgent,
+                                onRequestClose = onRequestClose,
+                                onRequestRename = onRequestRename,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -604,39 +743,63 @@ private fun TabBlock(
 @Composable
 private fun PaneRow(
     pane: HerdPane,
+    agent: Agent?,
+    availableShell: Boolean,
+    occupancyAvailable: Boolean,
     onFocusPane: (String) -> Unit,
     onSplit: (String, String) -> Unit,
-    onClosePane: (String) -> Unit,
     onStartAgent: (String?) -> Unit,
-    onRenamePane: (HerdPane) -> Unit,
-    availableShell: Boolean,
+    onOpenAgent: ((Agent) -> Unit)?,
+    onRequestClose: (String, String, String) -> Unit,
+    onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val paneLabel = pane.title.ifBlank { pane.id }
-    val paneKindLabel = pane.agentKind ?: if (availableShell) {
+    val displayName = agent?.name ?: paneLabel
+    val kindLabel = agent?.kind ?: pane.agentKind ?: if (availableShell) {
         stringResource(R.string.structure_pane_idle_shell)
     } else {
         stringResource(R.string.structure_pane_unverified)
     }
     val restoreFailedLabel = stringResource(R.string.structure_restore_failed)
     val paneStatusLabel = stringResource(pane.status.labelRes)
+    val cwdBase = pane.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
     val colors = ds()
+    // Tapping opens the agent only when the caller wired onOpenAgent; otherwise it focuses the
+    // pane, and the chevron stays hidden so the row never promises a navigation it cannot do.
+    val opensAgent = agent != null && onOpenAgent != null
+    val closeDetail = if (agent != null) {
+        stringResource(R.string.structure_close_pane_agent_body, agent.name)
+    } else {
+        stringResource(R.string.structure_close_pane_body)
+    }
     Row(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = stringResource(R.string.structure_focus_pane_label, paneLabel)) { onFocusPane(pane.id) }
-            .semantics { stateDescription = paneStatusLabel }.heightIn(min = 48.dp).padding(vertical = DsSpace.xs),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (opensAgent) stringResource(R.string.structure_open_agent_label, displayName)
+                else stringResource(R.string.structure_focus_pane_label, paneLabel),
+            ) {
+                if (opensAgent) onOpenAgent!!(agent!!) else onFocusPane(pane.id)
+            }
+            .semantics { stateDescription = paneStatusLabel }
+            .padding(vertical = DsSpace.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AnimatedStatusDot(pane.status, 7.dp)
+        NeoLamp(
+            color = statusColor(pane.status, statusPalette()),
+            pulse = pane.status == AgentStatus.WORKING,
+            size = 7.dp,
+        )
         Spacer(Modifier.width(DsSpace.s))
         Column(Modifier.weight(1f)) {
             Text(
-                stringResource(
-                    R.string.structure_pane_meta,
-                    stringResource(R.string.structure_type_pane),
-                    paneLabel,
-                    paneKindLabel,
-                ),
-                style = DsTypography.body,
+                // The row leads with what differs from its siblings: the agent (or shell),
+                // never the repeated word "pane".
+                stringResource(R.string.structure_pane_meta, displayName, kindLabel),
+                style = DsTypography.bodyStrong,
                 color = colors.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -645,38 +808,59 @@ private fun PaneRow(
                 listOfNotNull(
                     pane.id,
                     paneStatusLabel,
-                    pane.cwd,
+                    cwdBase,
                     pane.restoreError?.let { restoreFailedLabel },
                 ).joinToString(" · "),
-                style = DsTypography.mono.copy(fontSize = DsTypography.micro.fontSize),
+                style = captionMono,
                 color = if (pane.restoreError != null) colors.danger else colors.textSoft,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        NeoIconButton(
-                    glyph = NeoGlyph.Edit,
-            onClick = { onRenamePane(pane) },
-            contentDescription = stringResource(R.string.structure_rename_pane_desc, paneLabel),
-        )
-        if (availableShell) {
-            NeoButton(
-                label = stringResource(R.string.structure_start_pane),
-                onClick = { onStartAgent(pane.id) },
-                tone = NeoButtonTone.Quiet,
-                compact = true,
+        if (opensAgent) {
+            NeoIcon(
+                NeoGlyph.ChevronRight,
+                modifier = Modifier.size(18.dp),
+                tint = colors.textSoft,
+                contentDescription = null,
             )
         }
         Box {
             NeoIconButton(
                 glyph = NeoGlyph.More,
                 onClick = { menu = true },
-                contentDescription = stringResource(R.string.structure_pane_actions_desc, paneLabel),
+                contentDescription = stringResource(R.string.structure_pane_actions_desc, displayName),
             )
             NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (agent != null) {
+                    if (onOpenAgent != null) {
+                        NeoMenuItem(label = stringResource(R.string.structure_open_agent), icon = NeoGlyph.ChevronRight, onClick = { menu = false; onOpenAgent(agent) })
+                    } else {
+                        NeoMenuItem(
+                            label = stringResource(R.string.structure_open_agent_unavailable),
+                            icon = NeoGlyph.ChevronRight,
+                            enabled = false,
+                            onClick = {},
+                        )
+                    }
+                } else if (availableShell) {
+                    NeoMenuItem(label = stringResource(R.string.structure_start_agent), icon = NeoGlyph.Play, onClick = { menu = false; onStartAgent(pane.id) })
+                } else {
+                    NeoMenuItem(
+                        label = if (!occupancyAvailable) stringResource(R.string.structure_start_agent_unverified)
+                        else stringResource(R.string.structure_start_agent_no_shell),
+                        icon = NeoGlyph.Play,
+                        enabled = false,
+                        onClick = {},
+                    )
+                }
                 NeoMenuItem(label = stringResource(R.string.structure_focus_pane), onClick = { menu = false; onFocusPane(pane.id) })
-                NeoMenuItem(label = stringResource(R.string.structure_rename), onClick = { menu = false; onRenamePane(pane) })
+                NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("pane", pane.id, pane.title) })
+                NeoMenuDivider()
                 NeoMenuItem(label = stringResource(R.string.structure_split_right), onClick = { menu = false; onSplit(pane.id, "right") })
                 NeoMenuItem(label = stringResource(R.string.structure_split_down), onClick = { menu = false; onSplit(pane.id, "down") })
-                NeoMenuItem(label = stringResource(R.string.structure_close_pane), onClick = { menu = false; onClosePane(pane.id) })
+                NeoMenuDivider()
+                NeoMenuItem(label = stringResource(R.string.structure_close_pane), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("pane", pane.id, closeDetail) })
             }
         }
     }
@@ -697,40 +881,12 @@ private fun FocusPill(text: String, active: Boolean = true) {
     )
     Text(
         text,
-        style = DsTypography.micro,
+        style = DsTypography.caption,
         color = tint,
         modifier = Modifier
             .background(wash, RoundedCornerShape(DsRadius.key))
             .padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
     )
-}
-
-/** 展开/折叠的旋转三角：同一字形与同一运动时长，但用设计系统的描边图标。 */
-@Composable
-private fun ExpandChevron(expanded: Boolean) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(motionMillis(200)),
-        label = "expand-chevron",
-    )
-    NeoIcon(
-        NeoGlyph.ChevronDown,
-        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation },
-        tint = ds().textSoft,
-        contentDescription = null,
-    )
-}
-
-/** Tab/pane status dot: fades between status colors instead of snapping. */
-@Composable
-private fun AnimatedStatusDot(status: AgentStatus, size: Dp) {
-    val target = statusColor(status, statusPalette())
-    val color by animateColorAsState(
-        targetValue = target,
-        animationSpec = tween(motionMillis(220)),
-        label = "status-dot",
-    )
-    Box(Modifier.size(size).background(color, CircleShape))
 }
 
 

@@ -1,17 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Agent detail: header -->
-    <string name="agent_cd_back">Back to inbox</string>
-    <string name="agent_cd_rename">Rename agent</string>
+    <string name="agent_cd_back">Back</string>
     <string name="agent_cd_reread_screen">Reload screen</string>
     <string name="agent_cd_more_actions">More actions</string>
 
     <!-- Agent detail: overflow menu -->
-    <string name="agent_menu_read_fullscreen">Read full screen source</string>
     <string name="agent_rename">Rename</string>
-    <string name="agent_menu_expand_snapshot_1200">Expand snapshot to 1200 lines</string>
-    <string name="agent_menu_reread_snapshot_1200">Reload 1200-line snapshot</string>
-    <string name="agent_menu_restore_snapshot_400">Restore 400-line snapshot</string>
     <string name="agent_menu_status_source">Status source</string>
     <string name="agent_menu_copy_screen">Copy full screen</string>
     <string name="agent_toast_copied_screen">Full screen copied</string>
@@ -21,15 +16,10 @@
     <string name="agent_menu_stop">Stop agent</string>
 
     <!-- Agent detail: snapshot read state -->
-    <string name="agent_reading">Reading…</string>
-    <string name="agent_snapshot_stale">Snapshot not synced</string>
-    <string name="agent_read_at">Read at %1$s</string>
     <string name="agent_state_talkback_paused">TalkBack is on, auto-update stays paused</string>
     <string name="agent_state_autoupdate_paused">Auto-update paused</string>
     <string name="agent_state_autoupdate_on">Auto-update on</string>
     <string name="agent_pause_talkback">Paused under TalkBack</string>
-    <string name="agent_resume_updates">Resume updates</string>
-    <string name="agent_pause_updates">Pause updates</string>
 
     <!-- Agent detail: connection and evidence notices -->
     <string name="agent_host_disconnected">%1$s is not connected; the last screen and draft are kept.</string>
@@ -40,60 +30,35 @@
     <string name="agent_verify_remote">I verified the remote state…</string>
 
     <!-- Agent detail: uncertain state -->
-    <string name="agent_status_unverified">Status unverified</string>
-    <string name="agent_need_read_source">Source view required</string>
-    <string name="agent_no_safe_option">No option that is safe to choose was recognized. Check the full screen, then use a reply or terminal keys.</string>
 
     <!-- Agent detail: terminal pane -->
-    <string name="agent_snapshot_lines">%1$d lines</string>
-    <string name="agent_snapshot_lines_truncated">%1$d lines · truncated</string>
-    <string name="agent_fullscreen">Full screen</string>
     <string name="agent_cd_fold_decorations">Fold decoration lines and extra blank lines</string>
     <string name="agent_state_on">On</string>
     <string name="agent_state_off">Off</string>
-    <string name="agent_view_source">Show source</string>
-    <string name="agent_focus">Focus</string>
     <string name="agent_reading_screen">Reading screen…</string>
-    <string name="agent_folded_hint">Decoration lines and extra blank lines are folded; approvals still check the full source.</string>
-    <string name="agent_screen_empty">The screen is empty.</string>
-    <string name="agent_truncated_hint">The snapshot is truncated. You can expand to 1200 lines; the current protocol cannot page back through older scrollback.</string>
-    <string name="agent_truncated_hint_max">The read range is set to the latest 1200 lines and the output shown is still truncated. The protocol cannot page back through older scrollback.</string>
-    <string name="agent_expand_to_1200">Expand to 1200 lines</string>
 
     <!-- Agent detail: approval area -->
     <string name="agent_need_decision">Your decision is needed</string>
     <string name="agent_recognition_unverified">Recognition needs review</string>
-    <plurals name="agent_view_options">
-        <item quantity="one">View options · %1$d</item>
-        <item quantity="other">View options · %1$d</item>
-    </plurals>
     <string name="agent_state_expanded">Expanded</string>
     <string name="agent_state_collapsed">Collapsed</string>
-    <string name="agent_keys_collapse">Hide keys</string>
-    <string name="agent_keys">Terminal keys</string>
     <string name="agent_submitting">Submitting…</string>
-    <string name="agent_keys_hint">Sends keys straight to the current pane; check the screen before sending.</string>
     <string name="agent_ctrl_latched">Pressed; the next letter will be sent as a combo</string>
     <string name="agent_ctrl_idle">Not pressed</string>
     <string name="agent_cd_arrow_up">Arrow up</string>
     <string name="agent_cd_arrow_down">Arrow down</string>
     <string name="agent_cd_arrow_left">Arrow left</string>
     <string name="agent_cd_arrow_right">Arrow right</string>
-    <string name="agent_stop_ellipsis">Stop…</string>
     <string name="agent_cd_reply_to">Reply to %1$s</string>
     <string name="agent_reply_placeholder">Reply to agent…</string>
     <string name="agent_cd_send_to">Send to %1$s</string>
     <string name="agent_send_reply">Send</string>
 
     <!-- Agent detail: approval sheet -->
-    <string name="agent_context_line">%1$s / %2$s · %3$s</string>
-    <string name="agent_identity">%1$s / %2$s</string>
-    <string name="agent_no_options_now">No approval options can be recognized right now. Go back and check the latest screen.</string>
     <string name="agent_verify_screen_source">Check the screen source</string>
     <string name="agent_blocked_truncated">The snapshot is incomplete. Expand the read and check the source.</string>
     <string name="agent_blocked_unverified">The last operation is still unverified. Refresh the screen before deciding.</string>
     <string name="agent_blocked_cannot_approve">Approval is unavailable. Go back, reload and check the screen.</string>
-    <string name="agent_back_to_terminal">Back to terminal</string>
 
     <!-- Agent detail: dialogs -->
     <string name="agent_explain_title">How Herdr judges status</string>
@@ -108,8 +73,6 @@
     <string name="agent_stop">Stop</string>
 
     <!-- Agent detail: previous / next -->
-    <string name="agent_prev">Previous</string>
-    <string name="agent_next">Next</string>
 
     <!-- Agent detail: approval options and standing approval -->
     <string name="agent_choose_action">Choose an action</string>
@@ -126,5 +89,21 @@
     <!-- Agent detail: back to bottom -->
     <string name="agent_back_to_bottom_new">New output · Back to bottom</string>
     <string name="agent_back_to_bottom">Back to bottom</string>
-    <string name="agent_updates_paused">Auto-read paused — resume on the right</string>
+    <string name="agent_screen_label">Screen</string>
+    <string name="agent_layout_chat">Chat</string>
+    <string name="agent_layout_terminal">Terminal</string>
+    <string name="agent_role_user">You</string>
+    <string name="agent_role_assistant">Agent</string>
+    <string name="agent_role_tool">Tool</string>
+    <string name="agent_role_approval">Decision</string>
+    <string name="agent_role_system">Notice</string>
+    <string name="agent_block_cut">start cut off</string>
+    <string name="agent_input_placeholder">Type a command, Enter to run</string>
+    <string name="agent_run">Run</string>
+    <string name="agent_decision_from_screen">Options read from the screen</string>
+    <string name="agent_decision_check_screen">Recognition unsure — check the screen</string>
+    <string name="agent_menu_start_agent">Start an agent here</string>
+    <string name="agent_tool_lines">%1$s · %2$d lines</string>
+    <string name="agent_role_thinking">Thinking</string>
+    <string name="agent_thinking_lines">%1$s · %2$d lines</string>
 </resources>

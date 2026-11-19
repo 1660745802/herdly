@@ -1,0 +1,30 @@
+<resources>
+    <string name="manage_title">会话 · %1$s</string>
+    <string name="manage_subtitle">工作区、标签页与分屏，增删改都在这里</string>
+    <string name="manage_create_title">新建</string>
+    <string name="manage_new_workspace">新工作区</string>
+    <string name="manage_new_tab">新标签页</string>
+    <string name="manage_connect_first">连接这台机器后才能新建或修改会话。</string>
+    <string name="manage_empty">还没有工作区，先新建一个。</string>
+    <string name="manage_empty_offline">尚未连接，连上后会显示这台机器的会话。</string>
+    <string name="manage_rename">重命名</string>
+    <string name="manage_rename_title">重命名</string>
+    <string name="manage_rename_label">新名字</string>
+    <string name="manage_close">关闭</string>
+    <string name="manage_close_title">关闭 %1$s？</string>
+    <string name="manage_close_confirm">关闭</string>
+    <string name="manage_split">向右拆分</string>
+    <string name="manage_close_pane_agent" formatted="false">这会结束该分屏里的 %AGENT%。</string>
+    <string name="manage_close_pane_shell">这会结束该分屏里的 shell。</string>
+    <plurals name="manage_close_workspace_detail">
+        <item quantity="other">这会把该工作区的 %1$d 个分屏一起关闭，里面的进程都会结束。</item>
+    </plurals>
+    <plurals name="manage_close_tab_detail">
+        <item quantity="other">这会把该标签页的 %1$d 个分屏一起关闭，里面的进程都会结束。</item>
+    </plurals>
+    <string name="manage_browse">浏览结构</string>
+    <plurals name="manage_pane_count">
+        <item quantity="one">%1$d 个分屏</item>
+        <item quantity="other">%1$d 个分屏</item>
+    </plurals>
+</resources>

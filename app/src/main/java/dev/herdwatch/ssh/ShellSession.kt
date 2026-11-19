@@ -33,7 +33,7 @@ class ShellConnectException(message: String, cause: Throwable? = null) : Excepti
  * The host presents a key we have never stored. Nothing has been sent yet: the caller must show
  * the fingerprint to the user and only then reconnect with that exact fingerprint pinned.
  */
-class UnknownHostKeyException(val fingerprint: String) :
+class UnknownHostKeyException(val fingerprint: String, val keyType: String? = null) :
     Exception(Str.get(R.string.ssh_unknown_host_key, fingerprint))
 
 /**
@@ -65,6 +65,7 @@ class ShellSession(
 
     @Volatile
     private var lastSeenFingerprint: String? = null
+    private var lastSeenType: String? = null
 
     @Volatile
     private var ptyCols = 80
@@ -183,6 +184,9 @@ class ShellSession(
         // Strict checking always runs inside the handshake. With no pin the repository rejects the
         // key after recording its fingerprint, so credentials are never sent before confirmation.
         s.setConfig("StrictHostKeyChecking", "yes")
+        // Match OpenSSH's preference so the fingerprint shown to the user is the one an
+        // administrator gets from ssh-keygen, not whichever curve JSch happens to like first.
+        s.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
         s.serverAliveInterval = 30_000
         s.serverAliveCountMax = 3
         if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
@@ -201,7 +205,7 @@ class ShellSession(
                 throw HostKeyMismatchException(pinned, observed)
             }
             if (pinned == null && observed != null) {
-                throw UnknownHostKeyException(observed)
+                throw UnknownHostKeyException(observed, lastSeenType ?: s.hostKey?.type)
             }
             throw ShellConnectException(Str.get(R.string.ssh_connect_failed, config.host, detail(e)), e)
         }
@@ -250,6 +254,7 @@ class ShellSession(
         override fun check(host: String, key: ByteArray): Int {
             val observed = fingerprintOf(key)
             lastSeenFingerprint = observed
+            lastSeenType = keyAlgorithm(key)
             return if (pinned != null && observed == pinned) {
                 HostKeyRepository.OK
             } else {
@@ -269,6 +274,10 @@ class ShellSession(
         val encoded = s.hostKey?.key ?: error(Str.get(R.string.ssh_no_host_key))
         return fingerprintOf(Base64.getDecoder().decode(encoded))
     }
+
+    /** Key type of the key we actually negotiated, for display next to the fingerprint. */
+    val hostKeyType: String?
+        get() = synchronized(stateGate) { session?.hostKey?.type }
 
     private fun fingerprintOf(key: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(key)

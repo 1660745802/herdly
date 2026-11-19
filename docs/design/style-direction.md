@@ -1,6 +1,6 @@
 # 视觉与交互方向：哑光仪器（Matte Instrument）
 
-状态：已实现基础层（`app/src/main/java/dev/herdwatch/ui/design/` + 可运行的样式页：长按设置页标题 → 设计系统样式页）。
+状态：已实现，全部业务界面都走这一层（`app/src/main/java/dev/herdwatch/ui/design/`）。样式页已删除：它是开发期的脚手架，不该出现在用户的设置里。
 本文件是**唯一**的视觉权威。任何界面元素如果无法用本文里的材质、层级和节奏解释，就不要加。
 
 ## 1. 为什么是这个方向
@@ -123,7 +123,7 @@ Herdly 是一个仪表：它告诉你哪台机器上的哪个 agent 需要你，
 
 - 颜色、间距、圆角、时长只能从 `DsTokens.kt` 取；界面代码里禁止硬编码 `Color(0x…)` 与魔法 dp。
 - 材质只能用 `neoRaised` / `neoInset` / `neoState`；控件只能用 `NeoComponents.kt` 里的实现。
-- 新控件必须先出现在样式页（`StyleGallery.kt`），再进入业务界面。
+- 新控件先在本文件的控件清单里定义状态与尺寸，再进入业务界面；几何图标由 `NeoGlyphTest` 守住内边距与居中。
 - 弹层（对话框 / 菜单 / 底部面板 / 提示条）只能用 `NeoDialog` / `NeoMenu` + `NeoMenuItem` / `NeoSheet` / `NeoSnackbarBody`；直接用 Material 的 `AlertDialog`、`DropdownMenu`、`ModalBottomSheet`、`Snackbar` 会带回另一套底色与字阶。
 - 页面骨架统一用 `NeoPageHeader`：根页不画返回箭头，副标题固定一行，右侧动作放同一行。三个根页的标题基线必须一致。
 

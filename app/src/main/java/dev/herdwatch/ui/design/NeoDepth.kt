@@ -60,6 +60,16 @@ fun Modifier.neoRaised(
     }
 }
 
+/**
+ * Breathing room for a lifted surface.
+ *
+ * The shadow is painted outside the composable's bounds, so anything that clips at those bounds —
+ * a LazyColumn viewport, a Row that measures its children exactly, a parent with `clip` — cuts the
+ * highlight off and the surface looks flat on one side. Callers that place lifted surfaces next to
+ * each other reserve this much space instead of turning the shadow off.
+ */
+val NeoShadowBleed: Dp = 6.dp
+
 /** Milled into the chassis: the light now has to fall *into* the well. */
 fun Modifier.neoInset(
     cornerRadius: Dp,

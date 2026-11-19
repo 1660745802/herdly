@@ -20,7 +20,7 @@
     <string name="addhost_session_placeholder">默认 session</string>
     <string name="addhost_herdr_command">herdr 命令</string>
     <string name="addhost_herdr_command_hint">非交互 SSH 的 PATH 可能很短；可填绝对路径</string>
-    <string name="addhost_fingerprint_note">首次连接自动记录指纹；已保存的指纹变化时停止连接。</string>
+    <string name="addhost_fingerprint_note">首次连接会先让你核对主机指纹，确认后才发送凭据；已保存的指纹变化时停止连接。</string>
     <string name="addhost_check_hint">提示：主机上先运行 herdr remote-api-bridge --check，确认输出 herdr-api-bridge-v1。</string>
     <string name="addhost_saving">保存中…</string>
     <string name="addhost_err_host_required">主机不能为空</string>

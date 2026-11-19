@@ -3,27 +3,23 @@
     <!-- 通用动作词：所有界面共用，避免同一个词出现多种译法 -->
     <string name="common_cancel">取消</string>
     <string name="common_save">保存</string>
-    <string name="common_delete">删除</string>
     <string name="common_remove">移除</string>
     <string name="common_close">关闭</string>
     <string name="common_back">返回</string>
-    <string name="common_retry">重试</string>
     <string name="common_copy">复制</string>
     <string name="common_copied">已复制</string>
-    <string name="common_more">更多</string>
     <string name="common_expand">展开</string>
     <string name="common_collapse">收起</string>
     <string name="common_add">添加</string>
-    <string name="common_confirm">确定</string>
-    <string name="common_loading">加载中…</string>
     <string name="common_refresh">刷新</string>
     <string name="common_reconnect">重新连接</string>
     <string name="common_agent">Agent</string>
-    <string name="mode_agent_tag">AGENT · 决策</string>
-    <string name="mode_terminal_tag">SSH · 终端</string>
+    <string name="mode_agent_tag">AGENT 值守</string>
+    <string name="mode_terminal_tag">SSH 终端</string>
     <string name="status_waiting">等你</string>
     <string name="status_working">进行中</string>
     <string name="status_review">待查看</string>
     <string name="status_idle">空闲</string>
     <string name="status_unknown">未识别</string>
+    <string name="mode_shell_tag">SSH 终端</string>
 </resources>

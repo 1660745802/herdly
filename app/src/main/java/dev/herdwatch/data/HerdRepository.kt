@@ -8,11 +8,14 @@ import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.model.HostRuntime
+import dev.herdwatch.model.KeyMismatch
 import dev.herdwatch.model.PaneText
+import dev.herdwatch.model.PendingHostKey
 import dev.herdwatch.ssh.HostConnection
 import dev.herdwatch.ssh.HerdrClient
 import dev.herdwatch.ssh.HerdrRpcException
 import dev.herdwatch.ssh.HostKeyMismatchException
+import dev.herdwatch.ssh.UnknownHostKeyException
 import dev.herdwatch.ssh.Snapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -71,6 +74,7 @@ class HerdRepository internal constructor(
     private val hostLocks = HashMap<String, Mutex>()
     private val versions = HashMap<String, Long>()
     private val mismatches = HashMap<String, HostKeyMismatchException>()
+    private val unknownKeys = HashMap<String, PendingHostKey>()
     private val marks = HashMap<String, Seen>()
     private var refreshingGeneration: Long? = null
     private val networkSlots = Semaphore(4)
@@ -100,6 +104,7 @@ class HerdRepository internal constructor(
     private fun invalidate(hostId: String): HostConnection? {
         versions[hostId] = versions[hostId].orZero() + 1
         mismatches.remove(hostId)
+        unknownKeys.remove(hostId)
         return clients.remove(hostId)
     }
 
@@ -285,8 +290,16 @@ class HerdRepository internal constructor(
             if (!current(lease)) return
             clients.remove(lease.hostId)
             if (error is HostKeyMismatchException) mismatches[lease.hostId] = error
+            if (error is UnknownHostKeyException) {
+                unknownKeys[lease.hostId] = PendingHostKey(error.fingerprint, error.keyType)
+            }
             _state.update { s -> s.copy(hosts = s.hosts.map {
-                if (it.host.id == lease.hostId) it.copy(conn = error?.let { e -> ConnState.Failed(humanize(e)) } ?: ConnState.Idle) else it
+                if (it.host.id != lease.hostId) return@map it
+                it.copy(
+                    conn = error?.let { e -> ConnState.Failed(humanize(e), e.message) } ?: ConnState.Idle,
+                    keyMismatch = (error as? HostKeyMismatchException)?.let { e -> KeyMismatch(e.expected, e.actual) },
+                    pendingKey = unknownKeys[lease.hostId],
+                )
             }) }
             lease.client
         }
@@ -372,9 +385,22 @@ class HerdRepository internal constructor(
     }
 
     suspend fun explain(agent: Agent): kotlinx.serialization.json.JsonObject = useHost(agent.hostId) { it.explain(agent.paneId) }
-    suspend fun readPane(agent: Agent, lines: Int = 400): PaneText = useHost(agent.hostId) { it.readPane(agent.paneId, lines, "recent") }
+    // "recent_unwrapped" asks the bridge to undo the TUI's hard wrapping before we get the text.
+    // Reading prose on a phone means every wrapped line otherwise becomes its own line, which is
+    // what made both the raw view and the chat segmentation look shredded.
+    suspend fun readPane(agent: Agent, lines: Int = 400): PaneText =
+        useHost(agent.hostId) { it.readPane(agent.paneId, lines, "recent_unwrapped") }
     suspend fun sendKeys(agent: Agent, keys: List<String>): Result<Unit> = accepted {
         mutate(agent.hostId) { it.sendKeys(agent.paneId, keys) }
+    }
+
+    /**
+     * Writes literal text (optionally followed by what the caller wants) into the pane's PTY.
+     * Unlike [prompt] this is not interpreted by an agent — it is what makes the detail page work
+     * for panes that have no agent in them (shell, vim, tmux).
+     */
+    suspend fun sendInput(agent: Agent, text: String?, keys: List<String> = emptyList()): Result<Unit> = accepted {
+        mutate(agent.hostId) { it.sendInput(agent.paneId, text, keys) }
     }
     suspend fun prompt(agent: Agent, text: String): Result<Unit> = accepted {
         mutate(agent.hostId) { it.prompt(agent.paneId, text) }
@@ -396,7 +422,10 @@ class HerdRepository internal constructor(
             store.save(updated) // Must succeed before readiness, ping or snapshot publication.
             synchronized(gate) {
                 storedHosts = updated
-                lease.client.updateConfig(host.copy(fingerprint = fingerprint))
+                // The cached client keeps the config it was built with: replacing it here would
+                // hand the next handshake a null pin again, so the confirmation the user just gave
+                // would be silently lost and the machine would ask a second time.
+                lease.client.updateConfig(lease.client.config.copy(fingerprint = fingerprint))
                 _state.update { s -> s.copy(hosts = s.hosts.map {
                     if (it.host.id == host.id) it.copy(host = host.copy(fingerprint = fingerprint)) else it
                 }) }
@@ -438,15 +467,22 @@ class HerdRepository internal constructor(
     }
 
     fun trustNewFingerprint(hostId: String) {
-        val fingerprint = synchronized(gate) { mismatches[hostId]?.actual }
-            ?: throw IllegalStateException(Str.get(R.string.repo_no_new_fingerprint))
+        val fingerprint = synchronized(gate) {
+            mismatches[hostId]?.actual ?: unknownKeys[hostId]?.fingerprint
+        } ?: throw IllegalStateException(Str.get(R.string.repo_no_new_fingerprint))
+        // Store the decision, then invalidate the lease that produced it: updateHost clears the
+        // pending key and closes the refused client, so the reconnect below is built from the
+        // config that now carries the pin instead of re-asking for the same confirmation.
         updateFingerprint(hostId, fingerprint)
+        synchronized(gate) { unknownKeys.remove(hostId) }
         scope.launch { connectHost(hostId) }
     }
 
     // Called only under gate; returns a stable copy for optional cache persistence.
     private fun applySnapshot(lease: Lease, snapshot: Snapshot, fingerprint: String): List<Agent> {
         val hostId = lease.hostId
+        unknownKeys.remove(hostId)
+        mismatches.remove(hostId)
         val now = System.currentTimeMillis()
         val incoming = snapshot.agents.distinctBy { it.key }.map { agent ->
             val prev = marks[agent.key]
@@ -464,6 +500,8 @@ class HerdRepository internal constructor(
                 waitingCount = incoming.count { it.status == AgentStatus.WAITING || it.status == AgentStatus.UNKNOWN },
                 lastSyncAt = now, fingerprint = fingerprint,
                 structure = snapshot.structure,
+                keyMismatch = null,
+                pendingKey = null,
             ) else runtime },
             lastSyncAt = now,
         ) }
@@ -501,7 +539,9 @@ class HerdRepository internal constructor(
 }
 
 fun humanize(t: Throwable): String = when (t) {
-    is HostKeyMismatchException -> t.message ?: Str.get(R.string.repo_host_key_mismatch)
+    // One short line: the card has room for a sentence, and the review dialog shows both keys.
+    is UnknownHostKeyException -> Str.get(R.string.repo_host_key_first)
+    is HostKeyMismatchException -> Str.get(R.string.repo_host_key_mismatch)
     is HerdrRpcException -> Str.get(R.string.repo_rpc_error, t.message ?: "")
     is JSchException -> when {
         t.message?.contains("Auth fail", true) == true || t.message?.contains("auth cancel", true) == true -> Str.get(R.string.repo_auth_failed)

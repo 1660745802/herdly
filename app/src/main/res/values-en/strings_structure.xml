@@ -6,7 +6,7 @@
     <string name="structure_empty_body">In Herdr each project is usually one workspace, grouped by tabs and split into panes. You can create one right here.</string>
     <string name="structure_new_workspace">New workspace</string>
     <!-- Quick action in the summary card; distinct from the "New workspace" button in the empty state -->
-    <string name="structure_add_workspace">Workspace</string>
+    <string name="structure_add_workspace">New workspace</string>
     <string name="structure_footer_hint">This structure is read straight from Herdr. Creating tabs, splitting panes and starting agents here updates the TUI on the host.</string>
 
     <!-- %1$s: type name of a workspace / tab / pane -->
@@ -15,9 +15,34 @@
     <string name="structure_close_title">Close %1$s?</string>
     <!-- %1$s: path of the closing target; %2$s: what will actually end -->
     <string name="structure_close_message">%1$s\n\n%2$s</string>
-    <string name="structure_close_workspace_body">This closes the whole workspace: every tab, pane and process inside it will end.</string>
-    <string name="structure_close_tab_body">This closes the tab: its panes and their processes will end.</string>
     <string name="structure_close_pane_body">This closes the pane: its agent and other processes will be terminated.</string>
+
+    <!-- Tree structure: numbers, titles, counts and close consequences -->
+    <string name="structure_ws_number">W%1$d</string>
+    <string name="structure_tab_number">T%1$d</string>
+    <!-- %1$s: number (T1); %2$s: tab name -->
+    <string name="structure_tab_title">%1$s %2$s</string>
+    <string name="structure_pill_worktree">worktree</string>
+    <string name="structure_no_panes">This tab has no panes yet</string>
+    <!-- %1$s: tab count phrase; %2$s: pane count phrase; %3$s: agent count phrase -->
+    <string name="structure_close_workspace_detail">Contains %1$s and %2$s; %3$s inside will be terminated, and every other process will end too.</string>
+    <!-- %1$s: pane count phrase; %2$s: agent count phrase -->
+    <string name="structure_close_tab_detail">Contains %1$s; %2$s inside will be terminated, and their other processes will end too.</string>
+    <!-- %1$s: agent name -->
+    <string name="structure_close_pane_agent_body">This terminates agent “%1$s” and any other processes in the pane.</string>
+
+    <!-- Open / start agent availability and reasons -->
+    <string name="structure_open_agent">Open agent</string>
+    <!-- %1$s: agent name -->
+    <string name="structure_open_agent_label">Open %1$s</string>
+    <string name="structure_open_agent_unavailable">Open agent (not wired on this page yet; open it from the inbox)</string>
+    <string name="structure_start_agent_no_shell">Start agent (no verified idle pane)</string>
+    <string name="structure_start_agent_unverified">Start agent (pane occupancy unverified)</string>
+
+    <!-- Connection / loading states -->
+    <string name="structure_connect_first">Currently disconnected: the tree below is the last synced snapshot. Reconnect before editing.</string>
+    <string name="structure_loading_title">Reading structure…</string>
+    <string name="structure_loading_body">Workspaces appear once the host connection is up; if nothing changes, tap refresh at the top right.</string>
 
     <string name="structure_type_workspace">workspace</string>
     <string name="structure_type_tab">tab</string>
@@ -25,24 +50,17 @@
 
     <!-- %1$s/%2$s/%3$s: workspace, tab and pane counts -->
     <string name="structure_summary_line">%1$s · %2$s · %3$s</string>
-    <string name="structure_collapse_shells">Hide non-agent panes</string>
     <string name="structure_occupancy_unverified">Pane occupancy cannot be verified right now, so starting agents in existing panes is unavailable. Create a new task from the inbox instead.</string>
-    <string name="structure_no_available_shells">No verified free shell panes. Create a new tab and refresh to re-check; panes that already run an agent, or whose state is unknown, are never used for launching.</string>
+    <string name="structure_no_available_shells">No verified idle shell pane. Create a tab and retry; existing agents are never touched.</string>
     <!-- %1$s: relative time (just now / Ns ago / clock time) -->
     <string name="structure_last_sync">Last successful sync: %1$s</string>
     <string name="structure_last_sync_offline">Last successful sync: %1$s · currently disconnected</string>
 
-    <string name="structure_restore_title">Your previous agents are gone</string>
-    <string name="structure_restore_body">After a Herdr restart or an exited session you can resume in the same pane under the same name.</string>
-    <string name="structure_restore_action">Restore</string>
     <string name="structure_restore_failed">restore failed</string>
     <string name="structure_start_agent">Start agent</string>
     <string name="structure_pill_current">current</string>
 
     <!-- Accessibility descriptions; %1$s: display name of the target -->
-    <string name="structure_rename_workspace_desc">Rename %1$s</string>
-    <string name="structure_rename_tab_desc">Rename %1$s</string>
-    <string name="structure_rename_pane_desc">Rename pane %1$s</string>
     <string name="structure_workspace_actions_desc">Workspace actions for %1$s</string>
     <string name="structure_tab_actions_desc">Tab actions for %1$s</string>
     <string name="structure_pane_actions_desc">Pane actions for %1$s</string>
@@ -56,7 +74,7 @@
     <string name="structure_focus_pane">Focus pane</string>
     <string name="structure_rename">Rename</string>
     <string name="structure_new_tab">New tab</string>
-    <string name="structure_new_tab_plus">＋ New tab</string>
+    <string name="structure_new_tab_plus">New tab</string>
     <string name="structure_close_workspace">Close workspace</string>
     <string name="structure_close_tab">Close tab</string>
     <string name="structure_close_pane">Close pane</string>
@@ -64,20 +82,16 @@
     <string name="structure_split_down">Split down</string>
 
     <string name="structure_no_tabs">This workspace has no tabs yet</string>
-    <string name="structure_collapse_panes">Hide panes</string>
-    <string name="structure_show">Show</string>
-    <string name="structure_start_pane">Start</string>
     <string name="structure_pane_idle_shell">idle shell</string>
     <string name="structure_pane_unverified">unverified pane</string>
     <!-- %1$s: hierarchy label; %2$s: pane title; %3$s: pane kind or availability -->
-    <string name="structure_pane_meta">%1$s · %2$s · %3$s</string>
+    <string name="structure_pane_meta">%1$s · %2$s</string>
     <!-- %1$s: pane count phrase; %2$s: tab status -->
-    <string name="structure_tab_meta">%1$s · %2$s</string>
 
     <!-- Start agent sheet -->
     <string name="structure_start_sheet_body">Only panes verified to be idle shells on connected hosts are listed. Check the target before starting.</string>
     <string name="structure_target_pane">Target pane</string>
-    <string name="structure_no_candidates_no_agents">Pane occupancy cannot be verified. Go back to the inbox and create a new task so a fresh tab is used.</string>
+    <string name="structure_no_candidates_no_agents">Pane occupancy cannot be verified. Create a tab and try again.</string>
     <string name="structure_no_candidates_no_shells">No verified free shell panes. Go back to the structure, create a tab and refresh; no start command is ever sent into an existing agent or an unrecognized pane.</string>
     <!-- %1$s: host; %2$s: workspace; %3$s: tab; %4$s: pane title; %5$s: pane id; %6$s: working directory -->
     <string name="structure_target_detail">Target: %1$s / %2$s / %3$s / %4$s (%5$s)\nDirectory: %6$s</string>
@@ -93,6 +107,10 @@
     <!-- %1$s: agent name -->
     <string name="structure_start_named">Start %1$s</string>
 
+    <plurals name="structure_agent_count">
+        <item quantity="one">%1$d agent</item>
+        <item quantity="other">%1$d agents</item>
+    </plurals>
     <plurals name="structure_workspace_count">
         <item quantity="one">%1$d workspace</item>
         <item quantity="other">%1$d workspaces</item>
@@ -104,25 +122,5 @@
     <plurals name="structure_pane_count">
         <item quantity="one">%1$d pane</item>
         <item quantity="other">%1$d panes</item>
-    </plurals>
-    <plurals name="structure_other_panes">
-        <item quantity="one">Other pane %1$d</item>
-        <item quantity="other">Other panes %1$d</item>
-    </plurals>
-    <plurals name="structure_hidden_panes">
-        <item quantity="one">%1$d other pane</item>
-        <item quantity="other">%1$d other panes</item>
-    </plurals>
-    <plurals name="structure_collapse_tabs">
-        <item quantity="one">Hide %1$d tab</item>
-        <item quantity="other">Hide %1$d tabs</item>
-    </plurals>
-    <plurals name="structure_expand_tabs">
-        <item quantity="one">Show %1$d tab</item>
-        <item quantity="other">Show %1$d tabs</item>
-    </plurals>
-    <plurals name="structure_expand_panes">
-        <item quantity="one">Show %1$d pane</item>
-        <item quantity="other">Show %1$d panes</item>
     </plurals>
 </resources>

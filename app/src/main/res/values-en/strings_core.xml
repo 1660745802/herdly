@@ -2,19 +2,14 @@
 <resources>
     <string name="common_cancel">Cancel</string>
     <string name="common_save">Save</string>
-    <string name="common_delete">Delete</string>
     <string name="common_remove">Remove</string>
     <string name="common_close">Close</string>
     <string name="common_back">Back</string>
-    <string name="common_retry">Retry</string>
     <string name="common_copy">Copy</string>
     <string name="common_copied">Copied</string>
-    <string name="common_more">More</string>
     <string name="common_expand">Expand</string>
     <string name="common_collapse">Collapse</string>
     <string name="common_add">Add</string>
-    <string name="common_confirm">OK</string>
-    <string name="common_loading">Loading…</string>
     <string name="common_refresh">Refresh</string>
     <string name="common_reconnect">Reconnect</string>
     <string name="common_agent">Agent</string>
@@ -25,4 +20,5 @@
     <string name="status_review">To review</string>
     <string name="status_idle">Idle</string>
     <string name="status_unknown">Unknown</string>
+    <string name="mode_shell_tag">SHELL</string>
 </resources>

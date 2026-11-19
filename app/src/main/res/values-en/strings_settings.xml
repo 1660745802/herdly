@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Settings: title and groups -->
-    <string name="settings_back_a11y">Back</string>
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Appearance, terminal behavior, and local security</string>
     <string name="settings_group_appearance">Appearance</string>
     <string name="settings_group_terminal">Terminal</string>
-    <string name="settings_group_connection">Connection &amp; security</string>
-    <string name="settings_group_about">About &amp; diagnostics</string>
 
     <!-- Group 1: appearance -->
     <string name="settings_language_title">Language</string>
@@ -21,44 +18,14 @@
     <string name="settings_theme_system">System</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
-    <string name="settings_motion_title">Motion</string>
-    <string name="settings_motion_summary">Reduced drops slide and scale transitions</string>
-    <string name="settings_motion_full">Full</string>
-    <string name="settings_motion_reduced">Reduced</string>
-    <string name="settings_density_title">Density</string>
-    <string name="settings_density_summary">Compact narrows the margins and tightens rows, so more tasks fit on screen</string>
-    <string name="settings_density_comfortable">Cozy</string>
-    <string name="settings_density_compact">Compact</string>
 
     <!-- Group 2: terminal -->
     <string name="settings_font_title">Font size</string>
     <string name="settings_font_summary">Text size in the terminal and key caps</string>
     <string name="settings_font_decrease">Decrease font size</string>
     <string name="settings_font_increase">Increase font size</string>
-    <string name="settings_snapshot_title">Snapshot lines</string>
-    <string name="settings_snapshot_summary">Lines read from the terminal each time</string>
-    <string name="settings_snapshot_400">400 rows</string>
-    <string name="settings_snapshot_1200">1200 rows</string>
-    <string name="settings_keyrows_title">Key bar</string>
-    <string name="settings_keyrows_summary">Rows of shortcut keys under the terminal</string>
-    <string name="settings_keyrows_one">1 row</string>
-    <string name="settings_keyrows_two">2 rows</string>
-    <string name="settings_longpress_title">Long press</string>
-    <string name="settings_longpress_summary">Keep sending while a key is held</string>
-    <string name="settings_input_title">Input mode</string>
-    <string name="settings_input_summary">Direct suits full-screen apps like vim or tmux</string>
-    <string name="settings_input_line">Line</string>
-    <string name="settings_input_direct">Direct</string>
 
     <!-- Group 3: connection and security -->
-    <plurals name="settings_connected_summary">
-        <item quantity="one">%1$d / %2$d host connected</item>
-        <item quantity="other">%1$d / %2$d hosts connected</item>
-    </plurals>
-    <string name="settings_foreground_title">Foreground only</string>
-    <string name="settings_foreground_row_body">Disconnects when you leave the app: no background watch, no notifications.</string>
-    <string name="settings_credentials_title">Local credentials</string>
-    <string name="settings_credentials_body">Passwords and keys are encrypted on this device and never uploaded.</string>
     <string name="settings_reset_fp_title">Reset fingerprints</string>
     <string name="settings_reset_fp_summary">Clears the saved host keys for every host.</string>
     <string name="settings_reset_fp_action">Reset keys</string>
@@ -66,52 +33,9 @@
     <string name="settings_reset_fp_confirm_body">Use this only when you know the host was reinstalled or replaced. You will confirm the fingerprint again on the next connection.</string>
 
     <!-- Group 4: about and diagnostics -->
-    <string name="settings_hostprep_title">Host setup</string>
-    <string name="settings_hostprep_summary">Check Herdr, the SSH path, and the session</string>
-    <string name="settings_row_hostprep">Host setup</string>
-    <string name="settings_row_hostprep_body">Install Herdr 0.9+ and make sure herdr runs after an SSH login.</string>
-    <string name="settings_check_block">herdr remote-api-bridge --check\nExpected output: herdr-api-bridge-v1</string>
-    <string name="settings_copy_check">Copy check command</string>
-    <string name="settings_row_missing">Command or session not found</string>
-    <string name="settings_row_missing_body">Non-interactive SSH may use a different PATH. Set an absolute herdr path in the host advanced settings, and name the session when it is not the default.</string>
-    <string name="settings_row_connfail">Connection failed</string>
-    <string name="settings_row_connfail_body">Check the network, address, and SSH credentials first, then Herdr. The host connection details can copy diagnostics without saved passwords or private keys.</string>
-    <string name="settings_style_title">Design preview</string>
-    <string name="settings_style_body">Materials, depth, and controls of the matte instrument</string>
-    <string name="settings_about">Version &amp; scope</string>
-    <string name="settings_about_summary">Version, purpose, and action feedback</string>
-    <string name="settings_row_version">Version</string>
-    <string name="settings_version_value">Herdly 0.2.0 · Herdr protocol 22</string>
-    <string name="settings_row_purpose">Purpose</string>
-    <string name="settings_row_purpose_body">Find agents that need you, read terminal evidence, and send actions. The phone app has no file manager, port forwarding, or full terminal.</string>
-    <string name="settings_row_feedback">Action feedback</string>
-    <string name="settings_row_feedback_body">A remote request being accepted does not mean the agent finished. Verify with a fresh terminal read and later snapshots; when unsure, check before sending again.</string>
-    <string name="settings_row_connection">Connection</string>
-    <string name="settings_row_connection_body">Refreshes periodically in the foreground; a sync may be delayed by the network or host state. Direct SSH, one channel per request.</string>
-    <string name="settings_row_privacy">Privacy</string>
-    <string name="settings_row_privacy_body">No telemetry, no relay, no cloud account. Diagnostics reach the clipboard only when you copy them, so share them deliberately.</string>
-    <string name="settings_expanded">Expanded</string>
-    <string name="settings_collapsed">Collapsed</string>
-    <string name="settings_version_title">Herdly %1$s</string>
-    <string name="settings_version_summary">Installed release</string>
-    <string name="settings_privacy_title">Privacy</string>
-    <string name="settings_update_action">Check</string>
-    <string name="settings_update_checking_short">Checking</string>
-    <string name="settings_update_checking">Asking GitHub for the latest release…</string>
-    <string name="settings_update_current">Up to date (%1$s)</string>
-    <string name="settings_update_available">Version %1$s is available</string>
-    <string name="settings_update_failed">Check failed: %1$s</string>
     <string name="settings_update_failed_rate">GitHub is rate limiting; try again later</string>
     <string name="settings_update_failed_none">This repository has no published release yet</string>
     <string name="settings_update_failed_http">the server said %1$s</string>
     <string name="settings_update_failed_network">network unavailable</string>
-    <string name="settings_update_open">Open release page</string>
-    <string name="settings_update_download">Download APK</string>
-    <string name="settings_update_later">Later</string>
-    <string name="settings_update_dialog_title">Version %1$s is out</string>
-    <string name="settings_update_no_notes">This release has no notes.</string>
     <string name="settings_group_security">On-device security</string>
-    <string name="settings_boundaries_foreground">leaving the app disconnects; no background monitoring</string>
-    <string name="settings_boundaries_credentials">credentials are encrypted on this device and never uploaded</string>
-    <string name="settings_rows_privacy_short">no telemetry, no relay, no cloud account</string>
 </resources>

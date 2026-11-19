@@ -12,9 +12,6 @@
     <string name="hosts_empty_action">Add a machine</string>
     <string name="hosts_footer">No notifications, no background daemon: leaving the app disconnects. Coming back shows the last snapshot, then refreshes.</string>
     <string name="hosts_open_terminal">Open terminal</string>
-    <string name="hosts_check_sessions">Sessions</string>
-    <string name="hosts_connect_bridge">Connect sessions</string>
-    <string name="hosts_connecting">Connecting</string>
     <string name="hosts_details">Details</string>
     <string name="hosts_state_connected">Connected</string>
     <string name="hosts_state_connecting">Connecting</string>
@@ -25,11 +22,9 @@
         <item quantity="other">Connected · %1$d agents</item>
     </plurals>
     <string name="hosts_connecting_ellipsis">Connecting…</string>
-    <string name="hosts_failed_short">Connection failed · see Details</string>
     <string name="hosts_failed_reason">Connection failed: %1$s</string>
     <string name="hosts_last_sync">Last successful sync: %1$s</string>
     <string name="hosts_failure_hint">Check the network and SSH credentials. If SSH is fine, check the Herdr command on the host.</string>
-    <string name="hosts_manage">Manage %1$s</string>
     <string name="hosts_menu_edit">Edit connection</string>
     <string name="hosts_menu_delete">Remove machine</string>
     <string name="hosts_delete_title">Remove %1$s?</string>
@@ -41,4 +36,21 @@
     <string name="hosts_detail_fingerprint_line">%1$s\n%2$s</string>
     <string name="hosts_detail_copy">Copy diagnostics</string>
     <string name="hosts_session_default">default</string>
+    <string name="hosts_key_changed_hint">The host key changed. Check whether you replaced the machine before trusting the new key.</string>
+    <string name="hosts_key_review">Review new key</string>
+    <string name="hosts_key_changed_title">%1$s changed its key</string>
+    <string name="hosts_key_changed_body">This host presented a different key than the one saved last time. It may have been reinstalled or replaced — or someone may be impersonating it. Verify the new fingerprint on the host itself.</string>
+    <string name="hosts_key_expected">Saved before</string>
+    <string name="hosts_key_actual">Presented now</string>
+    <string name="hosts_key_changed_warning">Trusting replaces the old key. Continue only if you know this machine changed.</string>
+    <string name="hosts_key_trust">Machine changed, trust it</string>
+    <string name="hosts_manage_a11y">Manage %1$s</string>
+    <string name="hosts_sessions">Sessions</string>
+    <string name="hosts_key_first_hint">First connection: confirm this machine’s key.</string>
+    <string name="hosts_key_confirm">Confirm host key</string>
+    <string name="hosts_key_first_title">Confirm the key of %1$s</string>
+    <string name="hosts_key_first_body">This is the first connection to this machine. On the host run ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub and compare the fingerprint below with the one your administrator gave you. No credentials are sent until you confirm.</string>
+    <string name="hosts_key_first_label">Presented by this machine (%1$s)</string>
+    <string name="hosts_key_first_warning">Trusting saves this fingerprint. If it ever changes, the connection stops and asks you again.</string>
+    <string name="hosts_key_first_trust">Matches, trust and connect</string>
 </resources>

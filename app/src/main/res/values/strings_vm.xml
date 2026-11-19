@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 结构操作：成功文案本身会被 vm_mutation_accepted 包一层 -->
+    <!-- 结构操作：成功不出提示，列表变化本身就是回执；失败才说话 -->
     <string name="vm_created_workspace">已新建 workspace</string>
     <string name="vm_created_tab">已新建 tab</string>
     <string name="vm_split_right">已向右拆分</string>
@@ -14,12 +14,10 @@
     <string name="vm_renamed_workspace">已重命名工作区</string>
     <string name="vm_renamed_tab">已重命名标签页</string>
     <string name="vm_renamed_pane">已重命名分屏</string>
-    <string name="vm_mutation_accepted">%1$s（请求已接受，请核对同步状态）</string>
 
     <!-- 启动 / 恢复 agent -->
     <string name="vm_start_accepted">启动请求已接受；请核对新任务。</string>
     <string name="vm_start_accepted_named">启动请求已接受：%1$s；请核对远端状态。</string>
-    <string name="vm_restore_accepted">恢复请求已接受：%1$s；请核对远端状态。</string>
 
     <!-- 页面 / 主机 -->
     <string name="vm_host_not_found">找不到这台机器。</string>
@@ -65,10 +63,7 @@
     <string name="vm_approval_uncertain">审批结果不确定，请核对远端状态，勿直接重发。%1$s</string>
 
     <!-- 按键审批：接受 ≠ 成功 -->
-    <string name="vm_key_accepted">按键请求已接受：%1$s。远端执行结果待核实。</string>
-    <string name="vm_key_accepted_truncated">按键请求已接受，但后续屏幕不完整；执行结果待核实，请勿重复审批。</string>
     <string name="vm_key_accepted_unchanged">按键请求已接受，屏幕暂未变化；执行结果待核实，请勿重复审批。</string>
-    <string name="vm_key_accepted_changed">按键请求已接受，已观察到屏幕变化；这不代表远端任务执行成功。</string>
     <string name="vm_key_accepted_verify_cancelled">按键请求已接受，后续核对已取消；执行结果不确定，请勿重复审批。</string>
     <string name="vm_key_accepted_read_failed">按键请求已接受，但后续读取失败；执行结果待核实。%1$s</string>
     <string name="vm_reread_failed_not_sent">没能重读屏幕，没有发送。%1$s</string>
@@ -77,10 +72,12 @@
     <string name="vm_label_keys">按键</string>
     <string name="vm_label_reply">回复</string>
     <string name="vm_send_cancelled">%1$s已取消，没有发送。</string>
-    <string name="vm_send_accepted">%1$s请求已接受；远端执行结果仍需核对。</string>
     <string name="vm_send_accepted_verify_cancelled">%1$s请求已接受，后续核对已取消。</string>
     <string name="vm_send_interrupted">%1$s请求中断，是否已接受不确定；请核对远端状态。</string>
     <string name="vm_send_accepted_followup_failed">%1$s请求已接受，但后续处理失败：%2$s</string>
     <string name="vm_send_uncertain">%1$s结果不确定，请核对后再操作：%2$s</string>
     <string name="vm_send_not_sent">%1$s没有发送：%2$s</string>
+    <string name="vm_pane_not_found">这个分屏已经不在了。</string>
+    <string name="vm_label_input">终端输入</string>
+    <string name="vm_trust_failed">接受新密钥失败，请重试。</string>
 </resources>

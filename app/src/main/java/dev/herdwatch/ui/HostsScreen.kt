@@ -62,6 +62,7 @@ import dev.herdwatch.ui.design.NeoLamp
 import dev.herdwatch.ui.design.NeoMenu
 import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
+import dev.herdwatch.ui.design.NeoShadowBleed
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.theme.connStatusColor
@@ -75,11 +76,13 @@ fun HostsScreen(
     onReconnect: (String) -> Unit,
     onEdit: (HostConfig) -> Unit,
     onDelete: (String) -> Unit,
-    onOpen: (String) -> Unit,
     onTerminal: (String) -> Unit,
+    onManage: (String) -> Unit,
     onOpenHelp: () -> Unit,
+    onTrustNewKey: (String) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<HostConfig?>(null) }
+    var pendingTrust by remember { mutableStateOf<HostRuntime?>(null) }
     val compact = LocalConfiguration.current.run { screenWidthDp < 360 || fontScale >= 1.3f }
     val connected = hosts.count { it.conn is ConnState.Connected }
     Column(Modifier.fillMaxSize()) {
@@ -123,11 +126,12 @@ fun HostsScreen(
                 HostCard(
                     runtime,
                     modifier = animateItemMotion(),
-                    onOpen = { onOpen(runtime.host.id) },
                     onTerminal = { onTerminal(runtime.host.id) },
+                    onManage = { onManage(runtime.host.id) },
                     onReconnect = { onReconnect(runtime.host.id) },
                     onEdit = { onEdit(runtime.host) },
                     onDelete = { pendingDelete = runtime.host },
+                    onTrustNewKey = { pendingTrust = runtime },
                 )
             }
             item {
@@ -138,6 +142,23 @@ fun HostsScreen(
                     modifier = Modifier.padding(top = DsSpace.s, bottom = DsSpace.l),
                 )
             }
+        }
+    }
+
+    pendingTrust?.let { runtime ->
+        val mismatch = runtime.keyMismatch
+        val pending = runtime.pendingKey
+        if (mismatch != null || pending != null) {
+            HostKeyDialog(
+                label = runtime.host.label,
+                mismatch = mismatch,
+                pending = pending,
+                onDismiss = { pendingTrust = null },
+                onTrust = {
+                    onTrustNewKey(runtime.host.id)
+                    pendingTrust = null
+                },
+            )
         }
     }
 
@@ -183,16 +204,97 @@ private fun NeoConfirmRemove(label: String, onDismiss: () -> Unit, onConfirm: ()
     )
 }
 
+/**
+ * The decision a key change actually needs: both fingerprints side by side, and a warning that
+ * accepting means the old machine is gone or someone is in the middle. The card only offers this
+ * when the repository reported a real mismatch, so it cannot be used to pin an unverified key.
+ */
+@Composable
+private fun HostKeyDialog(
+    label: String,
+    mismatch: dev.herdwatch.model.KeyMismatch?,
+    pending: dev.herdwatch.model.PendingHostKey?,
+    onDismiss: () -> Unit,
+    onTrust: () -> Unit,
+) {
+    val colors = ds()
+    val changed = mismatch != null
+    NeoDialog(
+        onDismissRequest = onDismiss,
+        title = stringResource(
+            if (changed) R.string.hosts_key_changed_title else R.string.hosts_key_first_title,
+            label,
+        ),
+    ) {
+        Text(
+            stringResource(if (changed) R.string.hosts_key_changed_body else R.string.hosts_key_first_body),
+            style = DsTypography.body,
+            color = colors.textSoft,
+        )
+        if (mismatch != null) {
+            KeyFingerprint(stringResource(R.string.hosts_key_expected), mismatch.expected)
+            KeyFingerprint(stringResource(R.string.hosts_key_actual), mismatch.actual)
+        }
+        pending?.let {
+            val type = dev.herdwatch.ssh.hostKeyLabel(it.keyType)
+            KeyFingerprint(stringResource(R.string.hosts_key_first_label, type), it.fingerprint)
+        }
+        Text(
+            stringResource(if (changed) R.string.hosts_key_changed_warning else R.string.hosts_key_first_warning),
+            style = DsTypography.caption,
+            color = if (changed) colors.danger else colors.textSoft,
+        )
+        // Stacked, decision first: side by side the destructive label was cut to "Machine
+        // changed, tr…", which is exactly the text a person must read before tapping.
+        Column(
+            Modifier.fillMaxWidth().padding(top = DsSpace.xs, bottom = NeoShadowBleed),
+            verticalArrangement = Arrangement.spacedBy(NeoShadowBleed + DsSpace.xs),
+        ) {
+            NeoButton(
+                label = stringResource(if (changed) R.string.hosts_key_trust else R.string.hosts_key_first_trust),
+                onClick = onTrust,
+                tone = if (changed) NeoButtonTone.Danger else NeoButtonTone.Primary,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            NeoButton(
+                label = stringResource(R.string.common_cancel),
+                onClick = onDismiss,
+                tone = NeoButtonTone.Ghost,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyFingerprint(caption: String, value: String) {
+    val colors = ds()
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(caption, style = DsTypography.micro, color = colors.textSoft)
+        NeoWell(fill = colors.well, depth = DsElev.flat, corner = DsRadius.control) {
+            SelectionContainer {
+                Text(
+                    value,
+                    style = DsTypography.mono,
+                    color = colors.text,
+                    modifier = Modifier.padding(horizontal = DsSpace.m, vertical = DsSpace.s),
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HostCard(
     runtime: HostRuntime,
     modifier: Modifier = Modifier,
-    onOpen: () -> Unit,
     onTerminal: () -> Unit,
+    onManage: () -> Unit,
     onReconnect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onTrustNewKey: () -> Unit,
 ) {
     val host = runtime.host
     val conn = runtime.conn
@@ -229,7 +331,7 @@ private fun HostCard(
                     NeoIconButton(
                         glyph = NeoGlyph.More,
                         onClick = { menu = true },
-                        contentDescription = stringResource(R.string.hosts_manage, host.label),
+                        contentDescription = stringResource(R.string.hosts_manage_a11y, host.label),
                     )
                     NeoMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         NeoMenuItem(
@@ -266,11 +368,26 @@ private fun HostCard(
                         is ConnState.Connected ->
                             pluralStringResource(R.plurals.hosts_connected_agents, runtime.agentCount, runtime.agentCount)
                         ConnState.Connecting -> stringResource(R.string.hosts_connecting_ellipsis)
-                        is ConnState.Failed -> stringResource(R.string.hosts_failed_short)
+                        // "see Details" hid the one fact the user needs: which failure it was.
+                        // The message is already humanised by the repository, so show it here.
+                        // A first connection is not a failure: no "connection failed" prefix, and
+                        // the hint below already says what to do, so the line is the step itself.
+                        is ConnState.Failed -> if (runtime.pendingKey != null) {
+                            stringResource(R.string.hosts_key_first_hint)
+                        } else {
+                            stringResource(R.string.hosts_failed_reason, state.message)
+                        }
                         ConnState.Idle -> stringResource(R.string.hosts_state_idle)
                     },
                     style = DsTypography.body,
-                    color = if (state is ConnState.Failed) colors.danger else colors.textSoft,
+                    // A first connection is a step, not an incident: amber, like the hint below it.
+                    color = when {
+                        runtime.pendingKey != null -> colors.warn
+                        state is ConnState.Failed -> colors.danger
+                        else -> colors.textSoft
+                    },
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.height(DsSpace.xs))
@@ -279,7 +396,7 @@ private fun HostCard(
                 style = DsTypography.caption,
                 color = colors.textFaint,
             )
-            if (conn is ConnState.Failed) {
+            if (conn is ConnState.Failed && runtime.keyMismatch == null && runtime.pendingKey == null) {
                 // The card is a summary: two lines of red plus a paragraph of advice pushed the
                 // actual actions below the fold. Raw transport text lives in Details.
                 Text(
@@ -290,45 +407,81 @@ private fun HostCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (runtime.keyMismatch != null) {
+                Text(
+                    stringResource(R.string.hosts_key_changed_hint),
+                    style = DsTypography.caption,
+                    color = colors.danger,
+                )
+            }
             Spacer(Modifier.height(DsSpace.m))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
-                verticalArrangement = Arrangement.spacedBy(DsSpace.s),
+            // Two actions, not five: the terminal is the thing you came for, and everything about
+            // the machine's sessions — browsing, creating, renaming, closing — lives on one page.
+            // "Check sessions" and "Manage" used to be two buttons leading to two views of the same
+            // tree; the structure page is now reached from inside Manage.
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
             ) {
-                NeoButton(
-                    label = stringResource(R.string.hosts_open_terminal),
-                    onClick = onTerminal,
-                    tone = NeoButtonTone.Primary,
-                    icon = NeoGlyph.Terminal,
-                    compact = true,
-                )
-                NeoButton(
-                    label = if (connected) {
-                        stringResource(R.string.hosts_check_sessions)
-                    } else {
-                        stringResource(R.string.hosts_connect_bridge)
-                    },
-                    onClick = if (connected) onOpen else onReconnect,
-                    tone = NeoButtonTone.Quiet,
-                    enabled = conn != ConnState.Connecting,
-                    icon = NeoGlyph.Tray,
-                    compact = true,
-                )
-                NeoButton(
-                    label = if (details) {
-                        stringResource(R.string.common_collapse)
-                    } else {
-                        stringResource(R.string.hosts_details)
-                    },
+                if (runtime.keyMismatch != null) {
+                    NeoButton(
+                        label = stringResource(R.string.hosts_key_review),
+                        onClick = onTrustNewKey,
+                        tone = NeoButtonTone.Danger,
+                        icon = NeoGlyph.Key,
+                        compact = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (runtime.pendingKey != null) {
+                    NeoButton(
+                        label = stringResource(R.string.hosts_key_confirm),
+                        onClick = onTrustNewKey,
+                        tone = NeoButtonTone.Primary,
+                        icon = NeoGlyph.Fingerprint,
+                        compact = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    NeoButton(
+                        label = stringResource(R.string.hosts_open_terminal),
+                        onClick = onTerminal,
+                        tone = NeoButtonTone.Primary,
+                        icon = NeoGlyph.Terminal,
+                        compact = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    NeoButton(
+                        label = stringResource(R.string.hosts_sessions),
+                        onClick = onManage,
+                        tone = NeoButtonTone.Quiet,
+                        icon = NeoGlyph.Workspace,
+                        compact = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                NeoIconButton(
+                    glyph = if (details) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
                     onClick = { details = !details },
-                    tone = NeoButtonTone.Ghost,
-                    icon = if (details) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
-                    compact = true,
+                    contentDescription = stringResource(
+                        if (details) R.string.common_collapse else R.string.hosts_details,
+                    ),
                 )
             }
             ExpandableSection(details) {
                 Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s), modifier = Modifier.padding(top = DsSpace.m)) {
                     NeoDivider()
+                    // The raw transport words live here, not on the card: this is the panel a
+                    // person opens when the one-line summary is not enough to act on.
+                    (conn as? ConnState.Failed)?.technical?.takeIf { it.isNotBlank() && it != conn.message }?.let { raw ->
+                        SelectionContainer {
+                            Text(
+                                raw,
+                                style = DsTypography.mono,
+                                color = colors.danger,
+                            )
+                        }
+                    }
                     SelectionContainer {
                         Column(verticalArrangement = Arrangement.spacedBy(DsSpace.xs)) {
                             Text(
@@ -371,7 +524,10 @@ private fun HostCard(
                                             appendLine("session=${host.session.ifBlank { "-" }}; herdr=${host.herdrCommand}")
                                             appendLine("fingerprint=${fingerprint ?: "-"}")
                                             appendLine("lastSync=${runtime.lastSyncAt ?: "-"}")
-                                            if (conn is ConnState.Failed) append(conn.message)
+                                            if (conn is ConnState.Failed) {
+                                                appendLine(conn.message)
+                                                conn.technical?.takeIf { it != conn.message }?.let(::append)
+                                            }
                                         },
                                     ),
                                 )

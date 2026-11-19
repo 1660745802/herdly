@@ -74,7 +74,7 @@ app/src/main/java/dev/herdwatch/
   ssh/      连接接口、JSch 实现、JSON-RPC 编解码
   data/     多主机仓库、加密配置和缓存
   ui/       ViewModel、Compose 页面、队列与主题
-  ui/design/ 自绘设计系统：token、材质、图标、组件、样式页
+  ui/design/ 自绘设计系统：token、材质、图标、组件
   term/     VT 解析器（终端网格与滚动回放）
   i18n/     非 Compose 层的文案 provider 与测试替身
 app/src/test/  JVM 单元及回环 SSH 测试
@@ -94,7 +94,7 @@ tools/        本地 SSH fixture 与 Python 测试
 
 - Compose：`stringResource(R.string.x)`、`pluralStringResource(R.plurals.x, count, count)`。
 - 非 Compose（Repository、SSH 层、解析器、ViewModel）：`dev.herdwatch.i18n.Str.get(R.string.x, args)` / `Str.quantity(...)`，provider 由 `HerdwatchApp.onCreate` 安装。
-- 资源按模块拆文件：`res/values/strings_<module>.xml` 与 `res/values-en/strings_<module>.xml`，键名带模块前缀，中英键集合必须一致。当前模块：core、ssh、repo、store、vm、ask、policy、agent、inbox、reader、terminal、structure、newtask、hosts、settings、addhost、components、gallery、app。
+- 资源按模块拆文件：`res/values/strings_<module>.xml` 与 `res/values-en/strings_<module>.xml`，键名带模块前缀，中英键集合必须一致。当前模块：core、ssh、repo、store、vm、ask、policy、agent、inbox、terminal、structure、newtask、hosts、settings、addhost、components、app。
 - 数字 + 单位一律用 `plurals`；含变量的句子整句进资源，不做字符串拼接。
 - 新增语言只需加 `res/values-<lang>/` 并在 `res/xml/locales_config.xml` 登记，系统「应用语言」与设置页分段控件会一起生效。
 - 单元测试断言用 `dev.herdwatch.i18n.TestStrings.text("键名")`（它解析 `res/values/*.xml` 并反射映射 `R` id），不要硬编码译文。`Str` 未安装 provider 时返回 `#<id>`，所以带文案断言的测试类要在 `@Before` 调 `TestStrings.install()`。

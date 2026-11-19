@@ -78,7 +78,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
 
     BackHandler(
         enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure ||
-            ui.screen is Screen.Terminal || ui.screen == Screen.Settings || ui.screen == Screen.StyleGuide,
+            ui.screen is Screen.Manage || ui.screen is Screen.Terminal || ui.screen == Screen.Settings,
     ) { vm.back() }
 
     val tabInbox = stringResource(R.string.app_tab_inbox)
@@ -108,25 +108,6 @@ fun HerdwatchRoot(vm: AppViewModel) {
         snackbarHost = {
             SnackbarHost(snackbar) { data ->
                 dev.herdwatch.ui.design.NeoSnackbarBody(message = data.visuals.message)
-            }
-        },
-        floatingActionButton = {
-            val showNewTask = ui.screen == Screen.Inbox && ui.repo.hosts.isNotEmpty()
-            AnimatedVisibility(
-                visible = showNewTask,
-                enter = scaleIn(tween(motionMillis(180))) + fadeIn(tween(motionMillis(140))),
-                exit = scaleOut(tween(motionMillis(120))) + fadeOut(tween(motionMillis(90))),
-            ) {
-                // Same chassis language as the rest of the app: one lifted control, not a
-                // Material tonal pill with a ripple from a different design system.
-                dev.herdwatch.ui.design.NeoButton(
-                    label = newTaskLabel,
-                    onClick = { vm.showNewTask(true) },
-                    tone = dev.herdwatch.ui.design.NeoButtonTone.Primary,
-                    icon = dev.herdwatch.ui.design.NeoGlyph.Plus,
-                    compact = true,
-                    modifier = Modifier.semantics { contentDescription = newTaskLabel },
-                )
             }
         },
         bottomBar = {
@@ -163,8 +144,8 @@ fun HerdwatchRoot(vm: AppViewModel) {
                     Screen.Inbox -> "inbox"
                     Screen.Hosts -> "hosts"
                     Screen.Settings -> "settings"
-                    Screen.StyleGuide -> "style-guide"
                     is Screen.Structure -> "structure:${screen.hostId}"
+                    is Screen.Manage -> "manage:${screen.hostId}"
                     is Screen.Terminal -> "terminal:${screen.hostId}"
                     is Screen.Detail -> "detail" // Drafts live in the ViewModel; avoid unbounded page state per agent.
                 }
@@ -185,13 +166,13 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             ui = ui,
                             onRefresh = vm::refresh,
                             onOpenAgent = { agent, hostId -> vm.openAgent(agent, hostId) },
-                            onFilter = vm::setFilter,
                             onQuery = vm::setQuery,
                             onToggleSearch = vm::setSearching,
                             onAddHost = { vm.showAddHost(true) },
                             onReconnect = vm::reconnect,
                             onNewTask = { vm.showNewTask(true) },
                             onOpenHost = vm::openStructure,
+                            onOpenPane = vm::openPane,
                         )
                         Screen.Hosts -> HostsScreen(
                             hosts = ui.repo.hosts,
@@ -199,9 +180,10 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onReconnect = vm::reconnect,
                             onEdit = vm::editHost,
                             onDelete = vm::deleteHost,
-                            onOpen = vm::openStructure,
                             onTerminal = vm::openTerminal,
+                            onManage = { hostId -> vm.navigate(Screen.Manage(hostId)) },
                             onOpenHelp = { vm.navigate(Screen.Settings) },
+                            onTrustNewKey = vm::trustNewFingerprint,
                         )
                         is Screen.Structure -> {
                             val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
@@ -226,30 +208,42 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                     onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
                                     onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
                                     onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
+                                    onOpenAgent = { agent -> vm.openAgent(agent, runtime.host.id) },
+                                )
+                            }
+                        }
+                        is Screen.Manage -> {
+                            val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
+                            if (runtime == null) {
+                                LaunchedEffect(screen.hostId) { vm.back() }
+                            } else {
+                                ManageScreen(
+                                    runtime = runtime,
+                                    agents = ui.repo.agents,
+                                    onBack = vm::back,
+                                    onCreateWorkspace = { vm.createWorkspace(runtime.host.id) },
+                                    onCreateTab = { ws -> vm.createTab(runtime.host.id, ws) },
+                                    onSplit = { pane, dir -> vm.splitPane(runtime.host.id, pane, dir) },
+                                    onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
+                                    onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
+                                    onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
+                                    onCloseWorkspace = { vm.closeWorkspace(runtime.host.id, it) },
+                                    onCloseTab = { vm.closeTab(runtime.host.id, it) },
+                                    onClosePane = { vm.closePane(runtime.host.id, it) },
+                                    onOpenPane = { pane -> vm.openPane(runtime.host.id, pane) },
+                                    onBrowse = { vm.navigate(Screen.Structure(runtime.host.id)) },
                                 )
                             }
                         }
                         Screen.Settings -> SettingsScreen(
                             hosts = ui.repo.hosts,
                             preferences = prefs,
-                            onBack = vm::back,
-                            onOpenStyleGuide = { vm.navigate(Screen.StyleGuide) },
                             onLanguage = vm::setLanguage,
                             onTheme = vm::setTheme,
-                            onMotion = vm::setMotion,
-                            onDensity = vm::setDensity,
                             onFontSize = vm::terminalFontSize,
-                            onSnapshotLines = vm::setDefaultSnapshotLines,
-                            onKeyBarRows = vm::setKeyBarRows,
-                            onLongPressRepeat = vm::setLongPressRepeat,
-                            onInputMode = vm::setInputMode,
                             onResetFingerprints = vm::resetFingerprints,
                             version = version,
-                            update = update,
-                            onCheckUpdate = vm::checkForUpdate,
-                            onDismissUpdate = vm::clearUpdateResult,
                         )
-                        Screen.StyleGuide -> dev.herdwatch.ui.design.StyleGalleryScreen(onBack = vm::back)
                         is Screen.Detail -> AgentScreen(
                             detail = ui.detail,
                             onBack = vm::back,
@@ -257,18 +251,21 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onReconnect = { ui.detail.agent?.hostId?.let(vm::reconnect) },
                             onAutoRefresh = vm::refreshPaneQuietly,
                             onReadingPaused = vm::setReadingPaused,
+                            onLoadMoreHistory = vm::loadMoreHistory,
                             onReadingPosition = vm::rememberReadingPosition,
                             onChoose = vm::choose,
                             onVerifyOperation = vm::confirmOperationVerified,
                             onDraftChange = vm::setDraft,
                             onSendPrompt = { vm.sendPrompt(it) },
                             onSendKeys = vm::sendRawKeys,
-                            onLoadMore = vm::loadMore,
-                            onSetSnapshotLines = vm::setSnapshotLines,
+                            onSendInput = vm::sendInput,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },
                             onExplain = vm::explainAgent,
                             onDismissExplain = vm::dismissExplain,
                             onRename = vm::renameAgent,
+                            onStartAgent = ui.detail.agent?.takeIf { !it.hasAgent }?.let { pane ->
+                                { vm.openStartAgent(pane.hostId, pane.paneId) }
+                            },
                         )
                         is Screen.Terminal -> TerminalScreen(
                             state = terminal,
@@ -280,10 +277,6 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onFontSize = vm::terminalFontSize,
                             onFollow = vm::terminalFollow,
                             onTrustFingerprint = vm::terminalTrustFingerprint,
-                            inputMode = prefs.inputMode,
-                            onInputMode = vm::setInputMode,
-                            keyBarRows = prefs.keyBarRows,
-                            longPressRepeat = prefs.longPressRepeat,
                         )
                     }
                 }

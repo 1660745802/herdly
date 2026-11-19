@@ -40,7 +40,7 @@ class ReadingPauseTest {
         completionSeq = 0, focused = false, rawStatus = "blocked",
     )
 
-    @Test fun `expanded snapshot size survives refresh and page reentry and can return to default`() = runTest {
+    @Test fun `agent detail always reads the whole snapshot and keeps evidence on failure`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val models = ViewModelStore()
@@ -64,25 +64,15 @@ class ReadingPauseTest {
             runCurrent()
             vm.openAgent(agent)
             runCurrent()
-            vm.loadMore()
-            runCurrent()
             vm.refreshPaneQuietly()
             runCurrent()
-            vm.back()
-            vm.openAgent(agent)
-            runCurrent()
-            assertEquals(listOf(400, 1200, 1200, 1200), requests)
-            assertEquals(1200, vm.ui.value.detail.snapshotLines)
+            // Reading is never something the user has to size: one request, the widest one.
+            assertEquals(listOf(1200, 1200), requests)
             assertEquals("recent 1200", vm.ui.value.detail.text)
-            vm.setSnapshotLines(400)
-            runCurrent()
-            assertEquals(400, requests.last())
-            // A failed expansion retains the last evidence and clearly reports a read
-            // error; the line count remains a requested preference, not returned data.
             fail = true
-            vm.loadMore()
+            vm.reloadPane()
             runCurrent()
-            assertEquals("recent 400", vm.ui.value.detail.text)
+            assertEquals("recent 1200", vm.ui.value.detail.text)
             assertTrue(vm.ui.value.detail.stale)
             assertTrue(vm.ui.value.detail.error!!.contains(TestStrings.text("vm_read_failed", "").trim()))
         } finally {

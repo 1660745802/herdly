@@ -1,7 +1,6 @@
 package dev.herdwatch.ui
 
 import dev.herdwatch.R
-import dev.herdwatch.data.InputMode
 import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.ssh.HostKeyMismatchException
@@ -41,6 +40,8 @@ data class TerminalUiState(
     val sessionNonce: Long = 0,
     /** Set when the host has no saved pin yet: the page must ask the user before trusting it. */
     val pendingFingerprint: String? = null,
+    /** Algorithm of the key behind [pendingFingerprint], so the user can compare with ssh-keygen. */
+    val pendingKeyType: String? = null,
 ) {
     companion object {
         const val DEFAULT_FONT_SIZE = 13f
@@ -62,8 +63,11 @@ class TerminalController(
     private val _state = MutableStateFlow(TerminalUiState())
     val state: StateFlow<TerminalUiState> = _state.asStateFlow()
 
+    @Volatile
     private var config: HostConfig? = null
+    @Volatile
     private var session: ShellSession? = null
+    @Volatile
     private var screen: VtScreen? = null
     private var connectJob: Job? = null
     private var readJob: Job? = null
@@ -91,14 +95,6 @@ class TerminalController(
             }
         }
     }
-
-    /**
-     * Composer semantics for this session. LINE (the default) has the page buffer a whole line and
-     * submit it with Enter. DIRECT streams each committed character (vim/tmux); the page sends
-     * Enter as its own key, so a submit-style write must not append a second line terminator here.
-     */
-    @Volatile
-    private var inputMode: InputMode = InputMode.LINE
 
     @Volatile
     private var dirty = false
@@ -164,13 +160,14 @@ class TerminalController(
                 generation = generation,
                 session = s,
                 text = text,
-                newline = submit && inputMode == InputMode.LINE,
+                newline = submit,
             )
         )
     }
 
     /** Sends a literal escape sequence, e.g. ESC or an arrow key. */
     fun key(sequence: String) = write(sequence)
+
 
     fun resize(cols: Int, rows: Int) {
         val nextCols = cols.coerceIn(20, 400)
@@ -226,9 +223,6 @@ class TerminalController(
     }
 
     /** Switches the composer between line buffering and per-character streaming. */
-    fun setInputMode(mode: InputMode) {
-        inputMode = mode
-    }
 
     fun follow() {
         _state.update { it.copy(followRequests = it.followRequests + 1) }
@@ -292,7 +286,13 @@ class TerminalController(
     private fun fail(error: Throwable) {
         if (error is UnknownHostKeyException) {
             _state.update {
-                it.copy(connecting = false, connected = false, error = null, pendingFingerprint = error.fingerprint)
+                it.copy(
+                    connecting = false,
+                    connected = false,
+                    error = null,
+                    pendingFingerprint = error.fingerprint,
+                    pendingKeyType = error.keyType,
+                )
             }
             return
         }

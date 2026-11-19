@@ -6,7 +6,7 @@
     <string name="structure_empty_body">Herdr 里每个项目通常是一个 workspace，里面按 tab 分组、再拆 pane。手机端可以直接建。</string>
     <string name="structure_new_workspace">新建 workspace</string>
     <!-- 结构页顶部快捷按钮，与列表里的“新建 workspace”区分 -->
-    <string name="structure_add_workspace">工作区</string>
+    <string name="structure_add_workspace">新建工作区</string>
     <string name="structure_footer_hint">结构直接读自 Herdr；在这里建 tab、拆 pane、启动 agent，主机上的 TUI 会同步变化。</string>
 
     <!-- %1$s：workspace / tab / pane 的类型名 -->
@@ -15,9 +15,34 @@
     <string name="structure_close_title">关闭%1$s？</string>
     <!-- %1$s：被关闭目标的路径；%2$s：具体后果说明 -->
     <string name="structure_close_message">%1$s\n\n%2$s</string>
-    <string name="structure_close_workspace_body">会关闭整个工作区，里面所有标签页、分屏和进程都会结束。</string>
-    <string name="structure_close_tab_body">会关闭这个标签页，里面的分屏和进程都会结束。</string>
     <string name="structure_close_pane_body">会关闭这个分屏，其中的 agent 和其他进程都会被终止。</string>
+
+    <!-- 树形结构：编号、标题、计数与关闭后果 -->
+    <string name="structure_ws_number">W%1$d</string>
+    <string name="structure_tab_number">T%1$d</string>
+    <!-- %1$s：编号（T1）；%2$s：标签页名 -->
+    <string name="structure_tab_title">%1$s %2$s</string>
+    <string name="structure_pill_worktree">worktree</string>
+    <string name="structure_no_panes">这个标签页还没有分屏</string>
+    <!-- %1$s：标签页数量短语；%2$s：分屏数量短语；%3$s：agent 数量短语 -->
+    <string name="structure_close_workspace_detail">包含 %1$s、%2$s；其中 %3$s会随之终止，其余进程也会全部结束。</string>
+    <!-- %1$s：分屏数量短语；%2$s：agent 数量短语 -->
+    <string name="structure_close_tab_detail">包含 %1$s；其中 %2$s会随之终止，其余进程也会结束。</string>
+    <!-- %1$s：agent 名称 -->
+    <string name="structure_close_pane_agent_body">会终止 agent「%1$s」及该分屏里的其他进程。</string>
+
+    <!-- 打开 / 启动 agent 的可用性与原因 -->
+    <string name="structure_open_agent">打开 agent</string>
+    <!-- %1$s：agent 名称 -->
+    <string name="structure_open_agent_label">打开 %1$s</string>
+    <string name="structure_open_agent_unavailable">打开 agent（此页暂未接入，请从收件箱进入）</string>
+    <string name="structure_start_agent_no_shell">启动 agent（无已核实的空闲分屏）</string>
+    <string name="structure_start_agent_unverified">启动 agent（分屏占用未核实）</string>
+
+    <!-- 连接 / 加载状态 -->
+    <string name="structure_connect_first">当前未连接：下方是上次同步的结构快照，编辑前请先重新连接。</string>
+    <string name="structure_loading_title">正在读取结构…</string>
+    <string name="structure_loading_body">连上主机后会自动列出工作区；若长时间没有变化，请点右上角刷新。</string>
 
     <string name="structure_type_workspace">工作区</string>
     <string name="structure_type_tab">标签页</string>
@@ -25,24 +50,17 @@
 
     <!-- %1$s/%2$s/%3$s：工作区、标签页、分屏的数量短语 -->
     <string name="structure_summary_line">%1$s · %2$s · %3$s</string>
-    <string name="structure_collapse_shells">收起非 agent 分屏</string>
     <string name="structure_occupancy_unverified">暂无法核实分屏占用情况，已有分屏的启动入口不可用。可从收件箱创建新任务。</string>
-    <string name="structure_no_available_shells">没有已核实可用的空 shell 分屏。可新建标签页，刷新后再检查；已有 agent 或状态未识别的分屏不会用于启动。</string>
+    <string name="structure_no_available_shells">没有已核实的空 shell 分屏。新建标签页后再试；不会动已有 agent。</string>
     <!-- %1$s：相对时间（刚刚 / Ns 前 / 时间） -->
     <string name="structure_last_sync">最后成功同步：%1$s</string>
     <string name="structure_last_sync_offline">最后成功同步：%1$s · 当前未连接</string>
 
-    <string name="structure_restore_title">上次的 agent 不在了</string>
-    <string name="structure_restore_body">Herdr 重启或会话退出后，可以按原 pane、原名字接着跑。</string>
-    <string name="structure_restore_action">恢复</string>
     <string name="structure_restore_failed">恢复失败</string>
     <string name="structure_start_agent">启动 agent</string>
     <string name="structure_pill_current">当前</string>
 
     <!-- 无障碍描述，%1$s：对应对象的显示名 -->
-    <string name="structure_rename_workspace_desc">重命名 %1$s</string>
-    <string name="structure_rename_tab_desc">重命名 %1$s</string>
-    <string name="structure_rename_pane_desc">重命名分屏 %1$s</string>
     <string name="structure_workspace_actions_desc">%1$s 工作区操作</string>
     <string name="structure_tab_actions_desc">%1$s 标签页操作</string>
     <string name="structure_pane_actions_desc">%1$s 分屏操作</string>
@@ -56,7 +74,7 @@
     <string name="structure_focus_pane">聚焦 pane</string>
     <string name="structure_rename">重命名</string>
     <string name="structure_new_tab">新建标签页</string>
-    <string name="structure_new_tab_plus">＋ 新建标签页</string>
+    <string name="structure_new_tab_plus">新建标签页</string>
     <string name="structure_close_workspace">关闭工作区</string>
     <string name="structure_close_tab">关闭 tab</string>
     <string name="structure_close_pane">关闭 pane</string>
@@ -64,20 +82,16 @@
     <string name="structure_split_down">向下拆分</string>
 
     <string name="structure_no_tabs">这个工作区还没有标签页</string>
-    <string name="structure_collapse_panes">收起分屏</string>
-    <string name="structure_show">显示</string>
-    <string name="structure_start_pane">启动</string>
     <string name="structure_pane_idle_shell">空闲 shell</string>
     <string name="structure_pane_unverified">未核实分屏</string>
     <!-- %1$s：层级标签；%2$s：分屏标题；%3$s：分屏种类或可用性 -->
-    <string name="structure_pane_meta">%1$s · %2$s · %3$s</string>
+    <string name="structure_pane_meta">%1$s · %2$s</string>
     <!-- %1$s：分屏数量短语；%2$s：标签页状态 -->
-    <string name="structure_tab_meta">%1$s · %2$s</string>
 
     <!-- 启动 agent 面板 -->
     <string name="structure_start_sheet_body">仅列出已连接主机中可核实为空闲 shell 的分屏。请核对目标后启动。</string>
     <string name="structure_target_pane">目标分屏</string>
-    <string name="structure_no_candidates_no_agents">暂无法核实分屏占用情况。请返回收件箱创建新任务，以使用新标签页。</string>
+    <string name="structure_no_candidates_no_agents">暂无法核实分屏占用情况。新建标签页后再试。</string>
     <string name="structure_no_candidates_no_shells">没有已核实可用的空 shell 分屏。返回会话结构，新建标签页并刷新；不会向已有 agent 或未识别分屏发送启动命令。</string>
     <!-- %1$s：主机；%2$s：工作区；%3$s：标签页；%4$s：分屏标题；%5$s：分屏 id；%6$s：工作目录 -->
     <string name="structure_target_detail">目标：%1$s / %2$s / %3$s / %4$s (%5$s)\n目录：%6$s</string>
@@ -93,6 +107,9 @@
     <!-- %1$s：agent 名称 -->
     <string name="structure_start_named">启动 %1$s</string>
 
+    <plurals name="structure_agent_count">
+        <item quantity="other">%1$d 个 agent</item>
+    </plurals>
     <plurals name="structure_workspace_count">
         <item quantity="other">%1$d 个工作区</item>
     </plurals>
@@ -101,20 +118,5 @@
     </plurals>
     <plurals name="structure_pane_count">
         <item quantity="other">%1$d 个分屏</item>
-    </plurals>
-    <plurals name="structure_other_panes">
-        <item quantity="other">其他分屏 %1$d</item>
-    </plurals>
-    <plurals name="structure_hidden_panes">
-        <item quantity="other">%1$d 个其他分屏</item>
-    </plurals>
-    <plurals name="structure_collapse_tabs">
-        <item quantity="other">收起 %1$d 个标签页</item>
-    </plurals>
-    <plurals name="structure_expand_tabs">
-        <item quantity="other">展开 %1$d 个标签页</item>
-    </plurals>
-    <plurals name="structure_expand_panes">
-        <item quantity="other">展开 %1$d 个分屏</item>
     </plurals>
 </resources>

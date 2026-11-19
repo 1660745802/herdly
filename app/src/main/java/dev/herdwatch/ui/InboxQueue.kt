@@ -12,16 +12,15 @@ private val inboxStatusOrder = listOf(
 )
 internal val attentionStatuses = setOf(AgentStatus.WAITING, AgentStatus.UNKNOWN, AgentStatus.REVIEW)
 
-/** One definition shared by the header summary, the attention filter, and the duty card. */
+/** One definition shared by the header summary and the ordering of the agent section. */
 internal fun isAttention(agent: Agent): Boolean = agent.status in attentionStatuses
 private val inboxOrder = compareBy<Agent> { inboxStatusOrder.indexOf(it.status) }
     .thenBy { if (it.status == AgentStatus.WAITING) it.sinceMillis else -it.stateChangeSeq }
     .thenBy { it.name.lowercase() }
 
-/** The visible inbox and detail traversal must describe the same queue. */
-internal fun inboxQueue(agents: List<Agent>, filter: InboxFilter, query: String): List<Agent> =
+/** The visible agent section and the detail traversal must describe the same queue. */
+internal fun inboxQueue(agents: List<Agent>, query: String): List<Agent> =
     agents.filter { agent ->
-        val matchesFilter = query.isNotBlank() || filter == InboxFilter.ALL || isAttention(agent)
         val matchesQuery = query.isBlank() || listOf(
             agent.name,
             agent.repo,
@@ -32,5 +31,5 @@ internal fun inboxQueue(agents: List<Agent>, filter: InboxFilter, query: String)
             agent.tabLabel.orEmpty(),
             agent.cwd.orEmpty(),
         ).any { it.contains(query, ignoreCase = true) }
-        matchesFilter && matchesQuery
+        matchesQuery
     }.sortedWith(inboxOrder)

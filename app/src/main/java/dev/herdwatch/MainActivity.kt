@@ -20,10 +20,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.herdwatch.data.LanguageMode
-import dev.herdwatch.data.DensityMode
 import dev.herdwatch.ui.AppViewModel
 import dev.herdwatch.ui.HerdwatchRoot
-import dev.herdwatch.data.MotionMode
 import dev.herdwatch.data.ThemeMode
 import dev.herdwatch.ui.theme.HerdwatchTheme
 import dev.herdwatch.ui.design.DsSpacing
@@ -92,8 +90,6 @@ class MainActivity : ComponentActivity() {
             }
             HerdwatchTheme(
                 darkTheme = dark,
-                reduceMotion = preferences.motion == MotionMode.REDUCED,
-                spacing = if (preferences.density == DensityMode.COMPACT) DsSpacing.compact else DsSpacing.comfortable,
             ) {
                 key(localeRevision) { HerdwatchRoot(viewModel) }
             }

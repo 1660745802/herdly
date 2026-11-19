@@ -71,14 +71,14 @@ class DailyWorkflowTest {
 
         assertEquals(
             listOf(waiting.key, unknown.key, review.key, working.key, idle.key),
-            inboxQueue(agents, InboxFilter.ALL, "").map { it.key },
+            inboxQueue(agents, "").map { it.key },
         )
         assertEquals(
             listOf(waiting.key, unknown.key, review.key),
-            inboxQueue(agents, InboxFilter.ATTENTION, "").map { it.key },
+            inboxQueue(agents, "").filter { isAttention(it) }.map { it.key },
         )
         // Searching is a locating action: it must reach agents outside the default attention view.
-        assertEquals(listOf(working.key), inboxQueue(agents, InboxFilter.ATTENTION, "P-WORK").map { it.key })
+        assertEquals(listOf(working.key), inboxQueue(agents, "P-WORK").map { it.key })
     }
 
     @Test fun `hiding search keeps the query and its queue filtering`() = runTest {

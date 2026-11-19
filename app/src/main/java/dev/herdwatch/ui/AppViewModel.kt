@@ -6,11 +6,8 @@ import androidx.lifecycle.viewModelScope
 import dev.herdwatch.HerdwatchApp
 import dev.herdwatch.R
 import dev.herdwatch.data.HerdRepository
-import dev.herdwatch.data.InputMode
 import dev.herdwatch.data.LanguageMode
 import dev.herdwatch.data.AppPreferences
-import dev.herdwatch.data.DensityMode
-import dev.herdwatch.data.MotionMode
 import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepoState
 import dev.herdwatch.data.ThemeMode
@@ -26,6 +23,7 @@ import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.Ask
 import dev.herdwatch.model.AskOption
 import dev.herdwatch.model.PaneText
+import dev.herdwatch.model.paneDetailAgent
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.AuthType
 import dev.herdwatch.model.HostConfig
@@ -44,7 +42,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.launch
 
-enum class InboxFilter { ALL, ATTENTION }
+
+/** One thing the user sent from this page. `echoed` means the screen already shows it. */
+data class SentMessage(val id: Long, val text: String, val at: Long, val echoed: Boolean = false)
 
 data class DetailState(
     val agent: Agent? = null,
@@ -57,6 +57,16 @@ data class DetailState(
     val truncated: Boolean = false,
     val error: String? = null,
     val loadedAt: Long? = null,
+    /** How many lines from the tail we ask for. Grows when the reader scrolls to the top. */
+    val historyLines: Int = PANE_READ_LINES,
+    /**
+     * What this app has sent to the pane, newest last.
+     *
+     * The bridge returns a screen, not a transcript: our own message only becomes visible once the
+     * agent echoes it, and a slow agent can take seconds. Remembering the send locally is what makes
+     * the conversation feel answered the moment Send is pressed.
+     */
+    val sent: List<SentMessage> = emptyList(),
     val explain: String? = null,
     val explainLoading: Boolean = false,
     val draft: String = "",
@@ -69,7 +79,6 @@ data class DetailState(
     val canVerifyOperation: Boolean = false,
     val stale: Boolean = true,
     val readingPaused: Boolean = false,
-    val snapshotLines: Int = 400,
     val readingPosition: ReadingPosition = ReadingPosition(),
 )
 
@@ -77,7 +86,6 @@ data class UiState(
     val repo: RepoState = RepoState(),
     val screen: Screen = Screen.Inbox,
     /** 「全部」在前，也是默认视图；需要处理只是其中一个筛选。 */
-    val filter: InboxFilter = InboxFilter.ALL,
     val query: String = "",
     val searching: Boolean = false,
     val detail: DetailState = DetailState(),
@@ -103,6 +111,15 @@ data class UpdateUi(
     val result: UpdateChecker.Result? = null,
 )
 
+/** Agent detail always asks for the widest recent snapshot once; the bridge has no paging. */
+private const val PANE_READ_LINES = 1200
+
+/** Monotonic id for local sends; only used to key list items. */
+private var nextSendId: Long = 1
+
+/** Ceiling for the "read further back" request; past this the answer is a scrollback, not a phone. */
+private const val MAX_HISTORY_LINES = 19_200
+
 class AppViewModel(
     private val repository: HerdRepository,
     private val preferencesStore: PreferencesStore,
@@ -125,12 +142,19 @@ class AppViewModel(
     private var readGeneration = 0L
     private var explainGeneration = 0L
     private val operations = OperationState()
-    private var structureOrigin: Screen = Screen.Hosts
+    /**
+     * The page stack above the current tab root.
+     *
+     * A single `screen` value could only ever go "back to Inbox", so opening a pane from the
+     * structure page and pressing back threw the user out of the tree they were working in. A real
+     * stack keeps the trail: detail → structure → machines.
+     */
+    private val pageStack = mutableListOf<Screen>()
+
+    /** The tab the current trail started from; back lands here once the stack is empty. */
+    private var trailRoot: Screen = Screen.Inbox
     private val readingPositions = object : LinkedHashMap<String, ReadingPosition>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReadingPosition>?) = size > 80
-    }
-    private val snapshotLineLimits = object : LinkedHashMap<String, Int>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?) = size > 80
     }
     private val reconnecting = mutableSetOf<String>()
 
@@ -155,7 +179,8 @@ class AppViewModel(
 
     private fun connected(agent: Agent, repo: RepoState = _ui.value.repo): Boolean = foreground &&
         repo.hosts.any { it.host.id == agent.hostId && it.conn == ConnState.Connected } &&
-        repo.agents.any { it.key == agent.key }
+        // A pane without an agent is still a legitimate target: the host connection is all it needs.
+        (!agent.hasAgent || repo.agents.any { it.key == agent.key })
 
     private var foreground = true
 
@@ -213,11 +238,17 @@ class AppViewModel(
                     current.copy(
                         repo = repo,
                         detail = if (current.screen is Screen.Detail) {
+                            val target = fresh ?: current.detail.agent
+                            // A pane with no agent has no status sequence to compare against, so
+                            // "stale" can only come from the connection, not from a missing agent.
+                            val paneOnly = current.detail.agent?.hasAgent == false
+                            val hostDown = target != null &&
+                                repo.hosts.none { it.host.id == target.hostId && it.conn == ConnState.Connected }
+                            val movedOn = !paneOnly && fresh != null && current.detail.readingPaused &&
+                                fresh.stateChangeSeq != (current.detail.shownSeq ?: fresh.stateChangeSeq)
                             decorate(current.detail.copy(
-                                agent = fresh ?: current.detail.agent,
-                                stale = current.detail.stale || fresh == null ||
-                                    (current.detail.readingPaused && fresh.stateChangeSeq != (current.detail.shownSeq ?: fresh.stateChangeSeq)) ||
-                                    repo.hosts.none { it.host.id == fresh.hostId && it.conn == ConnState.Connected },
+                                agent = target,
+                                stale = current.detail.stale || (!paneOnly && fresh == null) || movedOn || hostDown,
                             ), repo)
                         } else current.detail,
                     )
@@ -256,7 +287,6 @@ class AppViewModel(
 
     fun dismissError() = repository.dismissError()
 
-    fun setFilter(filter: InboxFilter) = _ui.update { it.copy(filter = filter) }
     fun setQuery(query: String) = _ui.update { it.copy(query = query) }
     fun setSearching(searching: Boolean) = _ui.update { it.copy(searching = searching) }
     fun showAddHost(show: Boolean) = _ui.update {
@@ -269,38 +299,76 @@ class AppViewModel(
 
     fun navigate(screen: Screen) {
         if (screen is Screen.Detail) {
-            _ui.value.repo.agents.firstOrNull { it.key == screen.agentKey }?.let { openAgent(it) }
+            val key = screen.agentKey
+            val split = key.indexOf(':')
+            if (split > 0) openPane(key.substring(0, split), key.substring(split + 1))
             return
         }
         if (screen is Screen.Terminal) {
             openTerminal(screen.hostId)
             return
         }
-        if (_ui.value.screen is Screen.Terminal) terminal.close()
+        if (isRoot(screen)) {
+            // Switching tabs starts a fresh trail; the old stack belonged to another tab.
+            // Settings is reached from Machines far more often than from the tab bar, so back
+            // returns to the tab we came from instead of forcing a tap on a tab.
+            if (screen == Screen.Settings) {
+                val from = _ui.value.screen
+                trailRoot = if (isRoot(from) && from != Screen.Settings) from else trailRoot
+                pageStack.clear()
+                leavePage()
+                _ui.update { it.copy(screen = screen, detail = DetailState()) }
+                return
+            }
+            pageStack.clear()
+            trailRoot = screen
+            if (_ui.value.screen is Screen.Terminal) terminal.close()
+            leavePage()
+            _ui.update { it.copy(screen = screen, detail = DetailState()) }
+            return
+        }
+        push(screen)
+    }
+
+    private fun isRoot(screen: Screen): Boolean =
+        screen == Screen.Inbox || screen == Screen.Hosts || screen == Screen.Settings
+
+    /** Pushes a page, remembering where we came from so back returns there. */
+    private fun push(screen: Screen) {
+        val current = _ui.value.screen
+        if (current == screen) return
+        rememberPage()
+        if (current is Screen.Terminal) terminal.close()
         leavePage()
         _ui.update { it.copy(screen = screen, detail = DetailState()) }
+    }
+
+    /** Records the page we are leaving, unless it is a tab root (roots are never stacked). */
+    private fun rememberPage() {
+        val current = _ui.value.screen
+        if (!isRoot(current) && pageStack.lastOrNull() != current) pageStack.add(current)
     }
 
     fun back() {
         leavePage()
         if (_ui.value.screen is Screen.Terminal) terminal.close()
-        val current = _ui.value.screen
-        val destination = when (current) {
-            is Screen.Structure -> structureOrigin
-            is Screen.Terminal -> Screen.Hosts
-            Screen.Settings -> Screen.Hosts
-            else -> Screen.Inbox
-        }
-        _ui.update {
-            it.copy(
-                screen = destination,
-                detail = DetailState(),
-            )
+        val destination = if (pageStack.isNotEmpty()) pageStack.removeAt(pageStack.lastIndex) else tabRoot()
+        when (destination) {
+            is Screen.Detail -> {
+                val key = destination.agentKey
+                val split = key.indexOf(':')
+                if (split > 0) openPane(key.substring(0, split), key.substring(split + 1), pushPage = false)
+                else _ui.update { it.copy(screen = destination, detail = DetailState()) }
+            }
+            is Screen.Terminal -> openTerminal(destination.hostId, pushPage = false)
+            else -> _ui.update { it.copy(screen = destination, detail = DetailState()) }
         }
     }
 
+    /** Where back lands when the stack is empty: the tab this trail started from. */
+    private fun tabRoot(): Screen = trailRoot
+
     fun openStructure(hostId: String) {
-        if (_ui.value.screen !is Screen.Structure) structureOrigin = _ui.value.screen
         navigate(Screen.Structure(hostId))
     }
 
@@ -308,21 +376,23 @@ class AppViewModel(
      * Opens a plain SSH shell on the host. This is deliberately independent of Herdr: it works on
      * any SSH host, and Herdr keeps its own bridge connection.
      */
-    fun openTerminal(hostId: String) {
+    fun openTerminal(hostId: String, pushPage: Boolean = true) {
         val runtime = _ui.value.repo.hosts.firstOrNull { it.host.id == hostId }
         if (runtime == null) {
             _ui.update { it.copy(message = Str.get(R.string.vm_host_not_found)) }
             return
         }
+        if (pushPage) rememberPage()
         leavePage()
         _ui.update { it.copy(screen = Screen.Terminal(hostId), detail = DetailState()) }
-        terminal.setInputMode(preferencesStore.state.value.inputMode)
         terminal.open(runtime.host, preferencesStore.state.value.terminalFontSize)
     }
 
     private fun reopenTerminal() {
         val hostId = (_ui.value.screen as? Screen.Terminal)?.hostId ?: return
-        openTerminal(hostId)
+        // Returning to the foreground reloads the page we are already on; pushing it again made the
+        // first Back re-open the same terminal instead of leaving it.
+        openTerminal(hostId, pushPage = false)
     }
 
     fun closeTerminal() {
@@ -375,32 +445,23 @@ class AppViewModel(
 
     fun setTheme(mode: ThemeMode) = preferencesStore.setTheme(mode)
 
-    fun setMotion(mode: MotionMode) = preferencesStore.setMotion(mode)
 
-    fun setDensity(mode: DensityMode) = preferencesStore.setDensity(mode)
 
-    fun setKeyBarRows(rows: Int) = preferencesStore.setKeyBarRows(rows)
-
-    fun setLongPressRepeat(enabled: Boolean) = preferencesStore.setLongPressRepeat(enabled)
-
-    fun setInputMode(mode: InputMode) {
-        preferencesStore.setInputMode(mode)
-        terminal.setInputMode(mode)
+    /**
+     * Accepts the new key for ONE host after the user compared both fingerprints.
+     *
+     * Before this existed the only escape from a key change was the global reset in Settings, which
+     * throws away every other host's pin too — a bad trade for a single reinstalled machine.
+     */
+    fun trustNewFingerprint(hostId: String) {
+        runCatching { repository.trustNewFingerprint(hostId) }.onFailure { error ->
+            _ui.update { it.copy(message = error.message ?: Str.get(R.string.vm_trust_failed)) }
+        }
     }
-
 
     /** Forgets every pinned host key; the next connection asks for confirmation again. */
     fun resetFingerprints() {
         viewModelScope.launch { repository.resetFingerprints() }
-    }
-
-    /** Default snapshot size for every pane; per-pane overrides still win until the page closes. */
-    fun setDefaultSnapshotLines(lines: Int) {
-        val requested = if (lines >= 1200) 1200 else 400
-        preferencesStore.setSnapshotLines(requested)
-        snapshotLineLimits.clear()
-        val detail = _ui.value.detail
-        if (detail.agent != null && detail.snapshotLines != requested) setSnapshotLines(requested)
     }
 
     fun terminalReconnect() = terminal.reconnect()
@@ -507,7 +568,9 @@ class AppViewModel(
     }
 
     private fun structureAction(hostId: String, success: String, block: suspend () -> Unit) {
-        screenMutation(Str.get(R.string.vm_mutation_accepted, success), block)
+        // No success toast: the workspace/tab/pane appearing in the list is the receipt, and a
+        // "request accepted, verify the sync state" banner made every ordinary edit feel uncertain.
+        screenMutation(success = "", block = block)
     }
 
     private fun screenMutation(success: String, block: suspend () -> Unit) {
@@ -523,7 +586,7 @@ class AppViewModel(
                 currentCoroutineContext().ensureActive()
                 block()
                 currentCoroutineContext().ensureActive()
-                show(success)
+                if (success.isNotBlank()) show(success)
             } catch (cancelled: CancellationException) {
                 show(Str.get(R.string.vm_request_interrupted))
                 throw cancelled
@@ -567,14 +630,39 @@ class AppViewModel(
     fun openAgent(agent: Agent, hostFilterId: String? = null) {
         val state = _ui.value
         val live = state.repo.agents.firstOrNull { it.key == agent.key } ?: return
+        rememberPage()
         showAgent(live)
+    }
+
+    /**
+     * Opens the detail page for any pane of a host, agent or not. A shell pane reads and types
+     * through the same page: the page entity is the pane, the agent is only its chat side.
+     */
+    fun openPane(hostId: String, paneId: String, pushPage: Boolean = true) {
+        val runtime = _ui.value.repo.hosts.firstOrNull { it.host.id == hostId }
+        if (runtime == null) {
+            _ui.update { it.copy(message = Str.get(R.string.vm_host_not_found)) }
+            return
+        }
+        if (pushPage) rememberPage()
+        val key = "$hostId:$paneId"
+        val live = _ui.value.repo.agents.firstOrNull { it.key == key }
+        if (live != null) {
+            showAgent(live)
+            return
+        }
+        val pane = runtime.structure.panes.firstOrNull { it.id == paneId }
+        if (pane == null) {
+            _ui.update { it.copy(message = Str.get(R.string.vm_pane_not_found)) }
+            return
+        }
+        showAgent(paneDetailAgent(runtime, pane))
     }
 
     private fun showAgent(agent: Agent) {
         leavePage()
         _ui.update {
             it.copy(screen = Screen.Detail(agent.key), detail = decorate(DetailState(agent = agent, loading = true,
-                snapshotLines = snapshotLineLimits[agent.key] ?: preferencesStore.state.value.snapshotLines,
                 readingPosition = readingPositions[agent.key] ?: ReadingPosition(),
                 readingPaused = readingPositions[agent.key]?.paused == true)))
         }
@@ -611,19 +699,6 @@ class AppViewModel(
         _ui.update { it.copy(detail = it.detail.copy(explain = null, explainLoading = false)) }
     }
 
-    fun loadMore() = setSnapshotLines(1200)
-
-    /** Requested recent-snapshot size, not a claim about returned history. */
-    fun setSnapshotLines(lines: Int) {
-        if (_ui.value.detail.sending) return
-        val agent = _ui.value.detail.agent ?: return
-        val page = ticket() ?: return
-        val requested = if (lines >= 1200) 1200 else 400
-        snapshotLineLimits[page.agentKey] = requested
-        updateDetail(page) { it.copy(snapshotLines = requested) }
-        loadPane(agent)
-    }
-
     /** Quiet reads still have their own request generation and retain visible read errors. */
     fun refreshPaneQuietly() {
         val detail = _ui.value.detail
@@ -651,19 +726,20 @@ class AppViewModel(
         if (!paused && !_ui.value.detail.sending) _ui.value.detail.agent?.let { loadPane(it, quiet = true) }
     }
 
-    private fun applyPane(page: PageTicket, pane: PaneText, shownSeq: Long) {
+    private fun applyPane(page: PageTicket, pane: PaneText, shownSeq: Long, paneOnly: Boolean = false) {
         if (!matches(page)) return
         operations.observe(page.agentKey, ApprovalPolicy.evidence(pane))
-        updateDetail(page) {
-            it.copy(
+        updateDetail(page) { current ->
+            reconcileSent(current, pane.text).copy(
                 text = pane.text, ask = ApprovalPolicy.evidence(pane).ask,
                 loading = false, revision = pane.revision, shownSeq = shownSeq,
                 truncated = pane.truncated, loadedAt = System.currentTimeMillis(),
                 // A pane read and the agent snapshot are separate requests. A status
-                // transition during the read leaves their ordering unknown.
-                stale = !foreground || _ui.value.repo.agents.none { agent ->
+                // transition during the read leaves their ordering unknown. A pane with no
+                // agent has no status to compare, so only foreground affects its freshness.
+                stale = !foreground || (!paneOnly && _ui.value.repo.agents.none { agent ->
                     agent.key == page.agentKey && agent.stateChangeSeq == shownSeq
-                }, error = null,
+                }), error = null,
             )
         }
     }
@@ -671,7 +747,7 @@ class AppViewModel(
     private fun loadPane(agent: Agent, quiet: Boolean = false) {
         val page = ticket() ?: return
         if (!matches(page) || page.agentKey != agent.key || !foreground) return
-        val lines = _ui.value.detail.snapshotLines
+        val lines = _ui.value.detail.historyLines
         val request = ++readGeneration
         loadJob?.cancel()
         updateDetail(page) { it.copy(loading = !quiet, error = null) }
@@ -679,7 +755,7 @@ class AppViewModel(
             try {
                 val pane = repository.readPane(agent, lines)
                 currentCoroutineContext().ensureActive()
-                if (request == readGeneration) applyPane(page, pane, agent.stateChangeSeq)
+                if (request == readGeneration) applyPane(page, pane, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
             } catch (cancelled: CancellationException) {
                 if (request == readGeneration) updateDetail(page) { it.copy(loading = false, stale = true, error = Str.get(R.string.vm_read_cancelled)) }
                 throw cancelled
@@ -689,6 +765,53 @@ class AppViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Reads further back in the terminal buffer.
+     *
+     * The bridge has no cursor, so "older" means "ask for a bigger tail". Doubling the request is
+     * the honest way to do it: every response is a superset of the previous one, and the reader
+     * keeps its place because the page re-anchors on the new height.
+     */
+    fun loadMoreHistory() {
+        val detail = _ui.value.detail
+        val agent = detail.agent ?: return
+        if (detail.loading || detail.sending) return
+        // `truncated == false` means the host already returned its whole buffer; there is nothing
+        // further back to fetch and asking again would be a round trip for nothing.
+        if (!detail.truncated && detail.text.isNotBlank()) return
+        val next = (detail.historyLines * 2).coerceAtMost(MAX_HISTORY_LINES)
+        if (next == detail.historyLines) return
+        updateDetail(ticket() ?: return) { it.copy(historyLines = next) }
+        loadPane(agent, quiet = true)
+    }
+
+    private fun recordSent(agentKey: String, text: String) {
+        updateDetail(PageTicket(agentKey, pageGeneration)) {
+            it.copy(sent = (it.sent + SentMessage(nextSendId++, text, System.currentTimeMillis())).takeLast(12))
+        }
+    }
+
+    /**
+     * Marks a local send as echoed once the screen carries it.
+     *
+     * Matching is on the tail of the message, because a TUI wraps long prompts across rows and the
+     * snapshot may only hold the last few lines of it.
+     */
+    private fun reconcileSent(detail: DetailState, screen: String): DetailState {
+        if (detail.sent.isEmpty()) return detail
+        val flat = screen.filterNot { it.isWhitespace() }
+        var changed = false
+        val next = detail.sent.map { message ->
+            if (message.echoed) return@map message
+            val probe = message.text.filterNot { it.isWhitespace() }.takeLast(24)
+            if (probe.isNotEmpty() && flat.contains(probe)) {
+                changed = true
+                message.copy(echoed = true)
+            } else message
+        }
+        return if (changed) detail.copy(sent = next) else detail
     }
 
     fun setDraft(text: String) {
@@ -743,7 +866,7 @@ class AppViewModel(
             var uncertain = false
             var blocked: ApprovalEvidence? = null
             try {
-                val fresh = ApprovalPolicy.evidence(repository.readPane(agent, detail.snapshotLines))
+                val fresh = ApprovalPolicy.evidence(repository.readPane(agent, PANE_READ_LINES))
                 currentCoroutineContext().ensureActive()
                 // A preflight completing on another page must never initiate a write.
                 if (!matches(page) || !connected(agent) || preflightRequest != readGeneration) return@launch
@@ -757,26 +880,29 @@ class AppViewModel(
                     return@launch
                 }
                 attempted = true
+
                 blocked = fresh
                 repository.sendKeys(agent, option.keys).getOrThrow()
                 accepted = true
                 currentCoroutineContext().ensureActive()
-                notice = Str.get(R.string.vm_key_accepted, option.label)
+                // Successful writes stay silent; the screen itself is the receipt. Only an
+                // unresolved outcome earns a line, because a disclaimer makes people doubt the app.
+                notice = ""
                 uncertain = true
                 delay(700)
                 if (!matches(page) || !foreground) return@launch
                 val postRequest = ++readGeneration
                 loadJob?.cancel()
-                val after = repository.readPane(agent, detail.snapshotLines)
+                val after = repository.readPane(agent, PANE_READ_LINES)
                 currentCoroutineContext().ensureActive()
                 if (!matches(page) || postRequest != readGeneration) return@launch
                 applyPane(page, after, agent.stateChangeSeq)
                 if (after.truncated) {
-                    notice = Str.get(R.string.vm_key_accepted_truncated)
+                    notice = ""
                 } else if (ApprovalPolicy.sameContext(fresh, ApprovalPolicy.evidence(after))) {
                     notice = Str.get(R.string.vm_key_accepted_unchanged)
                 } else {
-                    notice = Str.get(R.string.vm_key_accepted_changed)
+                    notice = ""
                     uncertain = false
                 }
             } catch (cancelled: CancellationException) {
@@ -806,6 +932,23 @@ class AppViewModel(
         sendManual(Str.get(R.string.vm_label_keys), rpc = { repository.sendKeys(it, capturedKeys) })
     }
 
+    /** Terminal input for a pane: literal text into the PTY, no agent interpretation. */
+    fun sendInput(text: String, submit: Boolean = true) {
+        val value = text.trimEnd()
+        if (value.isEmpty()) return
+        val agent = _ui.value.detail.agent ?: return
+        val payload = if (submit) "$value\n" else value
+        // Clear only once the RPC was accepted: clearing up front threw the typed command away
+        // whenever the pane was offline, so the user lost text and nothing was sent.
+        operations.setDraft(agent.key, text)
+        syncOperation(agent.key)
+        val captured = operations.draft(agent.key)
+        sendManual(Str.get(R.string.vm_label_input), rpc = { repository.sendInput(it, payload) }, onRpcAccepted = {
+            if (operations.draft(agent.key) == captured) operations.clearDraft(agent.key, captured)
+            syncOperation(agent.key)
+        })
+    }
+
     fun sendPrompt(text: String = _ui.value.detail.draft, onSent: () -> Unit = {}) {
         val value = text.trim()
         if (value.isEmpty()) return
@@ -817,6 +960,7 @@ class AppViewModel(
         val captured = operations.draft(agent.key)
         var unchanged = false
         sendManual(Str.get(R.string.vm_label_reply), rpc = { repository.prompt(it, value) }, onRpcAccepted = {
+            recordSent(agent.key, value)
             unchanged = operations.draft(agent.key) == captured
             if (captured.text == text) operations.clearDraft(agent.key, captured)
             syncOperation(agent.key)
@@ -848,7 +992,7 @@ class AppViewModel(
                     accepted = true
                     onRpcAccepted()
                 }
-                notice = Str.get(R.string.vm_send_accepted, label)
+                notice = ""
                 onAccepted(page)
                 delay(600)
                 if (matches(page) && foreground) loadPane(agent)

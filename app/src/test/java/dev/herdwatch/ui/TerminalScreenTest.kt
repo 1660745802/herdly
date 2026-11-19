@@ -10,6 +10,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TerminalScreenTest {
+    /** Feeds successive field values through the same diff the composer uses. */
+    private fun type(vararg values: String): List<String> {
+        var sent = ""
+        return values.map { value ->
+            val edit = directInputEdit(sent, TextFieldValue(value))
+            sent = edit.sent
+            edit.text
+        }
+    }
+
     @Test
     fun `arrow keys follow application cursor mode`() {
         "ABCD".forEach { final ->
@@ -42,62 +52,107 @@ class TerminalScreenTest {
     }
 
     @Test
-    fun `direct input typing strips sentinel and empty backspace emits del`() {
-        val sentinel = TextFieldValue("\u2060", selection = TextRange(1))
-
-        val typed = directInputDelta(sentinel, TextFieldValue("\u2060a"))
-        assertEquals("a", typed.text)
-        assertFalse(typed.deleteBackward)
-        assertEquals("\u2060", typed.remaining.text)
-
-        // Some IMEs move the selection/sentinel instead of keeping it at offset zero.
-        val movedSentinel = directInputDelta(sentinel, TextFieldValue("a\u2060"))
-        assertEquals("a", movedSentinel.text)
-        assertFalse(movedSentinel.text.contains('\u2060'))
-
-        val legitimateZeroWidthSpace = directInputDelta(sentinel, TextFieldValue("\u2060\u200B"))
-        assertEquals("\u200B", legitimateZeroWidthSpace.text)
-
-        val deleted = directInputDelta(sentinel, TextFieldValue(""))
-        assertEquals("", deleted.text)
-        assertTrue(deleted.deleteBackward)
+    fun `direct input sends one byte per repeated character`() {
+        // Regression for `cleaar`: one extra character per IME event.
+        assertEquals("aaaa", type("a", "aa", "aaa", "aaaa").joinToString(""))
     }
 
     @Test
-    fun `direct input sends committed prefix while retaining composition`() {
-        val previous = TextFieldValue("\u2060hao", selection = TextRange(3), composition = TextRange(1, 4))
-        val mixed = TextFieldValue("\u2060你hao", selection = TextRange(4), composition = TextRange(2, 5))
-
-        val delta = directInputDelta(previous, mixed)
-
-        assertEquals("你", delta.text)
-        assertFalse(delta.deleteBackward)
-        assertEquals("\u2060hao", delta.remaining.text)
-        assertEquals(TextRange(1, 4), delta.remaining.composition)
-        assertEquals(TextRange(3), delta.remaining.selection)
-        assertEquals("你", directSubmitText(mixed))
-
-        val suffix = TextFieldValue("\u2060hao！", composition = TextRange(1, 4))
-        val held = directInputDelta(previous, suffix)
-        assertEquals("", held.text)
-        assertEquals("\u2060hao！", held.remaining.text)
-        assertEquals("", directSubmitText(suffix))
+    fun `direct input sends each character of a word exactly once`() {
+        assertEquals("clear", type("c", "cl", "cle", "clea", "clear").joinToString(""))
     }
 
     @Test
-    fun `direct input holds composition and cancellation does not emit backspace`() {
-        val composing = TextFieldValue("ni", composition = TextRange(0, 2))
-        val held = directInputDelta(TextFieldValue("\u2060"), composing)
+    fun `direct input does not resend text the PTY already has`() {
+        // An IME re-delivering a value we transmitted must produce an empty diff.
+        val replay = directInputEdit("clear", TextFieldValue("clear"))
+        assertEquals("", replay.text)
+        assertEquals("clear", replay.sent)
+        assertFalse(replay.clearField)
+    }
+
+    @Test
+    fun `direct input sends a multi character commit in one update`() {
+        val pasted = directInputEdit("", TextFieldValue("echo AAA"))
+        assertEquals("echo AAA", pasted.text)
+        assertEquals("echo AAA", pasted.sent)
+    }
+
+    @Test
+    fun `direct input deleting one character sends only one del`() {
+        val deleted = directInputEdit("clear", TextFieldValue("clea"))
+        assertEquals("\u007f", deleted.text)
+        assertEquals("clea", deleted.sent)
+
+        val emptied = directInputEdit("a", TextFieldValue(""))
+        assertEquals("\u007f", emptied.text)
+    }
+
+    @Test
+    fun `direct input never sends an unfinished composition`() {
+        val composing = TextFieldValue("你", composition = TextRange(0, 1))
+        val held = directInputEdit("", composing)
         assertEquals("", held.text)
-        assertEquals("\u2060ni", held.remaining.text)
+        assertEquals("", held.sent)
 
-        val cancelled = directInputDelta(composing, TextFieldValue(""))
-        assertEquals("", cancelled.text)
-        assertFalse(cancelled.deleteBackward)
-
-        val committed = directInputDelta(composing, TextFieldValue("你"))
+        val committed = directInputEdit(held.sent, TextFieldValue("你"))
         assertEquals("你", committed.text)
-        assertFalse(committed.deleteBackward)
+    }
+
+    @Test
+    fun `direct input keeps pinyin behind a committed prefix until it commits`() {
+        val composing = TextFieldValue("hao你", composition = TextRange(3, 4))
+        val held = directInputEdit("hao", composing)
+        assertEquals("", held.text)
+        assertEquals("hao", held.sent)
+
+        val committed = directInputEdit(held.sent, TextFieldValue("hao你"))
+        assertEquals("你", committed.text)
+    }
+
+    @Test
+    fun `direct input clears the mirror past its budget and stays correct afterwards`() {
+        val full = "x".repeat(DIRECT_MIRROR_BUDGET)
+        val atBudget = directInputEdit("", TextFieldValue(full))
+        assertFalse(atBudget.clearField)
+        assertEquals(full, atBudget.sent)
+
+        val over = directInputEdit(atBudget.sent, TextFieldValue(full + "y"))
+        assertEquals("y", over.text)
+        assertTrue(over.clearField)
+        assertEquals("", over.sent)
+
+        val afterReset = directInputEdit(over.sent, TextFieldValue("z"))
+        assertEquals("z", afterReset.text)
+        assertEquals("z", afterReset.sent)
+    }
+
+    @Test
+    fun `direct submit sends the committed part only while composing`() {
+        val composing = TextFieldValue("haoni", composition = TextRange(3, 5))
+        val edit = directSubmitEdit("", composing)
+        assertEquals("hao", edit.text)
+        assertFalse(edit.text.contains('\r'))
+        assertFalse(edit.clearField)
+        assertEquals("hao", edit.sent)
+
+        // Nothing committed since the last flush: Enter must not duplicate it either.
+        assertEquals("", directSubmitEdit("hao", composing).text)
+    }
+
+    @Test
+    fun `direct submit presses return on a committed or empty mirror`() {
+        val submit = directSubmitEdit("", TextFieldValue("echo AAA"))
+        assertEquals("echo AAA\r", submit.text)
+        assertTrue(submit.clearField)
+        assertEquals("", submit.sent)
+
+        assertEquals("\r", directSubmitEdit("", TextFieldValue("")).text)
+    }
+
+    @Test
+    fun `direct input passes a legitimate zero width space through`() {
+        assertEquals("\u200B", directInputEdit("", TextFieldValue("\u200B")).text)
     }
 
     private fun run(

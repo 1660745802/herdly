@@ -2,11 +2,7 @@
 <resources>
     <!-- 收件箱：顶部标题栏 -->
     <string name="inbox_subtitle_pocket">手机上的 Herdr 任务台</string>
-    <plurals name="inbox_count_agents">
-        <item quantity="other">%1$d 个 agent</item>
-    </plurals>
     <!-- %1$s：待处理数短语；%2$s：agent 数短语。连接状态不在这里重复。 -->
-    <string name="inbox_header_summary">%1$s · %2$s</string>
 
     <!-- 收件箱：搜索 -->
     <string name="inbox_cd_search">搜索</string>
@@ -37,45 +33,9 @@
     <string name="inbox_host_disconnected">未连接</string>
 
     <!-- 收件箱：值守摘要 -->
-    <string name="inbox_filter_attention">需要处理</string>
-    <string name="inbox_filter_all">全部 Agent</string>
     <!-- %1$s：等待最久的 agent 名称 -->
-    <string name="inbox_view_oldest">打开 %1$s</string>
-    <string name="inbox_longest_waiting">最久 %1$s</string>
-    <string name="inbox_longest_waiting_snapshot">最久 %1$s · 快照</string>
-    <string name="inbox_some_hosts_offline">部分机器未连接</string>
-    <string name="inbox_nothing_pending">暂无待处理</string>
-    <plurals name="inbox_count_unverified">
-        <item quantity="other">%1$d 待核实</item>
-    </plurals>
-    <plurals name="inbox_count_review">
-        <item quantity="other">%1$d 待查看</item>
-    </plurals>
-    <plurals name="inbox_count_working">
-        <item quantity="other">%1$d 进行中</item>
-    </plurals>
-    <plurals name="inbox_count_idle">
-        <item quantity="other">%1$d 空闲</item>
-    </plurals>
-    <string name="inbox_state_expanded">已展开</string>
-    <string name="inbox_state_collapsed">已收起</string>
-    <plurals name="inbox_failures_show">
-        <item quantity="other">%1$d 台连接失败 · 查看详情</item>
-    </plurals>
-    <plurals name="inbox_failures_hide">
-        <item quantity="other">%1$d 台连接失败 · 收起</item>
-    </plurals>
-    <string name="inbox_host_error_line">%1$s：%2$s</string>
-    <string name="inbox_last_synced">最后成功同步：%1$s</string>
-    <string name="inbox_reconnect_host">重连 %1$s</string>
 
     <!-- 收件箱：列表计数与空态 -->
-    <plurals name="inbox_count_items">
-        <item quantity="other">%1$d 项</item>
-    </plurals>
-    <plurals name="inbox_count_items_matched">
-        <item quantity="other">%1$d 项匹配</item>
-    </plurals>
     <string name="inbox_empty_none_title">现在没有 Agent</string>
     <string name="inbox_empty_host_title">这台机器没有 Agent</string>
     <string name="inbox_empty_none_body">可以创建新任务，或检查主机里的工作区和分屏。</string>
@@ -87,10 +47,8 @@
     <string name="inbox_recheck_agents">重新检查 agent</string>
     <string name="inbox_no_match_title">没有匹配的 Agent</string>
     <string name="inbox_no_match_search_body">搜索了名称、机器、项目、工作区、标签页、分屏和目录。</string>
-    <string name="inbox_no_match_attention_body">现在没有需要处理的项。</string>
     <string name="inbox_no_match_host_body">这台机器当前没有匹配的 Agent。</string>
     <string name="inbox_no_match_none_body">当前没有 Agent。</string>
-    <string name="inbox_show_all_agents">查看全部 Agent</string>
 
     <!-- 收件箱：首次使用引导 -->
     <string name="inbox_setup_title">把 Herdr 装进口袋</string>
@@ -100,13 +58,31 @@
     <string name="inbox_check_command_hint">在主机上运行上面那条命令，应输出 herdr-api-bridge-v1。</string>
 
     <!-- 收件箱：Agent 行 -->
-    <string name="inbox_cd_open_terminal">查看 %1$s 的终端</string>
     <string name="inbox_stale_snapshot">快照待更新 · %1$s</string>
     <string name="inbox_offline_snapshot">未连接，显示上次快照 · %1$s</string>
-    <plurals name="inbox_attention_count">
-        <item quantity="other">%1$d需要处理</item>
+    <string name="inbox_panes_empty_title">这台机器的分屏还不在这里</string>
+    <string name="inbox_panes_empty_body">连上机器并读取一次会话结构后，所有分屏都会出现在这里。</string>
+    <string name="inbox_env_offline">%1$s 未连接</string>
+    <string name="inbox_env_retry">重试</string>
+    <string name="inbox_pane_shell">shell</string>
+    <plurals name="inbox_count_hosts">
+        <item quantity="one">%1$d 台机器</item>
+        <item quantity="other">%1$d 台机器</item>
     </plurals>
-    <plurals name="inbox_failures_short">
-        <item quantity="other">%1$d 台连接失败</item>
+    <string name="inbox_connected_hosts">%1$d 台已连接</string>
+    <string name="inbox_host_up">已连接</string>
+    <string name="inbox_host_down">未连接</string>
+    <plurals name="inbox_group_agents">
+        <item quantity="one">%1$d 个 agent</item>
+        <item quantity="other">%1$d 个 agent</item>
+    </plurals>
+    <string name="inbox_subtitle_single">分屏与 agent</string>
+    <plurals name="inbox_group_waiting">
+        <item quantity="one">%1$d 个待处理</item>
+        <item quantity="other">%1$d 个待处理</item>
+    </plurals>
+    <plurals name="inbox_group_panes">
+        <item quantity="one">%1$d 个分屏</item>
+        <item quantity="other">%1$d 个分屏</item>
     </plurals>
 </resources>
