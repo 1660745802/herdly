@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_channel_name">Connection keep-alive</string>
+    <string name="service_channel_desc">Keeps SSH sessions open and polls task state while Herdly is in the background.</string>
+    <string name="service_title">Herdly is staying connected</string>
+    <plurals name="service_summary_hosts">
+        <item quantity="one">%1$d host connected</item>
+        <item quantity="other">%1$d hosts connected</item>
+    </plurals>
+    <plurals name="service_summary_waiting">
+        <item quantity="one">%1$d waiting</item>
+        <item quantity="other">%1$d waiting</item>
+    </plurals>
+    <string name="service_summary_idle">Nothing waiting</string>
+    <string name="service_summary_offline">All hosts offline, retrying</string>
+</resources>

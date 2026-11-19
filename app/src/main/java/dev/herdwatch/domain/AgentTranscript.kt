@@ -111,8 +111,6 @@ object AgentTranscript {
         var inFence = false
         while (i < lines.size) {
             val ln = lines[i]
-            if (ln.dropped || ln.chrome) { i++; continue }
-            if (ln.blank) { pendingBlank = true; i++; continue }
             if (ln.fence) {
                 if (!inFence) {
                     begin(TOOL, true, ln)
@@ -132,6 +130,8 @@ object AgentTranscript {
                 i++
                 continue
             }
+            if (ln.dropped || ln.chrome) { i++; continue }
+            if (ln.blank) { pendingBlank = true; i++; continue }
             val t = unpipe(ln.norm)
 
             // Numbered approval menu: a run of 1..n options with choice words or a question.

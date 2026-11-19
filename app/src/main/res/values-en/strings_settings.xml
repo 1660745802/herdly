@@ -38,4 +38,24 @@
     <string name="settings_update_failed_http">the server said %1$s</string>
     <string name="settings_update_failed_network">network unavailable</string>
     <string name="settings_group_security">On-device security</string>
+    <string name="settings_group_about">About</string>
+    <string name="settings_version_footnote">Herdly %1$s · Everything stays on this device</string>
+    <string name="settings_update_title">Update</string>
+    <string name="settings_update_summary">Fetch the latest release from GitHub and install it without leaving the app</string>
+    <string name="settings_update_check">Check</string>
+    <string name="settings_update_checking">Checking…</string>
+    <string name="settings_update_current">Up to date (%1$s)</string>
+    <string name="settings_update_available">Version %1$s available</string>
+    <string name="settings_update_download">Download and install</string>
+    <string name="settings_update_downloading">Downloading %1$d%%</string>
+    <string name="settings_update_ready">%1$s downloaded</string>
+    <string name="settings_update_install">Install</string>
+    <string name="settings_update_installing">Opening the installer…</string>
+    <string name="settings_update_permission">Allow Herdly to install apps in system settings</string>
+    <string name="settings_update_permission_action">Open settings</string>
+    <string name="update_failed_download">Download failed</string>
+    <string name="update_failed_install">Could not open the installer</string>
+    <string name="update_bad_apk">The downloaded file is not a Herdly build</string>
+    <string name="update_older_apk">That build is not newer than this one</string>
+    <string name="update_no_apk">This release has no APK asset</string>
 </resources>

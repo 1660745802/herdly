@@ -67,6 +67,8 @@ fun AddHostSheet(
         passphrase: String,
         session: String,
         herdrCommand: String,
+        fallbackHost: String,
+        fallbackPort: String,
     ) -> Unit,
 ) {
     var label by remember(initial) { mutableStateOf(initial?.label ?: "") }
@@ -79,9 +81,19 @@ fun AddHostSheet(
     var privateKey by remember(initial) { mutableStateOf(initial?.secret?.takeIf { initial.authType == AuthType.KEY } ?: "") }
     val secret = if (authType == AuthType.PASSWORD) password else privateKey
     var passphrase by remember(initial) { mutableStateOf(initial?.passphrase ?: "") }
+    // Second address for the same machine: LAN at home, public elsewhere. Credentials, pin and
+    // everything else stay shared, so this is one host with two routes rather than two hosts.
+    var fallbackHost by remember(initial) { mutableStateOf(initial?.fallbackHost ?: "") }
+    var fallbackPort by remember(initial) { mutableStateOf(initial?.fallbackPort?.takeIf { it > 0 }?.toString() ?: "") }
     var session by remember(initial) { mutableStateOf(initial?.session ?: "") }
     var herdrCommand by remember(initial) { mutableStateOf(initial?.herdrCommand ?: "herdr") }
-    var advanced by rememberSaveable(initial?.id) { mutableStateOf(initial?.session?.isNotBlank() == true || (initial != null && initial.herdrCommand != "herdr")) }
+    var advanced by rememberSaveable(initial?.id) {
+        mutableStateOf(
+            initial?.session?.isNotBlank() == true ||
+                (initial != null && initial.herdrCommand != "herdr") ||
+                initial?.hasFallback == true,
+        )
+    }
     var validation by remember { mutableStateOf<String?>(null) }
     // Hoisted out of the semantics block: that lambda is not composable.
     val expandedLabel = stringResource(R.string.addhost_expanded)
@@ -232,6 +244,33 @@ fun AddHostSheet(
                 modifier = Modifier.semantics { stateDescription = if (advanced) expandedLabel else collapsedLabel },
             )
             if (advanced) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NeoField(
+                        value = fallbackHost,
+                        onValueChange = { fallbackHost = it },
+                        keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                        label = stringResource(R.string.addhost_fallback_host_optional),
+                        hint = stringResource(R.string.addhost_fallback_host_placeholder),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    NeoField(
+                        value = fallbackPort,
+                        onValueChange = { fallbackPort = it.filter { c -> c.isDigit() }.take(5) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                        label = stringResource(R.string.addhost_port),
+                        hint = port,
+                        singleLine = true,
+                        modifier = Modifier.width(92.dp),
+                    )
+                }
+                Spacer(Modifier.height(DsSpace.xs))
+                Text(
+                    stringResource(R.string.addhost_fallback_hint),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                )
+                Spacer(Modifier.height(10.dp))
                 NeoField(
                     value = session,
                     onValueChange = { session = it },
@@ -278,9 +317,9 @@ fun AddHostSheet(
                             adding = adding,
                             modifier = Modifier.fillMaxWidth(),
                             onClick = {
-                                validation = validateHost(host, user, secret, authType, port, herdrCommand)
+                                validation = validateHost(host, user, secret, authType, port, herdrCommand, fallbackHost, fallbackPort)
                                 if (validation == null) {
-                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim())
+                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim(), fallbackHost.trim(), fallbackPort)
                                 }
                             },
                         )
@@ -298,9 +337,9 @@ fun AddHostSheet(
                             adding = adding,
                             modifier = Modifier.widthIn(min = 112.dp),
                             onClick = {
-                                validation = validateHost(host, user, secret, authType, port, herdrCommand)
+                                validation = validateHost(host, user, secret, authType, port, herdrCommand, fallbackHost, fallbackPort)
                                 if (validation == null) {
-                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim())
+                                    onSave(initial?.id, label.trim(), host.trim(), port, user.trim(), authType, secret, if (authType == AuthType.KEY) passphrase else "", session.trim(), herdrCommand.trim(), fallbackHost.trim(), fallbackPort)
                                 }
                             },
                         )
@@ -344,11 +383,19 @@ private fun validateHost(
     authType: AuthType,
     port: String,
     herdrCommand: String,
+    fallbackHost: String,
+    fallbackPort: String,
 ): String? = when {
     host.isBlank() -> Str.get(R.string.addhost_err_host_required)
     user.isBlank() -> Str.get(R.string.addhost_err_user_required)
     secret.isBlank() -> if (authType == AuthType.PASSWORD) Str.get(R.string.addhost_err_password_required) else Str.get(R.string.addhost_err_key_required)
     (port.toIntOrNull() ?: 0) !in 1..65535 -> Str.get(R.string.addhost_err_port_range)
     herdrCommand.isBlank() -> Str.get(R.string.addhost_err_herdr_required)
+    // Blank port means "same as the primary", so only a non-empty value has to be a port.
+    fallbackPort.isNotBlank() && (fallbackPort.toIntOrNull() ?: 0) !in 1..65535 -> Str.get(R.string.addhost_err_port_range)
+    fallbackHost.isNotBlank() &&
+        fallbackHost.trim() == host.trim() &&
+        (fallbackPort.toIntOrNull() ?: port.toIntOrNull()) == port.toIntOrNull() ->
+        Str.get(R.string.addhost_err_fallback_same)
     else -> null
 }

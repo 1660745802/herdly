@@ -25,6 +25,12 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     var onConnect: suspend () -> Unit = {}
     var onSnapshot: suspend () -> Snapshot = { initialSnapshot }
     var onStartAgent: suspend () -> Unit = {}
+    /** Workspaces/tabs handed back by the fake create calls, and what cleanup closed. */
+    var created = HostConnection.PaneCreated("root", tabId = "tab-1", workspaceId = "ws-1")
+    var onCreate: suspend () -> Unit = {}
+    var onClose: suspend () -> Unit = {}
+    val closedTabs = mutableListOf<String>()
+    val closedWorkspaces = mutableListOf<String>()
 
     override fun updateConfig(updated: HostConfig) { config = updated }
     override suspend fun connect() {
@@ -45,12 +51,30 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = unexpected()
     override suspend fun sendKeys(paneId: String, keys: List<String>): Unit = unexpected()
     override suspend fun sendInput(paneId: String, text: String?, keys: List<String>): Unit = unexpected()
-    override suspend fun createWorkspace(label: String?, cwd: String?): String? = unexpected()
-    override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): String? = unexpected()
+    override suspend fun createWorkspace(label: String?, cwd: String?): HostConnection.PaneCreated {
+        mutationCalls++
+        onCreate()
+        return created
+    }
+    override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): HostConnection.PaneCreated {
+        mutationCalls++
+        onCreate()
+        return created
+    }
     override suspend fun splitPane(paneId: String, direction: String): Unit = unexpected()
     override suspend fun closePane(paneId: String): JsonObject = unexpected()
-    override suspend fun closeTab(tabId: String): JsonObject = unexpected()
-    override suspend fun closeWorkspace(workspaceId: String): JsonObject = unexpected()
+    override suspend fun closeTab(tabId: String): JsonObject {
+        mutationCalls++
+        onClose()
+        closedTabs += tabId
+        return JsonObject(emptyMap())
+    }
+    override suspend fun closeWorkspace(workspaceId: String): JsonObject {
+        mutationCalls++
+        onClose()
+        closedWorkspaces += workspaceId
+        return JsonObject(emptyMap())
+    }
     override suspend fun focusPane(paneId: String): JsonObject = unexpected()
     override suspend fun focusTab(tabId: String): JsonObject = unexpected()
     override suspend fun focusWorkspace(workspaceId: String): JsonObject = unexpected()

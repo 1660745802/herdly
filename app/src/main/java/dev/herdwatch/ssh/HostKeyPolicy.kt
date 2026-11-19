@@ -15,6 +15,31 @@ internal const val HOST_KEY_ALGORITHMS: String =
     "ssh-ed25519,rsa-sha2-512,rsa-sha2-256," +
         "ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521"
 
+/**
+ * True when the attempt never got an answer from the address: refused, unreachable, timed out or
+ * the name did not resolve.
+ *
+ * JSch wraps socket errors in `JSchException`, so the type of the outer exception says nothing. A
+ * rejected key or a refused password is *not* a transport failure — retrying those on another
+ * address would double the attempts and hide the real cause. This walks the cause chain instead.
+ */
+internal fun Throwable.isUnreachableAddress(): Boolean {
+    var current: Throwable? = this
+    val seen = HashSet<Throwable>()
+    while (current != null && seen.add(current)) {
+        if (current is java.net.ConnectException ||
+            current is java.net.NoRouteToHostException ||
+            current is java.net.UnknownHostException ||
+            current is java.net.SocketTimeoutException ||
+            current is java.net.PortUnreachableException
+        ) {
+            return true
+        }
+        current = current.cause
+    }
+    return false
+}
+
 /** The blob's first length-prefixed field is the algorithm name ("ssh-ed25519", …). */
 internal fun keyAlgorithm(key: ByteArray): String? = runCatching {
     val len = ((key[0].toInt() and 0xff) shl 24) or ((key[1].toInt() and 0xff) shl 16) or

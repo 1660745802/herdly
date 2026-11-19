@@ -358,22 +358,35 @@ class AgentTranscriptTest {
 
 
     @Test
-    fun `fenced code stays one tool block and is not re-interpreted`() {
+    fun `bare fence closes tool block and preserves following turns`() {
         val text = listOf(
             "● here is the plan",
             "```bash",
             "# A. pin 120Hz",
             "adb shell setprop x false",
+            "---",
             "> quoted inside code",
             "1. not a menu",
             "```",
             "● done",
+            "> next request",
         ).joinToString("\n")
         val t = AgentTranscript.parse(text)
-        val code = t.blocks.filter { it.role == TranscriptRole.TOOL }
-        assertEquals(1, code.size)
-        assertTrue(code[0].text.contains("adb shell setprop x false"))
-        assertTrue(t.blocks.none { it.role == TranscriptRole.USER })
+        assertEquals(
+            listOf(
+                TranscriptRole.ASSISTANT,
+                TranscriptRole.TOOL,
+                TranscriptRole.ASSISTANT,
+                TranscriptRole.USER,
+            ),
+            t.blocks.map { it.role },
+        )
+        val code = t.blocks.single { it.role == TranscriptRole.TOOL }
+        assertTrue(code.text.contains("adb shell setprop x false"))
+        assertTrue(code.text.contains("---"))
+        assertTrue(code.text.endsWith("```"))
+        assertEquals("● done", t.blocks[2].text)
+        assertEquals("> next request", t.blocks[3].text)
         assertTrue(t.blocks.none { it.role == TranscriptRole.APPROVAL })
     }
 

@@ -76,6 +76,11 @@ class HerdrClient internal constructor(
     @Volatile
     private var lastSeenType: String? = null
 
+    /** `host:port` the live session is on; updated on every successful connect. */
+    @Volatile
+    override var activeAddress: String? = null
+        private set
+
     override fun updateConfig(updated: HostConfig) {
         config = updated
     }
@@ -123,49 +128,67 @@ class HerdrClient internal constructor(
                     )
                 }
             }
-            val s = jsch.getSession(config.user, config.host, config.port)
-            // These are session settings, not JSch process-global settings. Multiple hosts may
-            // have different authentication policies and connect concurrently.
-            s.setConfig("PreferredAuthentications", if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey")
-            s.serverAliveInterval = 30_000
-            s.serverAliveCountMax = 3
-            s.setConfig("StrictHostKeyChecking", "yes")
-            // Same preference as the interactive shell: without it JSch picks an ECDSA key while
-            // OpenSSH shows the admin an Ed25519 one, so the two fingerprints never match.
-            s.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
-            if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
-            s.timeout = TIMEOUT_MS
-            // Publish the connecting session too, so backgrounding/cancellation can abort
-            // a handshake instead of waiting for the socket timeout.
-            synchronized(sessionGate) {
-                check(!closed) { Str.get(R.string.ssh_client_closed) }
-                session = s
-            }
-            try {
-                s.connect(12_000)
-            } catch (e: Exception) {
-                s.disconnect()
-                // A mismatch is reported only when the host-key callback actually observed a
-                // different key. Auth, DNS, timeout and transport errors retain their type.
-                val observed = lastSeenFingerprint
-                if (pinned != null && observed != null && observed != pinned) {
-                    throw HostKeyMismatchException(pinned, observed)
+            // One host, up to two addresses. The fallback is for the same machine reached
+            // another way (LAN at home, public elsewhere); it is tried only when the primary
+            // address cannot be reached, never to work around a rejected key or password.
+            var lastFailure: Exception? = null
+            for ((index, endpoint) in config.endpoints.withIndex()) {
+                val moreAddresses = index < config.endpoints.lastIndex
+                lastSeenFingerprint = null
+                lastSeenType = null
+                val s = jsch.getSession(config.user, endpoint.host, endpoint.port)
+                // These are session settings, not JSch process-global settings. Multiple hosts may
+                // have different authentication policies and connect concurrently.
+                s.setConfig("PreferredAuthentications", if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey")
+                s.serverAliveInterval = 30_000
+                s.serverAliveCountMax = 3
+                s.setConfig("StrictHostKeyChecking", "yes")
+                // Same preference as the interactive shell: without it JSch picks an ECDSA key while
+                // OpenSSH shows the admin an Ed25519 one, so the two fingerprints never match.
+                s.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
+                if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
+                s.timeout = TIMEOUT_MS
+                // Publish the connecting session too, so backgrounding/cancellation can abort
+                // a handshake instead of waiting for the socket timeout.
+                synchronized(sessionGate) {
+                    check(!closed) { Str.get(R.string.ssh_client_closed) }
+                    session = s
                 }
-                if (pinned == null && observed != null) {
-                    throw UnknownHostKeyException(observed, lastSeenType)
+                try {
+                    s.connect(12_000)
+                } catch (e: Exception) {
+                    s.disconnect()
+                    // A mismatch is reported only when the host-key callback actually observed a
+                    // different key. Auth, DNS, timeout and transport errors retain their type.
+                    val observed = lastSeenFingerprint
+                    if (pinned != null && observed != null && observed != pinned) {
+                        throw HostKeyMismatchException(pinned, observed)
+                    }
+                    if (pinned == null && observed != null) {
+                        throw UnknownHostKeyException(observed, lastSeenType)
+                    }
+                    // Reaching this point means the address did not answer at all. Another
+                    // address may still work; an authentication failure cannot be fixed this way
+                    // because JSch only reports it after the host key was already accepted.
+                    lastFailure = e
+                    if (moreAddresses && e.isUnreachableAddress()) continue
+                    throw e
                 }
-                throw e
+                if (closed) {
+                    s.disconnect()
+                    throw IllegalStateException(Str.get(R.string.ssh_client_closed))
+                }
+                val actual = fingerprintOf(s)
+                if (pinned != null && pinned != actual) {
+                    s.disconnect()
+                    throw HostKeyMismatchException(pinned, actual)
+                }
+                fingerprint = actual
+                activeAddress = endpoint.toString()
+                return@blockingIo
             }
-            if (closed) {
-                s.disconnect()
-                throw IllegalStateException(Str.get(R.string.ssh_client_closed))
-            }
-            val actual = fingerprintOf(s)
-            if (pinned != null && pinned != actual) {
-                s.disconnect()
-                throw HostKeyMismatchException(pinned, actual)
-            }
-            fingerprint = actual
+            // Unreachable: the loop either returned on success or rethrew on the last address.
+            throw lastFailure ?: IllegalStateException(Str.get(R.string.ssh_client_closed))
         }
     }
 
@@ -215,24 +238,39 @@ class HerdrClient internal constructor(
         request("pane.send_input", params)
     }
 
-    override suspend fun createWorkspace(label: String?, cwd: String?): String? {
+    override suspend fun createWorkspace(label: String?, cwd: String?): HostConnection.PaneCreated? {
         val params = buildJsonObject {
             if (!label.isNullOrBlank()) put("label", label)
             if (!cwd.isNullOrBlank()) put("cwd", cwd)
         }
         val result = request("workspace.create", params)
-        return result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+        val paneId = result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+            ?: return null
+        return HostConnection.PaneCreated(
+            paneId = paneId,
+            tabId = result["tab"]?.jsonObject?.stringOrNull("tab_id"),
+            workspaceId = result["workspace"]?.jsonObject?.stringOrNull("workspace_id"),
+        )
     }
 
-    override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): String? {
+    override suspend fun createTab(workspaceId: String, label: String?, cwd: String?): HostConnection.PaneCreated? {
         val params = buildJsonObject {
             put("workspace_id", workspaceId)
             if (!label.isNullOrBlank()) put("label", label)
             if (!cwd.isNullOrBlank()) put("cwd", cwd)
         }
         val result = request("tab.create", params)
-        return result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+        val paneId = result["root_pane"]?.jsonObject?.get("pane_id")?.jsonPrimitive?.contentOrNull
+            ?: return null
+        return HostConnection.PaneCreated(
+            paneId = paneId,
+            tabId = result["tab"]?.jsonObject?.stringOrNull("tab_id"),
+            workspaceId = result["tab"]?.jsonObject?.stringOrNull("workspace_id") ?: workspaceId,
+        )
     }
+
+    private fun JsonObject.stringOrNull(key: String): String? =
+        this[key]?.jsonPrimitive?.contentOrNull
 
     override suspend fun splitPane(paneId: String, direction: String) {
         val params = buildJsonObject {

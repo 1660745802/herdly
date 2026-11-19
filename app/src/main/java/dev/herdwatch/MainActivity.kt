@@ -1,11 +1,14 @@
 package dev.herdwatch
 
 import android.app.LocaleManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.SystemBarStyle
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -31,6 +34,12 @@ class MainActivity : ComponentActivity() {
         AppViewModel.Factory(application as HerdwatchApp)
     }
 
+    // The keep-alive service must post an ongoing notification; without this grant Android 13+
+    // still runs the service but hides its notification, which looks like a silent background
+    // process. Ask once, at first launch, and never block the UI on the answer.
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     /**
      * The platform recreates the activity on a locale change unless we opt out. We do opt out
      * (manifest configChanges) and re-read resources here, so switching language is a recomposition
@@ -43,6 +52,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         // The status bar must follow the app's theme choice, not the system one: Settings can force
         // light while the device is dark (and vice versa), and enableEdgeToEdge would then keep the
         // system's icon/scrims over the opposite chassis.

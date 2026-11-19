@@ -1,12 +1,23 @@
 package dev.herdwatch.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,12 +50,14 @@ import dev.herdwatch.model.HerdWorkspace
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.ExpandableSection
 import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsMotion
 import dev.herdwatch.ui.design.DsRadius
 import dev.herdwatch.ui.design.DsSpace
 import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.NeoButton
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
+import dev.herdwatch.ui.design.NeoChip
 import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoField
@@ -58,6 +71,7 @@ import dev.herdwatch.ui.design.NeoShadowBleed
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
 import dev.herdwatch.ui.design.spacing
+import dev.herdwatch.ui.motionMillis
 import dev.herdwatch.ui.theme.agentStatusColor
 
 /**
@@ -70,13 +84,14 @@ import dev.herdwatch.ui.theme.agentStatusColor
  *
  * Destructive actions name the target and say what ends; nothing here closes a pane silently.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ManageScreen(
     runtime: HostRuntime,
     agents: List<Agent>,
     onBack: () -> Unit,
-    onCreateWorkspace: () -> Unit,
-    onCreateTab: (String) -> Unit,
+    onCreateWorkspace: (String?) -> Unit,
+    onCreateTab: (String, String?) -> Unit,
     onSplit: (String, String) -> Unit,
     onRenameWorkspace: (String, String) -> Unit,
     onRenameTab: (String, String) -> Unit,
@@ -92,6 +107,7 @@ fun ManageScreen(
     val connected = runtime.conn is ConnState.Connected
     var rename by remember { mutableStateOf<RenameRequest?>(null) }
     var close by remember { mutableStateOf<CloseRequest?>(null) }
+    var create by remember { mutableStateOf<CreateRequest?>(null) }
     // A machine with six workspaces is a long page; groups you are not working on collapse and stay
     // collapsed across visits.
     // Pane ids repeat across machines; scoping once here keeps a close dialog from naming another
@@ -140,7 +156,7 @@ fun ManageScreen(
                         ) {
                             NeoButton(
                                 label = stringResource(R.string.manage_new_workspace),
-                                onClick = onCreateWorkspace,
+                                onClick = { create = CreateRequest(newWorkspace = true, workspaceId = null) },
                                 tone = NeoButtonTone.Primary,
                                 icon = NeoGlyph.Workspace,
                                 enabled = connected,
@@ -152,7 +168,9 @@ fun ManageScreen(
                                 onClick = {
                                     val target = structure.workspaces.firstOrNull { it.focused }
                                         ?: structure.workspaces.firstOrNull()
-                                    if (target != null) onCreateTab(target.id) else onCreateWorkspace()
+                                    // "New tab" with no workspace means "give me a workspace first" —
+                                    // creating somewhere is still what the tap asked for.
+                                    create = CreateRequest(newWorkspace = target == null, workspaceId = target?.id)
                                 },
                                 tone = NeoButtonTone.Quiet,
                                 icon = NeoGlyph.Tab,
@@ -268,6 +286,86 @@ fun ManageScreen(
         }
     }
 
+    create?.let { request ->
+        // Preselect, so "create" is never a button that silently does nothing. The focused
+        // workspace is the one the reader was last working in.
+        var workspaceId by remember(request) {
+            mutableStateOf(
+                request.workspaceId
+                    ?: structure.workspaces.firstOrNull { it.focused }?.id
+                    ?: structure.workspaces.firstOrNull()?.id,
+            )
+        }
+        var cwd by remember(request) { mutableStateOf("") }
+        // There is no directory-listing API on this protocol, so the honest affordance is a path
+        // field plus the directories this host is already using. Anything more would be a file
+        // browser we cannot actually draw.
+        val recent = remember(structure.panes) {
+            structure.panes.mapNotNull { it.cwd?.trim()?.takeIf(String::isNotBlank) }.distinct().take(4)
+        }
+        NeoDialog(
+            onDismissRequest = { create = null },
+            title = stringResource(
+                if (request.newWorkspace) R.string.manage_create_workspace_title else R.string.manage_create_tab_title,
+            ),
+            subtitle = stringResource(R.string.manage_create_folder_hint),
+            confirmLabel = stringResource(R.string.common_create),
+            confirmEnabled = request.newWorkspace || workspaceId != null,
+            onConfirm = {
+                val path = cwd.trim().ifBlank { null }
+                if (request.newWorkspace) {
+                    onCreateWorkspace(path)
+                } else {
+                    workspaceId?.let { onCreateTab(it, path) }
+                }
+                create = null
+            },
+            dismissLabel = stringResource(R.string.common_cancel),
+        ) {
+            if (!request.newWorkspace) {
+                Text(
+                    stringResource(R.string.manage_pick_workspace),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    structure.workspaces.forEach { workspace ->
+                        NeoChip(
+                            label = workspace.label.ifBlank { workspace.id },
+                            selected = workspace.id == workspaceId,
+                            onClick = { workspaceId = workspace.id },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(DsSpace.m))
+            }
+            NeoField(
+                value = cwd,
+                onValueChange = { cwd = it },
+                label = stringResource(R.string.manage_create_folder),
+                hint = stringResource(R.string.manage_create_folder_placeholder),
+                singleLine = true,
+            )
+            if (recent.isNotEmpty()) {
+                Spacer(Modifier.height(DsSpace.s))
+                Text(
+                    stringResource(R.string.manage_create_folder_recent),
+                    style = DsTypography.caption,
+                    color = colors.textSoft,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+                    recent.forEach { path ->
+                        NeoChip(
+                            label = path.replace(Regex("^/home/[^/]+"), "~"),
+                            selected = path == cwd,
+                            onClick = { cwd = path },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     rename?.let { request ->
         var value by remember(request.id) { mutableStateOf(request.label) }
         NeoDialog(
@@ -328,9 +426,9 @@ private fun WorkspaceHeader(
         Modifier.fillMaxWidth().padding(start = DsSpace.xs, top = DsSpace.s, bottom = DsSpace.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.weight(1f).clickable(role = Role.Button, onClick = onToggle).padding(vertical = DsSpace.xs),
-            verticalAlignment = Alignment.CenterVertically,
+        ToggleSurface(
+            onClick = onToggle,
+            modifier = Modifier.weight(1f).padding(horizontal = DsSpace.xs),
         ) {
             NeoIcon(
                 if (open) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
@@ -362,6 +460,43 @@ private fun WorkspaceHeader(
 private data class RenameRequest(val type: String, val id: String, val label: String)
 private data class CloseRequest(val type: String, val id: String, val name: String, val detail: String)
 
+/** A pending create, held until the dialog has a directory and (for a tab) a workspace. */
+private data class CreateRequest(val newWorkspace: Boolean, val workspaceId: String?)
+
+/**
+ * Row that opens or closes a section.
+ *
+ * The press mark has to cover the thing that is actually tappable. A bare `clickable` on an inner
+ * Row left a ripple the size of the label while the row read as one control, and the highlight
+ * looked like a rectangle pasted over the card. One rounded, full-row surface reads as a button.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ToggleSurface(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val colors = ds()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val wash by animateColorAsState(
+        targetValue = if (pressed) colors.well else Color.Transparent,
+        animationSpec = tween(motionMillis(DsMotion.press)),
+        label = "toggleWash",
+    )
+    Row(
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(DsRadius.control))
+            .background(wash)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(vertical = DsSpace.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
 @Composable
 private fun TabManageCard(
     tab: HerdTab,
@@ -386,12 +521,12 @@ private fun TabManageCard(
                 Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.xs, top = DsSpace.s, bottom = DsSpace.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier.weight(1f).clickable(role = Role.Button) {
+                ToggleSurface(
+                    onClick = {
                         open = !open
                         onToggle(open)
-                    }.padding(vertical = DsSpace.xs),
-                    verticalAlignment = Alignment.CenterVertically,
+                    },
+                    modifier = Modifier.weight(1f).padding(start = DsSpace.xs),
                 ) {
                     NeoIcon(
                         if (open) NeoGlyph.ChevronDown else NeoGlyph.ChevronRight,
@@ -441,7 +576,9 @@ private fun TabManageCard(
             panes.forEachIndexed { index, pane ->
                 val agent = agents.firstOrNull { it.paneId == pane.id }
                 Row(
-                    Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.xs, top = DsSpace.xs, bottom = DsSpace.xs),
+                    Modifier.fillMaxWidth()
+                        .clickable(role = Role.Button) { onOpenPane(pane.id) }
+                        .padding(start = DsSpace.l, end = DsSpace.xs, top = DsSpace.xs, bottom = DsSpace.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     NeoLamp(

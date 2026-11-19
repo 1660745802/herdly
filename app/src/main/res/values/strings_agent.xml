@@ -20,6 +20,12 @@
     <string name="agent_state_autoupdate_paused">自动更新已暂停</string>
     <string name="agent_state_autoupdate_on">自动更新已开启</string>
     <string name="agent_pause_talkback">TalkBack 下暂停</string>
+    <string name="agent_send_blocked_connecting">主机重连中，连上就能发</string>
+    <string name="agent_send_blocked_offline">主机未连接，恢复后会自动重连</string>
+    <string name="agent_send_blocked_verify">先核对屏幕上的结果，再继续</string>
+    <string name="agent_send_blocked_busy">上一条还在发送中</string>
+    <string name="agent_reading_older">正在往前读…</string>
+    <string name="agent_resume_updates">继续更新</string>
 
     <!-- Agent 详情：连接与证据提示 -->
     <string name="agent_host_disconnected">%1$s 尚未连接，保留上次屏幕和草稿。</string>
@@ -89,13 +95,13 @@
     <!-- Agent 详情：回到底部 -->
     <string name="agent_back_to_bottom_new">有新内容 · 回到底部</string>
     <string name="agent_back_to_bottom">回到底部</string>
-    <string name="agent_screen_label">屏幕</string>
     <string name="agent_layout_chat">对话</string>
     <string name="agent_layout_terminal">终端</string>
     <string name="agent_role_user">你</string>
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">工具</string>
     <string name="agent_role_approval">待决定</string>
+    <string name="agent_approval_below">在下方选择</string>
     <string name="agent_role_system">提示</string>
     <string name="agent_block_cut">开头被截断</string>
     <string name="agent_input_placeholder">输入命令，回车执行</string>
@@ -106,4 +112,6 @@
     <string name="agent_tool_lines">%1$s · %2$d 行</string>
     <string name="agent_role_thinking">思考</string>
     <string name="agent_thinking_lines">%1$s · %2$d 行</string>
+    <string name="agent_expand_block">展开全文</string>
+    <string name="agent_collapse_block">收起</string>
 </resources>

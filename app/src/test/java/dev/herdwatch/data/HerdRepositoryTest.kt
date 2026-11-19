@@ -8,6 +8,7 @@ import dev.herdwatch.model.HerdPane
 import dev.herdwatch.model.HerdStructure
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.ssh.HostConnection
+import dev.herdwatch.ssh.HerdrRpcException
 import dev.herdwatch.ssh.HostKeyMismatchException
 import dev.herdwatch.ssh.UnknownHostKeyException
 import dev.herdwatch.ssh.Snapshot
@@ -297,7 +298,7 @@ class HerdRepositoryTest {
         assertNull(prefs.store.load().single().fingerprint)
 
         confirmed = true
-        repo.trustNewFingerprint(host.id)
+        repo.trustNewFingerprint(host.id, "SHA256:first")
         advanceUntilIdle()
 
         assertEquals("SHA256:first", prefs.store.load().single().fingerprint)
@@ -325,12 +326,43 @@ class HerdRepositoryTest {
         assertEquals("SHA256:new", runtime.keyMismatch?.actual)
         assertNull(repo.state.value.hosts.single { it.host.id == other.id }.keyMismatch)
 
-        repo.trustNewFingerprint(host.id)
+        repo.trustNewFingerprint(host.id, "SHA256:new")
         advanceUntilIdle()
 
         // Durable first: the new pin must survive a restart, and the other host keeps its own.
         assertEquals("SHA256:new", prefs.store.load().single { it.id == host.id }.fingerprint)
         assertEquals("SHA256:other", prefs.store.load().single { it.id == other.id }.fingerprint)
+    }
+
+    @Test fun `confirmation is refused when the pending key changed since the dialog opened`() = runTest {
+        TestStrings.install()
+        val prefs = preferences(host)
+        // One client per attempt, as in production: a refused client is closed and the retry is
+        // built fresh. The second attempt sees the machine's key rotated once more.
+        val clients = mutableListOf<FakeHostConnection>()
+        val repo = repository(prefs) { config ->
+            connection(config).apply {
+                onConnect = {
+                    throw HostKeyMismatchException(
+                        "SHA256:test",
+                        if (clients.size <= 1) "SHA256:first" else "SHA256:second",
+                    )
+                }
+            }.also { clients += it }
+        }
+        repo.connectHost(host.id)
+        assertEquals("SHA256:first", repo.state.value.hosts.single().keyMismatch?.actual)
+
+        // The machine changed again while the dialog was still showing SHA256:first.
+        repo.refreshHost(host.id)
+        advanceUntilIdle()
+        assertEquals("SHA256:second", repo.state.value.hosts.single().keyMismatch?.actual)
+
+        // Confirming the stale dialog must not pin a key the user never looked at.
+        val result = runCatching { repo.trustNewFingerprint(host.id, "SHA256:first") }
+        assertTrue(result.isFailure)
+        assertEquals("SHA256:test", prefs.store.load().single().fingerprint)
+        assertEquals("SHA256:second", repo.state.value.hosts.single().keyMismatch?.actual)
     }
 
     @Test fun `successful snapshot clears a previous key mismatch`() = runTest {
@@ -346,7 +378,7 @@ class HerdRepositoryTest {
         assertEquals("SHA256:rotated", repo.state.value.hosts.single().keyMismatch?.expected)
         assertEquals("SHA256:test", repo.state.value.hosts.single().keyMismatch?.actual)
 
-        repo.trustNewFingerprint(host.id)
+        repo.trustNewFingerprint(host.id, "SHA256:test")
         advanceUntilIdle()
         repo.refreshHost(host.id)
         advanceUntilIdle()
@@ -355,6 +387,83 @@ class HerdRepositoryTest {
         assertEquals(ConnState.Connected, runtime.conn)
         assertNull(runtime.keyMismatch)
         assertEquals("SHA256:test", prefs.store.load().single().fingerprint)
+    }
+
+    @Test fun `rejected agent start in a new tab closes just that tab`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host).apply {
+            created = HostConnection.PaneCreated("p2", tabId = "tab-9", workspaceId = "ws-1")
+            onStartAgent = { throw HerdrRpcException("agent_exists", "already running") }
+        }
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        val result = repo.startInNewTab(host.id, "ws-1", "pi", "agent", emptyList())
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is HerdrRpcException)
+        assertEquals(listOf("tab-9"), client.closedTabs)
+        assertTrue(client.closedWorkspaces.isEmpty())
+    }
+
+    @Test fun `rejected agent start in a new workspace closes that workspace`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host).apply {
+            created = HostConnection.PaneCreated("p3", tabId = "tab-3", workspaceId = "ws-9")
+            onStartAgent = { throw HerdrRpcException("bad_kind", "unknown agent") }
+        }
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        val result = repo.startInNewTab(host.id, null, "pi", "agent", emptyList())
+
+        assertTrue(result.isFailure)
+        assertEquals(listOf("ws-9"), client.closedWorkspaces)
+        assertTrue(client.closedTabs.isEmpty())
+    }
+
+    @Test fun `successful start in a new tab leaves the container alone`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host).apply {
+            created = HostConnection.PaneCreated("p2", tabId = "tab-9", workspaceId = "ws-1")
+        }
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        assertTrue(repo.startInNewTab(host.id, "ws-1", "pi", "agent", emptyList()).isSuccess)
+        assertTrue(client.closedTabs.isEmpty())
+        assertTrue(client.closedWorkspaces.isEmpty())
+    }
+
+    @Test fun `cleanup failure keeps the start error as the reported cause`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host).apply {
+            created = HostConnection.PaneCreated("p2", tabId = "tab-9", workspaceId = "ws-1")
+            onStartAgent = { throw HerdrRpcException("agent_exists", "already running") }
+            onClose = { error("close refused") }
+        }
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        val result = repo.startInNewTab(host.id, "ws-1", "pi", "agent", emptyList())
+
+        assertTrue(result.exceptionOrNull() is HerdrRpcException)
+        assertEquals(1, result.exceptionOrNull()!!.suppressedExceptions.size)
+    }
+
+    @Test fun `dropped transport during start performs no destructive cleanup`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host).apply {
+            created = HostConnection.PaneCreated("p2", tabId = "tab-9", workspaceId = "ws-1")
+            // The server may have accepted the start; the reply is simply lost.
+            onStartAgent = { throw java.io.IOException("connection reset") }
+        }
+        val repo = repository(prefs) { client }
+        repo.connectHost(host.id)
+
+        assertTrue(repo.startInNewTab(host.id, "ws-1", "pi", "agent", emptyList()).isFailure)
+        assertTrue(client.closedTabs.isEmpty())
+        assertTrue(client.closedWorkspaces.isEmpty())
     }
 
     private fun preferences(vararg hosts: HostConfig) = RepositoryPreferences().also {

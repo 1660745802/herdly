@@ -10,6 +10,7 @@
     <string name="repo_no_new_pane">Herdr 没有返回新 pane</string>
     <string name="repo_fingerprint_not_clearable">不能清除主机指纹，请核对新的指纹</string>
     <string name="repo_no_new_fingerprint">没有可核对的新主机指纹</string>
+    <string name="repo_stale_fingerprint">主机密钥又变了，请重新核对</string>
 
     <!-- humanize()：把底层异常翻成一句可核对的话 -->
     <string name="repo_host_key_mismatch">主机密钥变了，需要核对</string>

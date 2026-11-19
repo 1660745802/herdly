@@ -51,14 +51,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -125,8 +130,13 @@ fun TerminalScreen(
 ) {
     val term = LocalTerminalTokens.current
     val clipboard = LocalClipboardManager.current
-    var keyboardExpanded by rememberSaveable { mutableStateOf(true) }
+    // The system keyboard is the terminal keyboard. The extra Esc/Ctrl/arrows strip starts out of
+    // the way and can be opened when needed; it is not a replacement command composer.
+    var keyboardExpanded by rememberSaveable { mutableStateOf(false) }
     var gridScrolledUp by remember { mutableStateOf(false) }
+    var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
+    val requestTerminalInput = { if (state.connected) terminalInputView?.requestInput() }
+    val showKeyboardLabel = stringResource(R.string.terminal_show_keyboard)
     val hideKeysDesc = stringResource(R.string.terminal_keys_collapse_desc)
     val showKeysDesc = stringResource(R.string.terminal_keys_expand_desc)
 
@@ -146,9 +156,6 @@ fun TerminalScreen(
         Modifier.fillMaxSize().background(term.background)
             .windowInsetsPadding(WindowInsets.statusBars),
     ) {
-        // A full-screen application (vim/less/htop/tmux) owns the terminal, so typed characters go
-        // straight to the PTY. At a shell prompt the composer is a line editor and Send submits.
-        val direct = state.snapshot?.alternateScreen == true
         TerminalBar(
             state = state,
             onBack = onBack,
@@ -158,7 +165,14 @@ fun TerminalScreen(
             keysExpanded = keyboardExpanded,
             onToggleKeys = { keyboardExpanded = !keyboardExpanded },
         )
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier.weight(1f).fillMaxWidth().clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClickLabel = showKeyboardLabel,
+                onClick = requestTerminalInput,
+            ),
+        ) {
             val snapshot = state.snapshot
             if (snapshot != null && snapshot.lines.isNotEmpty()) {
                 TerminalGrid(
@@ -186,6 +200,16 @@ fun TerminalScreen(
                     Text(stringResource(R.string.terminal_connecting), color = term.text, style = DsTypography.caption)
                 }
             }
+            // This transparent field is only an IME bridge. The remote PTY draws the actual cursor
+            // and input, so there must be no local command field, Send button, or duplicated text.
+            TerminalImeCapture(
+                enabled = state.connected,
+                sessionNonce = state.sessionNonce,
+                applicationCursorKeys = state.snapshot?.applicationCursorKeys == true,
+                onKey = { onKey(it); onFollow() },
+                onView = { terminalInputView = it },
+                modifier = Modifier.align(Alignment.BottomStart),
+            )
             state.error?.takeIf { !state.connected }?.let { message ->
                 Column(
                     Modifier.align(Alignment.Center).padding(20.dp)
@@ -204,9 +228,10 @@ fun TerminalScreen(
                 }
             }
         }
-        // One 44dp strip, right-aligned, holding only what the grid cannot express itself.
+        // The two terminal-only controls overlay the bottom edge instead of permanently taking a
+        // row away from the PTY. The system keyboard itself opens by tapping anywhere in the grid.
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = DsSpace.s),
+            Modifier.fillMaxWidth().padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -215,7 +240,7 @@ fun TerminalScreen(
             TerminalOverlayPill(
                 glyph = NeoGlyph.Keyboard,
                 description = if (keyboardExpanded) hideKeysDesc else showKeysDesc,
-                onClick = { keyboardExpanded = !keyboardExpanded },
+                onClick = { keyboardExpanded = !keyboardExpanded; requestTerminalInput() },
                 active = keyboardExpanded,
             )
         }
@@ -242,25 +267,6 @@ fun TerminalScreen(
                         applicationCursorKeys = state.snapshot?.applicationCursorKeys == true,
                     )
                 }
-                // A full-screen application owns the terminal: there is no line to edit, so
-                // every committed character goes straight to the PTY, exactly like a desktop
-                // terminal. At a shell prompt the field stays a line editor and Send submits it.
-                if (direct) {
-                    Text(
-                        stringResource(R.string.terminal_direct_hint),
-                        color = term.muted,
-                        style = DsTypography.micro,
-                        modifier = Modifier.padding(bottom = 2.dp),
-                    )
-                }
-                TerminalInputBar(
-                    enabled = state.connected,
-                    direct = direct,
-                    sessionNonce = state.sessionNonce,
-                    onInput = onInput,
-                    onKey = onKey,
-                    onFollow = onFollow,
-                )
                 Spacer(Modifier.size(6.dp))
             }
         }
@@ -418,9 +424,8 @@ private fun TerminalGrid(
     onFollow: () -> Unit,
     onScrolledUp: (Boolean) -> Unit,
 ) {
-    // Reserve one strip at the bottom for the corner controls. Overlaying them on the grid looked
-    // lighter but hid real characters (the RES column in top, the last line of a shell prompt).
-    val chromeStrip = 44.dp
+    // No bottom reserve for controls: the screen already lays out its own strip above this grid,
+    // and reserving a second one here would spend that height twice.
     val term = LocalTerminalTokens.current
     val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
@@ -446,7 +451,7 @@ private fun TerminalGrid(
 
     // Inset OUTSIDE the measuring box so maxWidth is already the usable width, and the same inset
     // is not applied again inside the scroller (doing both hid the last columns permanently).
-    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp).padding(bottom = chromeStrip)) {
+    BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 6.dp)) {
         val charWidth = with(density) { charWidthPx.toDp() }
         // No horizontal inset here: any inset has to be panned past, and a fractional column left
         // over would clip the final character. Edge breathing room comes from the glyph box itself.
@@ -753,12 +758,38 @@ internal data class DirectInputEdit(
     val clearField: Boolean,
 )
 
-/** Length of the shared leading run of two strings. */
+/**
+ * Length of the shared leading run of two strings, in UTF-16 code units.
+ *
+ * The result never lands between the halves of a supplementary code point (an emoji, for one): a
+ * shared prefix that stops after a lone high surrogate would leave half a character on each side,
+ * and the PTY has no way to erase that half by itself.
+ */
 private fun commonPrefixLength(a: String, b: String): Int {
     val limit = minOf(a.length, b.length)
     var index = 0
     while (index < limit && a[index] == b[index]) index++
+    if (index > 0 && index < limit &&
+        Character.isHighSurrogate(a[index - 1]) && Character.isLowSurrogate(a[index])
+    ) {
+        index--
+    }
     return index
+}
+
+/** Code points in [text]: a supplementary character is one character on the remote line. */
+private fun codePointLength(text: String): Int = text.codePointCount(0, text.length)
+
+/**
+ * The bytes that make the PTY mirror [text] given the [sent] watermark: erase what the watermark
+ * holds beyond the shared prefix, then append the new suffix.
+ *
+ * Erasure counts code points, not UTF-16 code units — deleting one emoji must emit one DEL, not two.
+ */
+private fun mirrorDiff(sent: String, text: String): String {
+    val shared = commonPrefixLength(sent, text)
+    val erase = codePointLength(sent.substring(shared))
+    return DIRECT_DELETE.repeat(erase) + text.substring(shared)
 }
 
 /**
@@ -780,8 +811,7 @@ private fun commonPrefixLength(a: String, b: String): Int {
 internal fun directInputEdit(sent: String, next: TextFieldValue): DirectInputEdit {
     if (next.composition != null) return DirectInputEdit(text = "", sent = sent, clearField = false)
     val text = next.text
-    val shared = commonPrefixLength(sent, text)
-    val outgoing = DIRECT_DELETE.repeat(sent.length - shared) + text.substring(shared)
+    val outgoing = mirrorDiff(sent, text)
     return if (text.length > DIRECT_MIRROR_BUDGET) {
         DirectInputEdit(text = outgoing, sent = "", clearField = true)
     } else {
@@ -807,8 +837,7 @@ private fun committedInputText(value: TextFieldValue): String {
  */
 internal fun directSubmitEdit(sent: String, next: TextFieldValue): DirectInputEdit {
     val committed = committedInputText(next)
-    val shared = commonPrefixLength(sent, committed)
-    val flushed = DIRECT_DELETE.repeat(sent.length - shared) + committed.substring(shared)
+    val flushed = mirrorDiff(sent, committed)
     return if (next.composition != null) {
         DirectInputEdit(text = flushed, sent = committed, clearField = false)
     } else {
@@ -817,106 +846,31 @@ internal fun directSubmitEdit(sent: String, next: TextFieldValue): DirectInputEd
 }
 
 @Composable
-private fun TerminalInputBar(
+private fun TerminalImeCapture(
     enabled: Boolean,
-    direct: Boolean,
     sessionNonce: Long,
-    onInput: (String, Boolean) -> Unit,
+    applicationCursorKeys: Boolean,
     onKey: (String) -> Unit,
-    onFollow: () -> Unit,
+    onView: (TerminalInputView) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val term = LocalTerminalTokens.current
-    // TextFieldValue (not String) so direct mode can see `composition` and hold back pinyin that
-    // the IME has not committed yet: sending half-formed glyphs would garble the remote line.
-    var lineEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
-    var directEntry by rememberSaveable(sessionNonce, stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
-    // Watermark for the current composer epoch: the text the PTY already holds. Surviving
-    // recomposition (and restore) matters here — replaying characters on restore would duplicate
-    // them at the remote prompt.
-    var directSent by rememberSaveable(sessionNonce) { mutableStateOf("") }
-    val entry = if (direct) directEntry else lineEntry
-    val inputDesc = stringResource(R.string.terminal_input_desc)
-    // A disabled field that still says "type a command" reads as broken: say why it is dead.
-    val placeholder = stringResource(
-        if (enabled) R.string.terminal_input_placeholder else R.string.terminal_input_offline,
+    AndroidView(
+        factory = { context -> TerminalInputView(context).also(onView) },
+        update = { view ->
+            view.isEnabled = enabled
+            view.onBytes = onKey
+            view.applicationCursorKeys = { applicationCursorKeys }
+            // A new SSH channel must not inherit the previous line, composition, or a commit the
+            // keyboard queued for the old session.
+            if (view.tag != sessionNonce) {
+                view.tag = sessionNonce
+                view.resetSession()
+            }
+            onView(view)
+        },
+        // The bridge is a transport, not content: TalkBack must not stop on an invisible editor.
+        modifier = modifier.size(1.dp).alpha(0.01f).clearAndSetSemantics { },
     )
-    val sendDesc = stringResource(R.string.terminal_send)
-
-    fun submit() {
-        // Direct mode streams committed characters, so Enter only has to flush what is already
-        // committed. Unfinished pinyin is never leaked to the PTY and never gets an Enter.
-        if (direct) {
-            val edit = directSubmitEdit(directSent, directEntry)
-            directSent = edit.sent
-            if (edit.clearField) directEntry = TextFieldValue("")
-            if (edit.text.isNotEmpty()) onInput(edit.text, false)
-            onFollow()
-            return
-        }
-        if (lineEntry.text.isEmpty()) {
-            onKey("\r")
-            return
-        }
-        onInput(lineEntry.text, true)
-        lineEntry = TextFieldValue("")
-        onFollow()
-    }
-
-    Row(
-        Modifier.fillMaxWidth().padding(top = 4.dp)
-            .background(term.muted.copy(alpha = 0.14f), RoundedCornerShape(DsRadius.key))
-            .padding(start = 12.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BasicTextField(
-            value = entry,
-            onValueChange = onChange@{ next ->
-                if (!direct) {
-                    lineEntry = next
-                    return@onChange
-                }
-                val edit = directInputEdit(directSent, next)
-                directSent = edit.sent
-                // Only a budget reset touches the value: rewriting it on every keystroke truncates
-                // the IME's buffer, which is what made it re-deliver already transmitted text.
-                directEntry = if (edit.clearField) TextFieldValue("") else next
-                if (edit.text.isNotEmpty()) {
-                    onInput(edit.text, false)
-                    onFollow()
-                }
-            },
-            enabled = enabled,
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 12.dp)
-                .semantics { contentDescription = inputDesc },
-            textStyle = TextStyle(
-                color = term.text,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp,
-            ),
-            cursorBrush = SolidColor(term.accent),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { submit() }),
-            singleLine = true,
-            decorationBox = { inner ->
-                // Direct mode explains itself in the hint row; the line-input placeholder would lie.
-                if (entry.text.isEmpty() && !direct) {
-                    Text(placeholder, color = term.muted, style = DsTypography.body)
-                }
-                inner()
-            },
-        )
-        NeoIconButton(
-            glyph = NeoGlyph.Send,
-            onClick = { submit() },
-            contentDescription = sendDesc,
-            tint = term.accent,
-            enabled = enabled,
-        )
-    }
 }
 
 /**

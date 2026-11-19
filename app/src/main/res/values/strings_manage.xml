@@ -4,6 +4,12 @@
     <string name="manage_create_title">新建</string>
     <string name="manage_new_workspace">新工作区</string>
     <string name="manage_new_tab">新标签页</string>
+    <string name="manage_create_workspace_title">新建工作区</string>
+    <string name="manage_create_tab_title">新建标签页</string>
+    <string name="manage_create_folder">目录（可选）</string>
+    <string name="manage_create_folder_hint">填绝对路径就从那里开始；留空就用 Herdr 的默认目录。</string>
+    <string name="manage_create_folder_recent">最近用过</string>
+    <string name="manage_pick_workspace">建在哪个工作区</string>
     <string name="manage_connect_first">连接这台机器后才能新建或修改会话。</string>
     <string name="manage_empty">还没有工作区，先新建一个。</string>
     <string name="manage_empty_offline">尚未连接，连上后会显示这台机器的会话。</string>
@@ -27,4 +33,5 @@
         <item quantity="one">%1$d 个分屏</item>
         <item quantity="other">%1$d 个分屏</item>
     </plurals>
+    <string name="manage_create_folder_placeholder">/mnt/Data/your-project</string>
 </resources>

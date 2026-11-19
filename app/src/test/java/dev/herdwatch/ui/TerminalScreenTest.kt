@@ -89,6 +89,34 @@ class TerminalScreenTest {
     }
 
     @Test
+    fun `direct input deleting one emoji sends only one del`() {
+        // 😀 is two UTF-16 units but a single character on the remote line.
+        val deleted = directInputEdit("ab\uD83D\uDE00", TextFieldValue("ab"))
+        assertEquals("\u007f", deleted.text)
+        assertEquals("ab", deleted.sent)
+
+        assertEquals("\u007f\u007f", directInputEdit("\uD83D\uDE00\uD83D\uDE00", TextFieldValue("")).text)
+    }
+
+    @Test
+    fun `direct input replaces an emoji without splitting its surrogate pair`() {
+        // Shared prefix stops before the emoji, never after its high surrogate.
+        val replaced = directInputEdit("a\uD83D\uDE00", TextFieldValue("a\uD83D\uDE01"))
+        assertEquals("\u007f\uD83D\uDE01", replaced.text)
+
+        val appended = directInputEdit("a", TextFieldValue("a\uD83D\uDE00"))
+        assertEquals("\uD83D\uDE00", appended.text)
+        assertEquals("a\uD83D\uDE00", appended.sent)
+    }
+
+    @Test
+    fun `direct submit erases a deleted emoji with one del`() {
+        val edit = directSubmitEdit("a\uD83D\uDE00", TextFieldValue("a"))
+        assertEquals("\u007f\r", edit.text)
+        assertTrue(edit.clearField)
+    }
+
+    @Test
     fun `direct input never sends an unfinished composition`() {
         val composing = TextFieldValue("你", composition = TextRange(0, 1))
         val held = directInputEdit("", composing)
@@ -138,6 +166,12 @@ class TerminalScreenTest {
 
         // Nothing committed since the last flush: Enter must not duplicate it either.
         assertEquals("", directSubmitEdit("hao", composing).text)
+    }
+
+    @Test
+    fun `terminal IME enter is sent as PTY carriage return`() {
+        assertEquals("echo one\recho two\r", terminalInputPayload("echo one\necho two\r\n"))
+        assertEquals("\r", terminalInputPayload("\n"))
     }
 
     @Test

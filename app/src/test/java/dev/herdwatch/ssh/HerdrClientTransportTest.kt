@@ -167,6 +167,43 @@ class HerdrClientTransportTest {
     }
 
     @Test(timeout = 20_000)
+    fun `unreachable primary address falls through to the fallback`() = withFixture { fixture ->
+        // The LAN address is what the phone would try first at home; a dead one stands in for
+        // "not on this network" so the fallback route has to carry the session.
+        val dead = HostConfig(
+            id = "transport-test", label = "loopback fixture", host = "127.0.0.1", port = 1,
+            user = "fixture", secret = fixture.password, fingerprint = fixture.fingerprint,
+            fallbackHost = "127.0.0.1", fallbackPort = fixture.port,
+        )
+        HerdrClient(dead).use { client ->
+            client.connect()
+            assertTrue(client.isConnected)
+            assertEquals("127.0.0.1:${fixture.port}", client.activeAddress)
+            assertEquals("0.9.5" to 22, client.ping())
+        }
+        fixture.awaitCount("active_transports", 0)
+    }
+
+    @Test(timeout = 20_000)
+    fun `rejected password does not fall through to the fallback`() = withFixture { fixture ->
+        // Reaching the host and being refused is a decision, not a routing problem: retrying the
+        // other address would double every wrong password and hide the real cause.
+        val wrongPassword = fixture.config().copy(
+            secret = "wrong-password",
+            fallbackHost = "127.0.0.1",
+            fallbackPort = 1,
+        )
+        HerdrClient(wrongPassword).use { client ->
+            val failure = requestFailure { client.connect() }
+            assertTrue("expected JSch authentication failure, got ${failure.javaClass.simpleName}", failure is JSchException)
+            assertNull(client.activeAddress)
+            assertFalse(client.isConnected)
+        }
+        fixture.awaitCount("active_transports", 0)
+        assertEquals("only the primary address may see a password attempt", 1, fixture.count("auth_attempts"))
+    }
+
+    @Test(timeout = 20_000)
     fun `matching pin with wrong password stays an authentication failure`() = withFixture { fixture ->
         HerdrClient(fixture.config().copy(secret = "wrong-password")).use { client ->
             val failure = requestFailure { client.connect() }
@@ -232,10 +269,11 @@ class HerdrClientTransportTest {
         private val readyFile = File(directory, "ready.json")
         private val statusFile = File(directory, "status.json")
         private val logFile = File(directory, "fixture.log")
-        private val password = UUID.randomUUID().toString()
+        val password = UUID.randomUUID().toString()
         private var process: Process? = null
         private lateinit var ready: JsonObject
         val fingerprint: String get() = ready.getValue("fingerprint").jsonPrimitive.content
+        val port: Int get() = ready.getValue("port").jsonPrimitive.int
 
         suspend fun start(options: List<String>) {
             process = ProcessBuilder(listOf(

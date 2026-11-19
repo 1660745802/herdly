@@ -38,4 +38,24 @@
     <string name="settings_update_failed_http">服务返回 %1$s</string>
     <string name="settings_update_failed_network">网络不可用</string>
     <string name="settings_group_security">本机安全</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_version_footnote">Herdly %1$s · 数据留在本机，不上传</string>
+    <string name="settings_update_title">更新</string>
+    <string name="settings_update_summary">从 GitHub Releases 取最新版本，下载和安装都在应用内完成</string>
+    <string name="settings_update_check">检查</string>
+    <string name="settings_update_checking">正在检查…</string>
+    <string name="settings_update_current">已是最新版本 %1$s</string>
+    <string name="settings_update_available">有新版 %1$s</string>
+    <string name="settings_update_download">下载并安装</string>
+    <string name="settings_update_downloading">正在下载 %1$d%%</string>
+    <string name="settings_update_ready">%1$s 已下载</string>
+    <string name="settings_update_install">安装</string>
+    <string name="settings_update_installing">正在打开安装器…</string>
+    <string name="settings_update_permission">需要在系统设置里允许 Herdly 安装应用</string>
+    <string name="settings_update_permission_action">去设置</string>
+    <string name="update_failed_download">下载失败</string>
+    <string name="update_failed_install">打不开安装器</string>
+    <string name="update_bad_apk">下载到的文件不是 Herdly 安装包</string>
+    <string name="update_older_apk">这个包不比当前版本新</string>
+    <string name="update_no_apk">这个版本没有附带 APK 文件</string>
 </resources>

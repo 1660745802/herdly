@@ -20,7 +20,33 @@ data class HostConfig(
     val session: String = "",
     val herdrCommand: String = "herdr",
     val fingerprint: String? = null,
-)
+    /**
+     * A second address for the same machine, typically the public one that sits next to a LAN one.
+     *
+     * The two share credentials, pin and everything else: it is one host that can be reached two
+     * ways. The primary address is tried first, the fallback only when the primary cannot be
+     * reached at the transport level — so a phone at home never spends mobile data on the public
+     * route, and the same config still works outside.
+     */
+    val fallbackHost: String = "",
+    /** `0` means "same port as the primary address". */
+    val fallbackPort: Int = 0,
+) {
+    /** Addresses to try, in order. Empty fallback entries collapse to a single address. */
+    val endpoints: List<HostEndpoint>
+        get() = listOfNotNull(
+            HostEndpoint(host, port),
+            fallbackHost.trim().takeIf { it.isNotBlank() }
+                ?.let { HostEndpoint(it, if (fallbackPort in 1..65535) fallbackPort else port) },
+        )
+
+    val hasFallback: Boolean get() = fallbackHost.isNotBlank()
+}
+
+/** One `host:port` a [HostConfig] can be reached on. */
+data class HostEndpoint(val host: String, val port: Int) {
+    override fun toString(): String = if (port == 22) host else "$host:$port"
+}
 
 @Serializable
 enum class AgentStatus {
@@ -213,6 +239,8 @@ data class HostRuntime(
      * out, so this is a decision, not a notification.
      */
     val pendingKey: PendingHostKey? = null,
+    /** The address the live connection is actually using, when it differs from the primary one. */
+    val activeAddress: String? = null,
 )
 
 /** A host key awaiting the user's confirmation, with the algorithm name OpenSSH would print. */

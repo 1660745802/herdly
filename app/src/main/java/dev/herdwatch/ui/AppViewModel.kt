@@ -11,7 +11,11 @@ import dev.herdwatch.data.AppPreferences
 import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepoState
 import dev.herdwatch.data.ThemeMode
+import dev.herdwatch.data.InvalidApkException
 import dev.herdwatch.data.UpdateChecker
+import dev.herdwatch.data.UpdateInstaller
+import dev.herdwatch.data.AndroidUpdateInstaller
+import java.io.File
 import dev.herdwatch.domain.ApprovalEvidence
 import dev.herdwatch.domain.ApprovalPolicy
 import dev.herdwatch.domain.OperationState
@@ -105,10 +109,22 @@ data class StartAgentRequest(
     val resume: Boolean = false,
 )
 
-/** Manual update check: never runs on its own, so there is no polling state to model. */
+/**
+ * Manual update check plus the in-app install that follows it: never runs on its own, so there is
+ * no polling state to model.
+ */
 data class UpdateUi(
     val checking: Boolean = false,
     val result: UpdateChecker.Result? = null,
+    /** Whole-percent download progress; [downloading] is false after the file is on disk. */
+    val downloading: Boolean = false,
+    val progress: Int = 0,
+    val installing: Boolean = false,
+    /** Android blocks the installer until the user allows this app to install packages. */
+    val needsPermission: Boolean = false,
+    val error: String? = null,
+    /** Set once an APK is downloaded and verified; the next tap goes straight to the installer. */
+    val readyVersion: String? = null,
 )
 
 /** Agent detail always asks for the widest recent snapshot once; the bridge has no paging. */
@@ -117,13 +133,26 @@ private const val PANE_READ_LINES = 1200
 /** Monotonic id for local sends; only used to key list items. */
 private var nextSendId: Long = 1
 
-/** Ceiling for the "read further back" request; past this the answer is a scrollback, not a phone. */
-private const val MAX_HISTORY_LINES = 19_200
+/**
+ * Ceiling for the "read further back" request.
+ *
+ * The bridge has no cursor, so every step re-reads the whole tail: 19,200 lines was roughly a
+ * megabyte of ANSI on a long agent run and people still hit the wall mid-conversation. 48,000 costs
+ * a few megabytes at worst (the text is parsed once per load, and rows are rendered lazily) and
+ * covers a day of terminal scrollback. Past this the honest answer is "this is a pane, not an
+ * archive" — durable history would have to live on the host.
+ */
+private const val MAX_HISTORY_LINES = 48_000
 
 class AppViewModel(
     private val repository: HerdRepository,
     private val preferencesStore: PreferencesStore,
     private val appVersion: String = "0.0.0",
+    /**
+     * Android side of updating: download, the "install unknown apps" grant, the system installer.
+     * Null in JVM tests, where none of it can run; the update row then only offers the check.
+     */
+    private val updateInstaller: UpdateInstaller? = null,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -261,6 +290,7 @@ class AppViewModel(
 
     fun onForeground() {
         foreground = true
+        repository.setVisible(true)
         repository.setForeground(true)
         val capturedPage = ticket()
         viewModelScope.launch {
@@ -276,9 +306,10 @@ class AppViewModel(
     fun onBackground() {
         foreground = false
         leavePage()
-        terminal.close()
+        // The terminal and the bridge clients stay open: the keep-alive service holds the process
+        // and the connection. Closing them here was what made every return a reconnect.
+        repository.setVisible(false)
         _ui.update { it.copy(detail = decorate(it.detail.copy(stale = true, loading = false, explainLoading = false))) }
-        repository.setForeground(false)
     }
 
     fun refresh() {
@@ -424,6 +455,8 @@ class AppViewModel(
     private val _update = MutableStateFlow<UpdateUi>(UpdateUi())
     val update: StateFlow<UpdateUi> = _update.asStateFlow()
     private var updateJob: Job? = null
+    /** The APK this session already downloaded, so a retry never re-fetches it. */
+    private var pendingApk: File? = null
 
     fun checkForUpdate() {
         if (_update.value.checking) return
@@ -437,7 +470,102 @@ class AppViewModel(
 
     fun clearUpdateResult() {
         updateJob?.cancel()
+        updateJob = null
+        pendingApk = null
         _update.value = UpdateUi()
+    }
+
+    /**
+     * Downloads the newer release and hands it to the installer.
+     *
+     * A second tap after a successful download skips the network: the APK is already in the cache,
+     * and re-downloading ten megabytes to install the same file would be a strange punishment for
+     * having pressed the button twice.
+     */
+    fun installUpdate() {
+        val installer = updateInstaller ?: return
+        val state = _update.value
+        if (state.checking || state.downloading || state.installing) return
+        val release = (state.result as? UpdateChecker.Result.Newer)?.release ?: return
+        val cached = pendingApk
+        if (cached != null && cached.exists() && state.readyVersion == release.version) {
+            launchInstaller(installer, cached)
+            return
+        }
+        val url = release.apkUrl
+        if (url == null) {
+            // A release without an APK asset cannot be installed from here; say so instead of
+            // downloading the release page (HTML) and failing later inside the installer.
+            _update.update { it.copy(error = Str.get(R.string.update_no_apk)) }
+            return
+        }
+        updateJob?.cancel()
+        _update.update { it.copy(downloading = true, progress = 0, error = null, needsPermission = false) }
+        updateJob = viewModelScope.launch {
+            try {
+                val apk = installer.download(url, release.version) { percent ->
+                    _update.update { it.copy(progress = percent) }
+                }
+                pendingApk = apk
+                _update.update { it.copy(downloading = false, progress = 100, readyVersion = release.version) }
+                launchInstaller(installer, apk)
+            } catch (cancelled: CancellationException) {
+                _update.update { it.copy(downloading = false) }
+                throw cancelled
+            } catch (t: Throwable) {
+                _update.update {
+                    it.copy(
+                        downloading = false,
+                        error = t.message ?: Str.get(R.string.update_failed_download),
+                    )
+                }
+            }
+        }
+    }
+
+    /** Called after the user returns from the system settings screen. */
+    fun retryInstall() {
+        val installer = updateInstaller ?: return
+        val apk = pendingApk
+        if (apk == null) {
+            installer.requestInstallPermission()
+            _update.update { it.copy(needsPermission = true) }
+            return
+        }
+        if (!apk.exists()) {
+            pendingApk = null
+            _update.update { it.copy(readyVersion = null) }
+            return
+        }
+        launchInstaller(installer, apk)
+    }
+
+    fun openInstallPermission() {
+        updateInstaller?.requestInstallPermission()
+        _update.update { it.copy(needsPermission = true) }
+    }
+
+    private fun launchInstaller(installer: UpdateInstaller, apk: File) {
+        if (!installer.canInstall()) {
+            // Ask once, then leave the state visible: the user comes back from Settings and the
+            // row still says what it is waiting for instead of having silently reset.
+            _update.update { it.copy(needsPermission = true, installing = false) }
+            installer.requestInstallPermission()
+            return
+        }
+        _update.update { it.copy(installing = true, needsPermission = false, error = null) }
+        try {
+            installer.install(apk)
+        } catch (invalid: InvalidApkException) {
+            pendingApk = null
+            _update.update {
+                it.copy(installing = false, readyVersion = null, error = invalid.message)
+            }
+        } catch (t: Throwable) {
+            _update.update {
+                it.copy(installing = false, error = t.message ?: Str.get(R.string.update_failed_install))
+            }
+        }
     }
 
     /** Current installed version, for the about block. */
@@ -453,8 +581,8 @@ class AppViewModel(
      * Before this existed the only escape from a key change was the global reset in Settings, which
      * throws away every other host's pin too — a bad trade for a single reinstalled machine.
      */
-    fun trustNewFingerprint(hostId: String) {
-        runCatching { repository.trustNewFingerprint(hostId) }.onFailure { error ->
+    fun trustNewFingerprint(hostId: String, fingerprint: String) {
+        runCatching { repository.trustNewFingerprint(hostId, fingerprint) }.onFailure { error ->
             _ui.update { it.copy(message = error.message ?: Str.get(R.string.vm_trust_failed)) }
         }
     }
@@ -498,12 +626,12 @@ class AppViewModel(
         }
     }
 
-    fun createWorkspace(hostId: String) = structureAction(hostId, Str.get(R.string.vm_created_workspace)) {
-        repository.createWorkspace(hostId, null)
+    fun createWorkspace(hostId: String, cwd: String? = null) = structureAction(hostId, Str.get(R.string.vm_created_workspace)) {
+        repository.createWorkspace(hostId, null, cwd)
     }
 
-    fun createTab(hostId: String, workspaceId: String) = structureAction(hostId, Str.get(R.string.vm_created_tab)) {
-        repository.createTab(hostId, workspaceId, null)
+    fun createTab(hostId: String, workspaceId: String, cwd: String? = null) = structureAction(hostId, Str.get(R.string.vm_created_tab)) {
+        repository.createTab(hostId, workspaceId, null, cwd)
     }
 
     fun splitPane(hostId: String, paneId: String, direction: String) =
@@ -937,13 +1065,17 @@ class AppViewModel(
         val value = text.trimEnd()
         if (value.isEmpty()) return
         val agent = _ui.value.detail.agent ?: return
-        val payload = if (submit) "$value\n" else value
+        // A newline inside `text` is not Enter: `pane.send_input` types the characters and drops the
+        // line break, so the command sat at the prompt unexecuted until the user pressed the key
+        // strip. Submit is a key press, not a character.
+        val payload = value
+        val submitKeys = if (submit) listOf("enter") else emptyList()
         // Clear only once the RPC was accepted: clearing up front threw the typed command away
         // whenever the pane was offline, so the user lost text and nothing was sent.
         operations.setDraft(agent.key, text)
         syncOperation(agent.key)
         val captured = operations.draft(agent.key)
-        sendManual(Str.get(R.string.vm_label_input), rpc = { repository.sendInput(it, payload) }, onRpcAccepted = {
+        sendManual(Str.get(R.string.vm_label_input), rpc = { repository.sendInput(it, payload, submitKeys) }, onRpcAccepted = {
             if (operations.draft(agent.key) == captured) operations.clearDraft(agent.key, captured)
             syncOperation(agent.key)
         })
@@ -1018,6 +1150,8 @@ class AppViewModel(
         passphrase: String,
         session: String,
         herdrCommand: String,
+        fallbackHost: String = "",
+        fallbackPort: String = "",
     ) {
         if (_ui.value.addingHost) return
         _ui.update { it.copy(addingHost = true) }
@@ -1035,6 +1169,8 @@ class AppViewModel(
                     session = session.trim(),
                     herdrCommand = herdrCommand.trim().ifBlank { "herdr" },
                     fingerprint = _ui.value.editingHost?.fingerprint,
+                    fallbackHost = fallbackHost.trim(),
+                    fallbackPort = fallbackPort.toIntOrNull()?.takeIf { it in 1..65535 } ?: 0,
                 )
                 if (id == null) {
                     repository.addHost(config)
@@ -1090,6 +1226,11 @@ class AppViewModel(
     class Factory(private val app: HerdwatchApp) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            AppViewModel(app.repository, app.preferencesStore, app.appVersion) as T
+            AppViewModel(
+                app.repository,
+                app.preferencesStore,
+                app.appVersion,
+                AndroidUpdateInstaller(app),
+            ) as T
     }
 }

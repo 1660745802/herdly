@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -458,13 +459,16 @@ fun NeoChip(
         animationSpec = tween(motionMillis(DsMotion.press)),
         label = "chipSink",
     )
+    // Selected has to be visible at a glance: two shades of the chassis fill (base vs baseRaised)
+    // differ by a few percent in dark mode, so a chosen workspace looked exactly like an unchosen
+    // one and the "create" button appeared to have no target.
     val fill by animateColorAsState(
-        targetValue = if (selected) colors.baseRaised else colors.base,
+        targetValue = if (selected) colors.accentWash else colors.base,
         animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipFill",
     )
     val textColor by animateColorAsState(
-        targetValue = if (selected) colors.text else colors.textSoft,
+        targetValue = if (selected) colors.accent else colors.textSoft,
         animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipText",
     )
@@ -473,6 +477,13 @@ fun NeoChip(
             .defaultMinSize(minHeight = 48.dp)
             .neoState(DsRadius.pill, DsElev.soft, fill, colors, sink)
             .clip(RoundedCornerShape(DsRadius.pill))
+            .then(
+                if (selected) {
+                    Modifier.border(1.dp, colors.accent.copy(alpha = 0.55f), RoundedCornerShape(DsRadius.pill))
+                } else {
+                    Modifier
+                },
+            )
             .clickable(interactionSource = interaction, indication = null, role = Role.Tab) { onClick() }
             .padding(horizontal = DsSpace.l, vertical = 10.dp)
             .semantics { this.role = Role.Tab; this.selected = selected },
@@ -486,7 +497,7 @@ fun NeoChip(
                     .background(dot, RoundedCornerShape(DsRadius.pill)),
             )
         }
-        Text(label, style = if (selected) DsTypography.caption else DsTypography.caption, color = textColor, maxLines = 1)
+        Text(label, style = DsTypography.caption, color = textColor, maxLines = 1)
     }
 }
 

@@ -21,12 +21,7 @@
     <string name="terminal_scroll_to_bottom">Jump to bottom</string>
     <string name="terminal_keys_expand_desc">Show terminal keys</string>
     <string name="terminal_keys_collapse_desc">Hide terminal keys</string>
-    <string name="terminal_input_desc">Terminal command input</string>
-    <string name="terminal_input_placeholder">Type a command, press enter to run</string>
-    <string name="terminal_input_offline">Offline — reconnect to type</string>
-    <string name="terminal_send">Send</string>
     <string name="terminal_paste">Paste</string>
-    <string name="terminal_direct_hint">Direct: each character is sent immediately (good for vim/tmux)</string>
     <!-- Key labels stay in English; only their accessibility descriptions are localized -->
     <string name="terminal_key_escape">Esc key</string>
     <string name="terminal_key_tab">Tab key</string>
@@ -52,4 +47,5 @@
     <string name="terminal_key_page_up">Page up</string>
     <string name="terminal_key_page_down">Page down</string>
     <string name="terminal_key_backspace">Backspace</string>
+    <string name="terminal_show_keyboard">Type a command</string>
 </resources>

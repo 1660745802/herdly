@@ -9,6 +9,7 @@
     <string name="repo_no_new_pane">Herdr did not return a new pane</string>
     <string name="repo_fingerprint_not_clearable">The host fingerprint cannot be cleared. Check the new fingerprint.</string>
     <string name="repo_no_new_fingerprint">No new host fingerprint to verify</string>
+    <string name="repo_stale_fingerprint">The host key changed again — verify it once more</string>
 
     <string name="repo_host_key_mismatch">Host key changed — review it</string>
     <string name="repo_rpc_error">Herdr returned an error: %1$s</string>

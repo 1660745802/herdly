@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,13 +25,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -69,6 +73,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.HerdPane
@@ -128,7 +133,12 @@ fun InboxScreen(
     var selectedHostId by rememberSaveable { mutableStateOf<String?>(null) }
     // One list: every pane the fleet has. A pane running an agent shows that agent's name, lamp
     // and clock in the same row, so a second "agents" list was the same data twice.
-    val hostScope = selectedHostId.takeIf { ui.repo.hosts.size > 1 }
+    // The saved selection can outlive the host it pointed at (deleted, or removed by a refresh).
+    // Keeping it would filter the fleet down to nothing and the page would look empty while other
+    // machines are fine, so an unknown id silently falls back to "all hosts".
+    val hostScope = selectedHostId?.takeIf { id ->
+        ui.repo.hosts.size > 1 && ui.repo.hosts.any { it.host.id == id }
+    }
     val scopedHosts = hostScope?.let { id -> ui.repo.hosts.filter { it.host.id == id } } ?: ui.repo.hosts
     val scopedAgents = scopedHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
     // Agents get their own section whenever the host reports any: "who is working" is a different
@@ -258,364 +268,736 @@ fun InboxScreen(
             }
         }
 
+        // One list on a phone, two columns on a wide screen. Both branches emit the same items
+        // through the same builders, so the queue cannot drift between the two layouts.
+        val wide = configuration.screenWidthDp >= 600 ||
+            configuration.screenWidthDp > configuration.screenHeightDp
+        val listPadding = PaddingValues(
+            start = spacing().gutter,
+            end = spacing().gutter,
+            top = DsSpace.m,
+            bottom = 100.dp,
+        )
+        val connectingHosts = ui.repo.hosts.filter { it.conn == ConnState.Connecting }
+        val showConnecting = connectingHosts.isNotEmpty() && agents.isEmpty()
+        val noMatchVisible = panes.isEmpty() && agentGroup.isEmpty() &&
+            (scopedAgents.isNotEmpty() || ui.query.isNotBlank())
+        // Mutually exclusive: a search with no hit used to show "nothing matched" and "no machines"
+        // at the same time, and a quiet fleet showed both the agent-empty and the pane-empty card.
+        val panesEmptyVisible = !noMatchVisible && panes.isEmpty() && scopedHosts.isNotEmpty()
+        val agentsEmptyVisible = !noMatchVisible && ui.repo.hosts.isNotEmpty() &&
+            scopedAgents.isEmpty() &&
+            (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })
+        // On a wide screen the big "no agents" card only earns its space when there is nothing at
+        // all to show; otherwise the queue column states it in one line and the panes stay visible.
+        val wideAgentsEmptyCard = agentsEmptyVisible && panes.isEmpty()
+
         PullToRefreshBox(
             isRefreshing = ui.repo.refreshing,
             onRefresh = onRefresh,
             modifier = Modifier.weight(1f).fillMaxWidth(),
         ) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = spacing().gutter, end = spacing().gutter, top = DsSpace.m, bottom = 100.dp),
-        ) {
-            if (ui.repo.hosts.isNotEmpty()) {
-                val connecting = ui.repo.hosts.filter { it.conn == ConnState.Connecting }
-                if (connecting.isNotEmpty() && agents.isEmpty()) {
-                    item {
-                        NeoWell(
-                            modifier = Modifier.fillMaxWidth().padding(top = DsSpace.m),
-                            corner = DsRadius.control,
-                            depth = DsElev.inset,
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = DsSpace.l, vertical = DsSpace.m),
-                                verticalAlignment = Alignment.CenterVertically,
+            if (wide) {
+                Column(Modifier.fillMaxSize()) {
+                    if (ui.repo.hosts.isEmpty()) {
+                        // Nothing to split yet: the first-run card is the whole screen.
+                        LazyColumn(Modifier.fillMaxSize(), contentPadding = listPadding) {
+                            item(key = "setup") { SetupCard(onAddHost) }
+                        }
+                    } else {
+                        // Screen-wide notices stay outside the columns: they describe the fleet,
+                        // not one side of the queue.
+                        Column(Modifier.fillMaxWidth().padding(horizontal = spacing().gutter)) {
+                            if (showConnecting) ConnectingNotice(connectingHosts)
+                            if (failedHosts.isNotEmpty()) EnvironmentRow(failedHosts, onReconnect)
+                            if (wideAgentsEmptyCard) {
+                                AgentsEmptyCard(
+                                    hostScope = hostScope,
+                                    hosts = ui.repo.hosts,
+                                    onNewTask = onNewTask,
+                                    onOpenHost = onOpenHost,
+                                    onShowAllHosts = { selectedHostId = null },
+                                    onRefresh = onRefresh,
+                                )
+                            }
+                            if (noMatchVisible) NoMatchCard(ui.query, hostScope) { onQuery("") }
+                            if (panesEmptyVisible) {
+                                PanesEmptyCard(scopedHosts, ui.query, onOpenHost, onRefresh)
+                            }
+                        }
+                        Row(Modifier.weight(1f).fillMaxWidth()) {
+                            LazyColumn(
+                                Modifier.weight(1f).fillMaxHeight(),
+                                contentPadding = listPadding,
                             ) {
-                                NeoSkeleton(Modifier.width(18.dp), height = 18.dp, corner = 9.dp)
-                                Spacer(Modifier.width(DsSpace.m))
-                                Text(
-                                    stringResource(
-                                        R.string.inbox_connecting_hosts,
-                                        connecting.joinToString(stringResource(R.string.inbox_list_separator)) { it.host.label },
-                                    ),
-                                    style = DsTypography.body,
-                                    color = colors.textSoft,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                }
-                if (failedHosts.isNotEmpty()) {
-                    item { EnvironmentRow(failedHosts, onReconnect) }
-                }
-                if (scopedAgents.isEmpty() && (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })) {
-                    item {
-                        NeoEmptyState(
-                            icon = NeoGlyph.Tray,
-                            title = stringResource(
-                                if (hostScope == null) R.string.inbox_empty_none_title else R.string.inbox_empty_host_title,
-                            ),
-                            body = stringResource(
-                                if (hostScope == null) R.string.inbox_empty_none_body else R.string.inbox_empty_host_body,
-                            ),
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
-                                if (hostScope != null) {
-                                    NeoButton(
-                                        label = stringResource(R.string.inbox_show_all_hosts),
-                                        onClick = { selectedHostId = null },
-                                        tone = NeoButtonTone.Ghost,
-                                        compact = true,
-                                    )
-                                }
-                                if (onNewTask != null && hostScope == null) {
-                                    NeoButton(
-                                        label = stringResource(R.string.inbox_start_new_task),
-                                        onClick = onNewTask,
-                                        tone = NeoButtonTone.Primary,
-                                        icon = NeoGlyph.Plus,
-                                    )
+                                if (agentGroup.isEmpty()) {
+                                    item(key = "agents-empty-line") { QueueEmptyLine() }
                                 } else {
-                                    Text(
-                                        stringResource(R.string.inbox_new_task_hint),
-                                        style = DsTypography.body,
-                                        color = colors.textSoft,
-                                    )
-                                }
-                                if (onOpenHost != null && hostScope == null) {
-                                    ui.repo.hosts.filter { it.conn is ConnState.Connected }.forEach { runtime ->
-                                        NeoButton(
-                                            label = stringResource(R.string.inbox_check_host_sessions, runtime.host.label),
-                                            onClick = { onOpenHost(runtime.host.id) },
-                                            tone = NeoButtonTone.Ghost,
-                                            icon = NeoGlyph.Server,
-                                            compact = true,
-                                        )
-                                    }
-                                } else {
-                                    NeoButton(
-                                        label = stringResource(R.string.inbox_recheck_agents),
-                                        onClick = onRefresh,
-                                        tone = NeoButtonTone.Ghost,
-                                        icon = NeoGlyph.Refresh,
-                                        compact = true,
+                                    hostQueueBlocks(
+                                        hosts = scopedHosts,
+                                        agentGroup = agentGroup,
+                                        panes = panes,
+                                        now = now,
+                                        hostScope = hostScope,
+                                        onOpenAgent = onOpenAgent,
+                                        onOpenPane = onOpenPane,
+                                        emitPanes = false,
                                     )
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            if (ui.repo.hosts.isEmpty()) {
-                item {
-                    val clipboard = LocalClipboardManager.current
-                    NeoEmptyState(
-                        icon = NeoGlyph.Server,
-                        title = stringResource(R.string.inbox_setup_title),
-                        body = stringResource(R.string.inbox_setup_body),
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
-                                verticalAlignment = Alignment.CenterVertically,
+                            LazyColumn(
+                                Modifier.weight(1f).fillMaxHeight(),
+                                contentPadding = listPadding,
                             ) {
-                                NeoButton(
-                                    label = stringResource(R.string.inbox_add_host),
-                                    onClick = onAddHost,
-                                    tone = NeoButtonTone.Primary,
-                                    icon = NeoGlyph.Plus,
-                                    compact = true,
-                                )
-                                NeoButton(
-                                    label = stringResource(R.string.inbox_copy_check_command),
-                                    onClick = { clipboard.setText(AnnotatedString("herdr remote-api-bridge --check")) },
-                                    tone = NeoButtonTone.Quiet,
-                                    icon = NeoGlyph.Copy,
-                                    compact = true,
-                                )
-                            }
-                            Text(
-                                stringResource(R.string.inbox_check_command_hint),
-                                style = DsTypography.caption,
-                                color = colors.textSoft,
-                            )
-                        }
-                    }
-                }
-                return@LazyColumn
-            }
-
-            // Hierarchy, in this order: machine → tab → pane. Agents are their own group above the
-            // panes, because "who needs me" is a different question from "what is running where".
-            // A flat list of eleven rows told you neither, and a panel with a fixed height left half
-            // the screen empty while the rest of the list hid behind an inner scroll.
-            // Agents are grouped the same way the panes below them are: workspace, then tab. Five
-            // rows called "π - hyper" with a bare p1/pF told you nothing about which is which; the
-            // group heading carries the machine and project so the row only has to name the agent.
-            if (agentGroup.isNotEmpty()) {
-                val waitingTotal = agentGroup.count { isAttention(it) }
-                item(key = "agents-header") {
-                    NeoSection(
-                        title = pluralStringResource(R.plurals.inbox_group_agents, agentGroup.size, agentGroup.size),
-                        trailing = if (waitingTotal > 0) ({
-                            Text(
-                                pluralStringResource(R.plurals.inbox_group_waiting, waitingTotal, waitingTotal),
-                                style = DsTypography.micro,
-                                color = colors.warn,
-                            )
-                        }) else null,
-                    )
-                }
-                val byHost = agentGroup.groupBy { it.hostId }
-                byHost.forEach { (hostId, hostAgents) ->
-                    val hostRuntime = ui.repo.hosts.firstOrNull { it.host.id == hostId }
-                    if (hostScope == null && byHost.size > 1) {
-                        item(key = "agents-host:$hostId") {
-                            Text(
-                                hostAgents.first().hostLabel,
-                                style = DsTypography.bodyStrong,
-                                color = colors.text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
-                            )
-                        }
-                    }
-                    val byWorkspace = hostAgents.groupBy { it.workspaceLabel ?: it.repo ?: "" }
-                    byWorkspace.forEach { (workspaceLabel, workspaceAgents) ->
-                        if (workspaceLabel.isNotBlank()) {
-                            item(key = "agents-ws:$hostId:$workspaceLabel") {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    NeoIcon(NeoGlyph.Workspace, modifier = Modifier.size(14.dp), tint = colors.textFaint)
-                                    Spacer(Modifier.width(DsSpace.xs))
-                                    Text(
-                                        workspaceLabel,
-                                        style = DsTypography.caption,
-                                        color = colors.textSoft,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                if (panes.isNotEmpty()) {
+                                    hostQueueBlocks(
+                                        hosts = scopedHosts,
+                                        agentGroup = agentGroup,
+                                        panes = panes,
+                                        now = now,
+                                        hostScope = hostScope,
+                                        onOpenAgent = onOpenAgent,
+                                        onOpenPane = onOpenPane,
+                                        emitAgents = false,
                                     )
                                 }
                             }
                         }
-                        item(key = "agents-card:$hostId:$workspaceLabel") {
-                            NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
-                                Column(Modifier.fillMaxWidth()) {
-                                    workspaceAgents.forEachIndexed { index, agent ->
-                                        AgentRow(
-                                            agent,
-                                            now,
-                                            hostRuntime,
-                                            hostScoped = true,
-                                            compact = true,
-                                        ) { onOpenAgent(agent, hostScope) }
-                                        if (index != workspaceAgents.lastIndex) NeoDivider(inset = DsSpace.l)
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
-            }
-
-            scopedHosts.forEach { runtime ->
-                val hostPanes = panes.filter { it.first.host.id == runtime.host.id }.map { it.second }
-                if (hostPanes.isEmpty()) return@forEach
-                val tabs = runtime.structure.tabs
-                val paneCount = hostPanes.size
-                item(key = "host:" + runtime.host.id) {
-                    NeoSection(
-                        title = runtime.host.label + "  ·  " +
-                            pluralStringResource(R.plurals.inbox_group_panes, paneCount, paneCount),
-                        trailing = {
-                            Text(
-                                stringResource(
-                                    if (runtime.conn is ConnState.Connected) R.string.inbox_host_up
-                                    else R.string.inbox_host_down,
-                                ),
-                                style = DsTypography.micro,
-                                color = if (runtime.conn is ConnState.Connected) colors.ok else colors.danger,
+            } else {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = listPadding) {
+                    if (showConnecting) {
+                        item(key = "connecting") { ConnectingNotice(connectingHosts) }
+                    }
+                    if (failedHosts.isNotEmpty()) {
+                        item(key = "environment") { EnvironmentRow(failedHosts, onReconnect) }
+                    }
+                    if (agentsEmptyVisible) {
+                        item(key = "agents-empty") {
+                            AgentsEmptyCard(
+                                hostScope = hostScope,
+                                hosts = ui.repo.hosts,
+                                onNewTask = onNewTask,
+                                onOpenHost = onOpenHost,
+                                onShowAllHosts = { selectedHostId = null },
+                                onRefresh = onRefresh,
                             )
-                        },
+                        }
+                    }
+                    if (ui.repo.hosts.isEmpty()) {
+                        item(key = "setup") { SetupCard(onAddHost) }
+                        return@LazyColumn
+                    }
+                    // One block per machine: its agents first, then its workspaces, then a weak
+                    // hairline before the next machine. Grouping by state first and machine second
+                    // made a six-device fleet read as one long list where the same machine appeared
+                    // in two unrelated places.
+                    hostQueueBlocks(
+                        hosts = scopedHosts,
+                        agentGroup = agentGroup,
+                        panes = panes,
+                        now = now,
+                        hostScope = hostScope,
+                        onOpenAgent = onOpenAgent,
+                        onOpenPane = onOpenPane,
                     )
-                }
-                // Group by tab so the path and the tab a pane belongs to are structural facts, not
-                // three dots of text squeezed into a caption.
-                // Workspace first, then its tabs: repeating "hyper" above every tab made the same
-                // level look like three different machines.
-                val byWorkspace = hostPanes.groupBy { it.workspaceId }
-                byWorkspace.forEach { (workspaceId, workspacePanes) ->
-                    val workspace = runtime.structure.workspaces.firstOrNull { it.id == workspaceId }
-                    if (workspace?.label != null) {
-                        item(key = "ws:" + runtime.host.id + ":" + workspaceId) {
-                            Text(
-                                workspace.label,
-                                style = DsTypography.bodyStrong,
-                                color = colors.text,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.m, bottom = DsSpace.xxs),
-                            )
-                        }
+                    if (noMatchVisible) {
+                        item(key = "no-match") { NoMatchCard(ui.query, hostScope) { onQuery("") } }
                     }
-                val groups = workspacePanes.groupBy { it.tabId }
-                groups.forEach { (tabId, group) ->
-                    val tab = tabs.firstOrNull { it.id == tabId }
-                    val workspace = runtime.structure.workspaces.firstOrNull { it.id == group.first().workspaceId }
-                    // The tab is a sub-level of the workspace heading above: a small glyph and a
-                    // caption, indented one step so the tree reads without a rail.
-                    val tabLabel = tab?.label ?: tabId.substringAfterLast(':')
-                    item(key = "tab:" + runtime.host.id + ":" + tabId) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = DsSpace.m, top = DsSpace.s, bottom = DsSpace.xxs),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            NeoIcon(NeoGlyph.Tab, modifier = Modifier.size(13.dp), tint = colors.textFaint)
-                            Spacer(Modifier.width(DsSpace.xs))
-                            Text(
-                                tabLabel,
-                                style = DsTypography.caption,
-                                color = colors.textSoft,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    item(key = "panes:" + runtime.host.id + ":" + tabId) {
-                        NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
-                            Column(Modifier.fillMaxWidth()) {
-                                group.forEachIndexed { index, pane ->
-                                    PaneRow(
-                                        pane = pane,
-                                        runtime = runtime,
-                                        agent = scopedAgents.firstOrNull { it.hostId == runtime.host.id && it.paneId == pane.id },
-                                        hostScoped = true,
-                                    ) {
-                                        if (onOpenPane != null) onOpenPane(runtime.host.id, pane.id)
-                                        else runtimeHostAgent(scopedAgents, pane, runtime)
-                                            ?.let { onOpenAgent(it, hostScope) }
-                                    }
-                                    if (index != group.lastIndex) NeoDivider(inset = DsSpace.l)
-                                }
-                            }
-                        }
-                    }
-                }
-                }
-            }
-
-            if (panes.isEmpty() && agentGroup.isEmpty() && (scopedAgents.isNotEmpty() || ui.query.isNotBlank())) {
-                item {
-                    NeoEmptyState(
-                        icon = NeoGlyph.Search,
-                        title = stringResource(R.string.inbox_no_match_title),
-                        body = stringResource(
-                            when {
-                                ui.query.isNotBlank() -> R.string.inbox_no_match_search_body
-                                hostScope != null -> R.string.inbox_no_match_host_body
-                                else -> R.string.inbox_no_match_none_body
-                            },
-                        ),
-                    ) {
-                        if (ui.query.isNotBlank()) {
-                            NeoButton(
-                                label = stringResource(R.string.inbox_clear_search),
-                                onClick = { onQuery("") },
-                                tone = NeoButtonTone.Ghost,
-                                compact = true,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (panes.isEmpty() && scopedHosts.isNotEmpty()) {
-                item {
-                    NeoEmptyState(
-                        icon = NeoGlyph.Pane,
-                        title = stringResource(R.string.inbox_panes_empty_title),
-                        body = stringResource(
-                            if (ui.query.isNotBlank()) R.string.inbox_no_match_search_body
-                            else R.string.inbox_panes_empty_body,
-                        ),
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
-                            if (onOpenHost != null) {
-                                NeoButton(
-                                    label = stringResource(R.string.inbox_check_host_sessions, scopedHosts.first().host.label),
-                                    onClick = { onOpenHost(scopedHosts.first().host.id) },
-                                    tone = NeoButtonTone.Ghost,
-                                    icon = NeoGlyph.Server,
-                                    compact = true,
-                                )
-                            }
-                            NeoButton(
-                                label = stringResource(R.string.inbox_recheck_agents),
-                                onClick = onRefresh,
-                                tone = NeoButtonTone.Ghost,
-                                icon = NeoGlyph.Refresh,
-                                compact = true,
-                            )
+                    if (panesEmptyVisible) {
+                        item(key = "panes-empty") {
+                            PanesEmptyCard(scopedHosts, ui.query, onOpenHost, onRefresh)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * The phone queue: one block per machine.
+ *
+ * Order inside a block answers the two questions a reader actually has, in order: who needs me here
+ * (its agents), then what is running here (workspaces → tabs → panes). Between machines there is a
+ * weak hairline instead of a gap, so a long fleet stays scannable without turning into a wall of
+ * cards: a divider is a glance, a card is an object.
+ */
+private fun LazyListScope.hostQueueBlocks(
+    hosts: List<HostRuntime>,
+    agentGroup: List<Agent>,
+    panes: List<Pair<HostRuntime, HerdPane>>,
+    now: Long,
+    hostScope: String?,
+    onOpenAgent: (Agent, String?) -> Unit,
+    onOpenPane: ((String, String) -> Unit)?,
+    // On a wide screen the two columns are the same machine blocks, split: the left column is the
+    // agents of each machine, the right column the sessions of the same machine. Splitting the page
+    // into "all agents" and "all panes" instead lost the machine grouping on exactly the layout with
+    // room to show it.
+    emitAgents: Boolean = true,
+    emitPanes: Boolean = true,
+) {
+    val agentsByHost = agentGroup.groupBy { it.hostId }
+    val panesByHost = panes.groupBy { it.first.host.id }
+    // Machines with attention come first, then whichever has more happening, then alphabetical so
+    // the order is stable across refreshes instead of shuffling under the reader's thumb.
+    val ordered = hosts.sortedWith(
+        compareByDescending<HostRuntime> { runtime ->
+            agentsByHost[runtime.host.id].orEmpty().count { isAttention(it) }
+        }
+            .thenByDescending { runtime -> agentsByHost[runtime.host.id].orEmpty().size }
+            .thenByDescending { runtime -> panesByHost[runtime.host.id].orEmpty().size }
+            .thenBy { it.host.label },
+    )
+    var first = true
+    ordered.forEach { runtime ->
+        val hostAgents = agentsByHost[runtime.host.id].orEmpty()
+        // An agent is a pane. Listing its pane again under the workspaces showed the same process
+        // twice in one machine block, once with a status and once with a path, and made the reader
+        // wonder which row to tap. The agent row is the richer one, so the pane list keeps only the
+        // panes that have no agent above them.
+        val agentPanes = hostAgents.map { it.paneId }.toSet()
+        val hostPanes = panesByHost[runtime.host.id].orEmpty()
+            .filterNot { it.second.id in agentPanes }
+        val shownAgents = if (emitAgents) hostAgents else emptyList()
+        val shownPanes = if (emitPanes) hostPanes else emptyList()
+        if (shownAgents.isEmpty() && shownPanes.isEmpty()) return@forEach
+        if (!first) {
+            item(key = "host-rule:" + runtime.host.id) { WeakRule() }
+        }
+        first = false
+        item(key = "host-block:" + runtime.host.id) {
+            HostBlockHeader(runtime, shownAgents, shownPanes.map { it.second })
+        }
+        if (shownAgents.isNotEmpty()) {
+            item(key = "host-agents-label:" + runtime.host.id) {
+                BlockLabel(stringResource(R.string.inbox_block_agents))
+            }
+        }
+        if (shownAgents.isNotEmpty()) {
+            agentQueueItems(
+                agentGroup = shownAgents,
+                hosts = listOf(runtime),
+                hostScope = hostScope,
+                now = now,
+                showHeader = false,
+                showHostHeadings = false,
+                onOpenAgent = onOpenAgent,
+            )
+        }
+        if (shownPanes.isNotEmpty()) {
+            item(key = "host-panes-label:" + runtime.host.id) {
+                BlockLabel(stringResource(R.string.inbox_block_panes))
+            }
+        }
+        if (shownPanes.isNotEmpty()) {
+            paneItems(
+                scopedHosts = listOf(runtime),
+                panes = shownPanes,
+                scopedAgents = shownAgents,
+                hostScope = hostScope,
+                showHeader = false,
+                showHostHeadings = false,
+                onOpenPane = onOpenPane,
+                onOpenAgent = onOpenAgent,
+            )
+        }
+    }
+}
+
+/** A structural caption inside a machine block: which half of the block follows. */
+@Composable
+private fun BlockLabel(text: String) {
+    val colors = ds()
+    Text(
+        text,
+        style = DsTypography.micro,
+        color = colors.textFaint,
+        modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
+    )
+}
+
+/**
+ * A hairline between two machine blocks.
+ *
+ * Weaker than [NeoDivider] on purpose: it separates groups without becoming a row of its own, and it
+ * does not use the panel shadow, so the page still has exactly one chassis.
+ */
+@Composable
+private fun WeakRule() {
+    val colors = ds()
+    Spacer(Modifier.height(DsSpace.l))
+    HorizontalDivider(thickness = 1.dp, color = colors.textFaint.copy(alpha = 0.16f))
+    Spacer(Modifier.height(DsSpace.l))
+}
+
+
+
+/**
+ * The first line of a machine block: which machine, whether it is reachable, and how much is on it.
+ * Everything after this line belongs to this machine, which is the point of the whole restructure.
+ */
+@Composable
+private fun HostBlockHeader(runtime: HostRuntime, agents: List<Agent>, panes: List<HerdPane>) {
+    val colors = ds()
+    val attention = agents.count { isAttention(it) }
+    val up = runtime.conn is ConnState.Connected
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = DsSpace.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(if (up) colors.ok else colors.danger),
+        )
+        Spacer(Modifier.width(DsSpace.s))
+        Text(
+            runtime.host.label,
+            style = DsTypography.bodyStrong,
+            color = colors.text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(DsSpace.s))
+        Text(
+            buildList {
+                if (agents.isNotEmpty()) {
+                    add(pluralStringResource(R.plurals.inbox_group_agents, agents.size, agents.size))
+                }
+                if (panes.isNotEmpty()) {
+                    add(pluralStringResource(R.plurals.inbox_group_panes, panes.size, panes.size))
+                }
+            }.joinToString(stringResource(R.string.inbox_list_separator)),
+            style = DsTypography.micro,
+            color = colors.textFaint,
+            maxLines = 1,
+        )
+        if (attention > 0) {
+            Spacer(Modifier.width(DsSpace.s))
+            Text(
+                pluralStringResource(R.plurals.inbox_group_waiting, attention, attention),
+                style = DsTypography.micro,
+                color = colors.warn,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * The agent queue, emitted into whichever list is hosting it. Machines are the outer block:
+ * heading, its cards, then a weak hairline before the next machine.
+ */
+private fun LazyListScope.agentQueueItems(
+    agentGroup: List<Agent>,
+    hosts: List<HostRuntime>,
+    hostScope: String?,
+    now: Long,
+    showHeader: Boolean,
+    showHostHeadings: Boolean,
+    onOpenAgent: (Agent, String?) -> Unit,
+) {
+    if (agentGroup.isEmpty()) return
+    if (showHeader) {
+        val waitingTotal = agentGroup.count { isAttention(it) }
+        item(key = "agents-header") {
+            val colors = ds()
+            NeoSection(
+                title = pluralStringResource(R.plurals.inbox_group_agents, agentGroup.size, agentGroup.size),
+                trailing = if (waitingTotal > 0) ({
+                    Text(
+                        pluralStringResource(R.plurals.inbox_group_waiting, waitingTotal, waitingTotal),
+                        style = DsTypography.micro,
+                        color = colors.warn,
+                    )
+                }) else null,
+            )
+        }
+    }
+    val byHost = agentGroup.groupBy { it.hostId }
+    byHost.entries.forEachIndexed { hostIndex, (hostId, hostAgents) ->
+        val hostRuntime = hosts.firstOrNull { it.host.id == hostId }
+        if (showHostHeadings) {
+            val waitingForHost = hostAgents.count { isAttention(it) }
+            item(key = "agents-host:$hostId") {
+                val colors = ds()
+                NeoSection(
+                    title = hostAgents.first().hostLabel,
+                    trailing = if (waitingForHost > 0) ({
+                        Text(
+                            pluralStringResource(R.plurals.inbox_group_waiting, waitingForHost, waitingForHost),
+                            style = DsTypography.micro,
+                            color = colors.warn,
+                        )
+                    }) else null,
+                )
+            }
+        }
+        val byWorkspace = hostAgents.groupBy { it.workspaceLabel ?: it.repo ?: "" }
+        byWorkspace.forEach { (workspaceLabel, workspaceAgents) ->
+            if (workspaceLabel.isNotBlank()) {
+                item(key = "agents-ws:$hostId:$workspaceLabel") {
+                    val colors = ds()
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = DsSpace.s, top = DsSpace.s, bottom = DsSpace.xxs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NeoIcon(NeoGlyph.Workspace, modifier = Modifier.size(14.dp), tint = colors.textFaint)
+                        Spacer(Modifier.width(DsSpace.xs))
+                        Text(
+                            workspaceLabel,
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            item(key = "agents-card:$hostId:$workspaceLabel") {
+                NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
+                    Column(Modifier.fillMaxWidth()) {
+                        workspaceAgents.forEachIndexed { index, agent ->
+                            AgentRow(
+                                agent,
+                                now,
+                                hostRuntime,
+                                hostScoped = true,
+                                compact = true,
+                            ) { onOpenAgent(agent, hostScope) }
+                            if (index != workspaceAgents.lastIndex) NeoDivider(inset = DsSpace.l)
+                        }
+                    }
+                }
+            }
+        }
+        if (hostIndex != byHost.size - 1) {
+            item(key = "agents-host-divider:$hostId") {
+                NeoDivider(Modifier.padding(vertical = DsSpace.s))
+            }
+        }
+    }
+}
+
+/** The pane tree. Machines are the outer block here too: heading, its panes, a weak hairline. */
+private fun LazyListScope.paneItems(
+    scopedHosts: List<HostRuntime>,
+    panes: List<Pair<HostRuntime, HerdPane>>,
+    scopedAgents: List<Agent>,
+    hostScope: String?,
+    showHeader: Boolean,
+    showHostHeadings: Boolean = true,
+    onOpenPane: ((String, String) -> Unit)?,
+    onOpenAgent: (Agent, String?) -> Unit,
+) {
+    if (showHeader) {
+        item(key = "panes-header") {
+            NeoSection(
+                title = pluralStringResource(R.plurals.inbox_group_panes, panes.size, panes.size),
+            )
+        }
+    }
+    val perHost = scopedHosts.mapNotNull { runtime ->
+        val hostPanes = panes.filter { it.first.host.id == runtime.host.id }.map { it.second }
+        if (hostPanes.isEmpty()) null else runtime to hostPanes
+    }
+    perHost.forEachIndexed { hostIndex, (runtime, hostPanes) ->
+        val tabs = runtime.structure.tabs
+        if (showHostHeadings) {
+            item(key = "host:" + runtime.host.id) {
+                val colors = ds()
+                NeoSection(
+                    title = runtime.host.label + "  ·  " +
+                        pluralStringResource(R.plurals.inbox_group_panes, hostPanes.size, hostPanes.size),
+                    trailing = {
+                        Text(
+                            stringResource(
+                                if (runtime.conn is ConnState.Connected) R.string.inbox_host_up
+                                else R.string.inbox_host_down,
+                            ),
+                            style = DsTypography.micro,
+                            color = if (runtime.conn is ConnState.Connected) colors.ok else colors.danger,
+                        )
+                    },
+                )
+            }
+        }
+        // Group by tab so the path and the tab a pane belongs to are structural facts, not
+        // three dots of text squeezed into a caption.
+        // Workspace first, then its tabs: repeating "hyper" above every tab made the same
+        // level look like three different machines.
+        val byWorkspace = hostPanes.groupBy { it.workspaceId }
+        byWorkspace.forEach { (workspaceId, workspacePanes) ->
+            val workspace = runtime.structure.workspaces.firstOrNull { it.id == workspaceId }
+            if (workspace?.label != null) {
+                item(key = "ws:" + runtime.host.id + ":" + workspaceId) {
+                    val colors = ds()
+                    Text(
+                        workspace.label,
+                        style = DsTypography.bodyStrong,
+                        color = colors.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = DsSpace.s, top = DsSpace.m, bottom = DsSpace.xxs),
+                    )
+                }
+            }
+            val groups = workspacePanes.groupBy { it.tabId }
+            groups.forEach { (tabId, group) ->
+                val tab = tabs.firstOrNull { it.id == tabId }
+                // The tab is a sub-level of the workspace heading above: a small glyph and a
+                // caption, indented one step so the tree reads without a rail.
+                val tabLabel = tab?.label ?: tabId.substringAfterLast(':')
+                item(key = "tab:" + runtime.host.id + ":" + tabId) {
+                    val colors = ds()
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = DsSpace.m, top = DsSpace.s, bottom = DsSpace.xxs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NeoIcon(NeoGlyph.Tab, modifier = Modifier.size(13.dp), tint = colors.textFaint)
+                        Spacer(Modifier.width(DsSpace.xs))
+                        Text(
+                            tabLabel,
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                item(key = "panes:" + runtime.host.id + ":" + tabId) {
+                    NeoCard(modifier = Modifier.fillMaxWidth(), depth = DsElev.soft) {
+                        Column(Modifier.fillMaxWidth()) {
+                            group.forEachIndexed { index, pane ->
+                                PaneRow(
+                                    pane = pane,
+                                    runtime = runtime,
+                                    agent = scopedAgents.firstOrNull { it.hostId == runtime.host.id && it.paneId == pane.id },
+                                    hostScoped = true,
+                                ) {
+                                    if (onOpenPane != null) onOpenPane(runtime.host.id, pane.id)
+                                    else runtimeHostAgent(scopedAgents, pane, runtime)
+                                        ?.let { onOpenAgent(it, hostScope) }
+                                }
+                                if (index != group.lastIndex) NeoDivider(inset = DsSpace.l)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (hostIndex != perHost.lastIndex) {
+            item(key = "host-divider:" + runtime.host.id) {
+                NeoDivider(Modifier.padding(vertical = DsSpace.s))
+            }
+        }
+    }
+}
+
+/** Wide-screen queue column with nothing in it: one line, not a full empty-state card. */
+@Composable
+private fun QueueEmptyLine() {
+    val colors = ds()
+    Text(
+        stringResource(R.string.inbox_queue_empty),
+        style = DsTypography.body,
+        color = colors.textSoft,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = DsSpace.s, vertical = DsSpace.l),
+    )
+}
+
+@Composable
+private fun ConnectingNotice(hosts: List<HostRuntime>) {
+    val colors = ds()
+    NeoWell(
+        modifier = Modifier.fillMaxWidth().padding(top = DsSpace.m),
+        corner = DsRadius.control,
+        depth = DsElev.inset,
+    ) {
+        Row(
+            Modifier.padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NeoSkeleton(Modifier.width(18.dp), height = 18.dp, corner = 9.dp)
+            Spacer(Modifier.width(DsSpace.m))
+            Text(
+                stringResource(
+                    R.string.inbox_connecting_hosts,
+                    hosts.joinToString(stringResource(R.string.inbox_list_separator)) { it.host.label },
+                ),
+                style = DsTypography.body,
+                color = colors.textSoft,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AgentsEmptyCard(
+    hostScope: String?,
+    hosts: List<HostRuntime>,
+    onNewTask: (() -> Unit)?,
+    onOpenHost: ((String) -> Unit)?,
+    onShowAllHosts: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val colors = ds()
+    NeoEmptyState(
+        icon = NeoGlyph.Tray,
+        title = stringResource(
+            if (hostScope == null) R.string.inbox_empty_none_title else R.string.inbox_empty_host_title,
+        ),
+        body = stringResource(
+            if (hostScope == null) R.string.inbox_empty_none_body else R.string.inbox_empty_host_body,
+        ),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            if (hostScope != null) {
+                NeoButton(
+                    label = stringResource(R.string.inbox_show_all_hosts),
+                    onClick = onShowAllHosts,
+                    tone = NeoButtonTone.Ghost,
+                    compact = true,
+                )
+            }
+            if (onNewTask != null && hostScope == null) {
+                NeoButton(
+                    label = stringResource(R.string.inbox_start_new_task),
+                    onClick = onNewTask,
+                    tone = NeoButtonTone.Primary,
+                    icon = NeoGlyph.Plus,
+                )
+            } else {
+                Text(
+                    stringResource(R.string.inbox_new_task_hint),
+                    style = DsTypography.body,
+                    color = colors.textSoft,
+                )
+            }
+            if (onOpenHost != null && hostScope == null) {
+                hosts.filter { it.conn is ConnState.Connected }.forEach { runtime ->
+                    NeoButton(
+                        label = stringResource(R.string.inbox_check_host_sessions, runtime.host.label),
+                        onClick = { onOpenHost(runtime.host.id) },
+                        tone = NeoButtonTone.Ghost,
+                        icon = NeoGlyph.Server,
+                        compact = true,
+                    )
+                }
+            } else {
+                NeoButton(
+                    label = stringResource(R.string.inbox_recheck_agents),
+                    onClick = onRefresh,
+                    tone = NeoButtonTone.Ghost,
+                    icon = NeoGlyph.Refresh,
+                    compact = true,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupCard(onAddHost: () -> Unit) {
+    val colors = ds()
+    val clipboard = LocalClipboardManager.current
+    NeoEmptyState(
+        icon = NeoGlyph.Server,
+        title = stringResource(R.string.inbox_setup_title),
+        body = stringResource(R.string.inbox_setup_body),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NeoButton(
+                    label = stringResource(R.string.inbox_add_host),
+                    onClick = onAddHost,
+                    tone = NeoButtonTone.Primary,
+                    icon = NeoGlyph.Plus,
+                    compact = true,
+                )
+                NeoButton(
+                    label = stringResource(R.string.inbox_copy_check_command),
+                    onClick = { clipboard.setText(AnnotatedString("herdr remote-api-bridge --check")) },
+                    tone = NeoButtonTone.Quiet,
+                    icon = NeoGlyph.Copy,
+                    compact = true,
+                )
+            }
+            Text(
+                stringResource(R.string.inbox_check_command_hint),
+                style = DsTypography.caption,
+                color = colors.textSoft,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NoMatchCard(query: String, hostScope: String?, onClearQuery: () -> Unit) {
+    NeoEmptyState(
+        icon = NeoGlyph.Search,
+        title = stringResource(R.string.inbox_no_match_title),
+        body = stringResource(
+            when {
+                query.isNotBlank() -> R.string.inbox_no_match_search_body
+                hostScope != null -> R.string.inbox_no_match_host_body
+                else -> R.string.inbox_no_match_none_body
+            },
+        ),
+    ) {
+        if (query.isNotBlank()) {
+            NeoButton(
+                label = stringResource(R.string.inbox_clear_search),
+                onClick = onClearQuery,
+                tone = NeoButtonTone.Ghost,
+                compact = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PanesEmptyCard(
+    hosts: List<HostRuntime>,
+    query: String,
+    onOpenHost: ((String) -> Unit)?,
+    onRefresh: () -> Unit,
+) {
+    NeoEmptyState(
+        icon = NeoGlyph.Pane,
+        title = stringResource(R.string.inbox_panes_empty_title),
+        body = stringResource(
+            if (query.isNotBlank()) R.string.inbox_no_match_search_body
+            else R.string.inbox_panes_empty_body,
+        ),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            if (onOpenHost != null) {
+                NeoButton(
+                    label = stringResource(R.string.inbox_check_host_sessions, hosts.first().host.label),
+                    onClick = { onOpenHost(hosts.first().host.id) },
+                    tone = NeoButtonTone.Ghost,
+                    icon = NeoGlyph.Server,
+                    compact = true,
+                )
+            }
+            NeoButton(
+                label = stringResource(R.string.inbox_recheck_agents),
+                onClick = onRefresh,
+                tone = NeoButtonTone.Ghost,
+                icon = NeoGlyph.Refresh,
+                compact = true,
+            )
         }
     }
 }

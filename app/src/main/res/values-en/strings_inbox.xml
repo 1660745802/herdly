@@ -50,10 +50,12 @@
     <string name="inbox_no_match_search_body">Searched names, machines, projects, workspaces, tabs, splits and directories.</string>
     <string name="inbox_no_match_host_body">No matching agents on this machine.</string>
     <string name="inbox_no_match_none_body">There are no agents right now.</string>
+    <!-- Wide layout, left column: one-line notice when the queue is empty -->
+    <string name="inbox_queue_empty">Nothing needs you right now</string>
 
     <!-- Inbox: first-run setup -->
     <string name="inbox_setup_title">Herdr in your pocket</string>
-    <string name="inbox_setup_body">Herdly does not run agents for you; it only lets you view and approve.\n\n1. Install Herdr on the host and make sure the phone can log in over SSH\n2. Check that the bridge is reachable\n3. Add a machine — the duty page lists every agent</string>
+    <string name="inbox_setup_body">Herdly does not run agents for you; it only lets you view and approve.\n\n1. Install Herdr on the host and make sure the phone can log in over SSH\n2. Check that the bridge is reachable\n3. Add a machine — the tasks page lists every agent</string>
     <string name="inbox_add_host">Add machine</string>
     <string name="inbox_copy_check_command">Copy check command</string>
     <string name="inbox_check_command_hint">Run that command on the host; it should print herdr-api-bridge-v1.</string>
@@ -87,4 +89,6 @@
         <item quantity="one">%d pane</item>
         <item quantity="other">%d panes</item>
     </plurals>
-</resources>
+    <string name="inbox_block_agents">AGENTS</string>
+    <string name="inbox_block_panes">SESSIONS</string>
+        </resources>

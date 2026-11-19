@@ -49,10 +49,12 @@
     <string name="inbox_no_match_search_body">搜索了名称、机器、项目、工作区、标签页、分屏和目录。</string>
     <string name="inbox_no_match_host_body">这台机器当前没有匹配的 Agent。</string>
     <string name="inbox_no_match_none_body">当前没有 Agent。</string>
+    <!-- 宽屏左栏：没有 Agent 时的一行提示 -->
+    <string name="inbox_queue_empty">没有需要处理的任务</string>
 
     <!-- 收件箱：首次使用引导 -->
     <string name="inbox_setup_title">把 Herdr 装进口袋</string>
-    <string name="inbox_setup_body">Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，值守页会列出每个 Agent</string>
+    <string name="inbox_setup_body">Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，任务页会列出每个 Agent</string>
     <string name="inbox_add_host">添加机器</string>
     <string name="inbox_copy_check_command">复制检查命令</string>
     <string name="inbox_check_command_hint">在主机上运行上面那条命令，应输出 herdr-api-bridge-v1。</string>
@@ -85,4 +87,6 @@
         <item quantity="one">%1$d 个分屏</item>
         <item quantity="other">%1$d 个分屏</item>
     </plurals>
-</resources>
+    <string name="inbox_block_agents">AGENT</string>
+    <string name="inbox_block_panes">分屏</string>
+        </resources>

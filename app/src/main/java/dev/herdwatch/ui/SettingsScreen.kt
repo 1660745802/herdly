@@ -7,6 +7,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -43,6 +44,7 @@ import dev.herdwatch.R
 import dev.herdwatch.data.AppPreferences
 import dev.herdwatch.data.LanguageMode
 import dev.herdwatch.data.ThemeMode
+import dev.herdwatch.data.UpdateChecker
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.design.DsElev
 import dev.herdwatch.ui.design.DsMotion
@@ -83,6 +85,10 @@ fun SettingsScreen(
     onFontSize: (Float) -> Unit = {},
     onResetFingerprints: () -> Unit = {},
     version: String = "",
+    update: UpdateUi = UpdateUi(),
+    onCheckUpdate: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
+    onOpenInstallPermission: () -> Unit = {},
 ) {
     var confirmReset by remember { mutableStateOf(false) }
     val colors = ds()
@@ -130,8 +136,20 @@ fun SettingsScreen(
             )
         }
 
+        // Updating lives here rather than behind a website link: the release page is a download
+        // button, and a phone that opens a browser to fetch an APK has already lost the user.
+        SettingsGroup(stringResource(R.string.settings_group_about)) {
+            UpdateRow(
+                version = version,
+                update = update,
+                onCheck = onCheckUpdate,
+                onInstall = onInstallUpdate,
+                onPermission = onOpenInstallPermission,
+            )
+        }
+
         Text(
-            "Herdly $version",
+            stringResource(R.string.settings_version_footnote, version),
             style = DsTypography.micro,
             color = colors.textFaint,
             modifier = Modifier.fillMaxWidth().padding(horizontal = DsSpace.xl, vertical = DsSpace.l),
@@ -395,6 +413,104 @@ private fun NeoChevron() {
         tint = ds().textSoft,
         contentDescription = null,
     )
+}
+
+/**
+ * The whole update flow in one row.
+ *
+ * States are ordered by what the user can do next, not by what the code is doing: nothing known yet
+ * offers 「检查」, a newer release offers the download, a download offers its percentage, and a
+ * finished download offers the installer (or the one-time permission it needs).
+ */
+@Composable
+private fun UpdateRow(
+    version: String,
+    update: UpdateUi,
+    onCheck: () -> Unit,
+    onInstall: () -> Unit,
+    onPermission: () -> Unit,
+) {
+    val colors = ds()
+    val newer = update.result as? UpdateChecker.Result.Newer
+    val current = update.result as? UpdateChecker.Result.Current
+    val failed = update.result as? UpdateChecker.Result.Failed
+    val downloading = update.downloading
+    Column(Modifier.fillMaxWidth().padding(vertical = DsSpace.m)) {
+        Text(
+            if (newer != null) {
+                stringResource(R.string.settings_update_available, newer.release.version)
+            } else {
+                stringResource(R.string.settings_update_title)
+            },
+            style = DsTypography.bodyStrong,
+            color = if (newer != null) colors.accent else colors.text,
+        )
+        val detail = when {
+            update.error != null -> update.error
+            update.installing -> stringResource(R.string.settings_update_installing)
+            downloading -> stringResource(R.string.settings_update_downloading, update.progress)
+            update.needsPermission -> stringResource(R.string.settings_update_permission)
+            update.readyVersion != null && newer != null ->
+                stringResource(R.string.settings_update_ready, newer.release.version)
+            newer != null -> newer.release.notes.lineSequence()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .take(3)
+                .joinToString(" ")
+
+            current != null -> stringResource(R.string.settings_update_current, current.version)
+            failed != null -> failureText(failed.reason)
+            update.checking -> stringResource(R.string.settings_update_checking)
+            else -> stringResource(R.string.settings_update_summary)
+        }
+        Text(
+            detail.orEmpty(),
+            style = DsTypography.caption,
+            color = if (failed != null || update.error != null) colors.danger else colors.textSoft,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (downloading) {
+            Spacer(Modifier.height(DsSpace.s))
+            NeoWell(Modifier.fillMaxWidth().height(6.dp), corner = DsRadius.pill) {
+                Box(
+                    Modifier.fillMaxWidth(update.progress / 100f).fillMaxSize()
+                        .background(colors.accent, RoundedCornerShape(DsRadius.pill)),
+                )
+            }
+        }
+        Spacer(Modifier.height(DsSpace.s))
+        Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+            when {
+                update.needsPermission -> NeoButton(
+                    label = stringResource(R.string.settings_update_permission_action),
+                    onClick = onPermission,
+                    tone = NeoButtonTone.Primary,
+                    compact = true,
+                )
+
+                newer != null || update.readyVersion != null -> NeoButton(
+                    label = if (update.readyVersion != null) {
+                        stringResource(R.string.settings_update_install)
+                    } else {
+                        stringResource(R.string.settings_update_download)
+                    },
+                    onClick = onInstall,
+                    tone = NeoButtonTone.Primary,
+                    enabled = !downloading && !update.installing && !update.checking,
+                    compact = true,
+                )
+
+                else -> NeoButton(
+                    label = stringResource(R.string.settings_update_check),
+                    onClick = onCheck,
+                    tone = NeoButtonTone.Quiet,
+                    enabled = !update.checking,
+                    compact = true,
+                )
+            }
+        }
+    }
 }
 
 @Composable

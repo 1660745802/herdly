@@ -9,7 +9,7 @@
     <string name="hosts_empty_title">添加第一台机器</string>
     <string name="hosts_empty_body">只需要 SSH 可达。终端随时可用；连接会话只是额外能力，需要主机上能运行 herdr remote-api-bridge。</string>
     <string name="hosts_empty_action">添加机器</string>
-    <string name="hosts_footer">没有通知、没有后台常驻：离开 App 就断开，回来先显示上次快照，再刷新。</string>
+    <string name="hosts_footer">添加机器后，Herdly 会通过常驻通知保持 SSH 连接；你可以随时回到这里管理连接。</string>
     <string name="hosts_open_terminal">打开终端</string>
     <string name="hosts_details">详情</string>
     <string name="hosts_state_connected">已连接</string>
@@ -51,4 +51,6 @@
     <string name="hosts_key_first_label">这台机器给出（%1$s）</string>
     <string name="hosts_key_first_warning">信任后这个指纹会被保存；以后它变了，连接会停下来等你再确认。</string>
     <string name="hosts_key_first_trust">核对无误，信任并连接</string>
+    <string name="hosts_route_primary">经主地址 %1$s</string>
+    <string name="hosts_route_fallback">经备用地址 %1$s</string>
 </resources>

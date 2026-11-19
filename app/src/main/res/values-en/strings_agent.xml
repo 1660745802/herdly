@@ -20,6 +20,12 @@
     <string name="agent_state_autoupdate_paused">Auto-update paused</string>
     <string name="agent_state_autoupdate_on">Auto-update on</string>
     <string name="agent_pause_talkback">Paused under TalkBack</string>
+    <string name="agent_send_blocked_connecting">Reconnecting — sends resume when it is back</string>
+    <string name="agent_send_blocked_offline">Host is offline. It reconnects on its own.</string>
+    <string name="agent_send_blocked_verify">Check the on-screen result before sending again</string>
+    <string name="agent_send_blocked_busy">The last message is still in flight</string>
+    <string name="agent_reading_older">Reading further back…</string>
+    <string name="agent_resume_updates">Resume updates</string>
 
     <!-- Agent detail: connection and evidence notices -->
     <string name="agent_host_disconnected">%1$s is not connected; the last screen and draft are kept.</string>
@@ -89,13 +95,13 @@
     <!-- Agent detail: back to bottom -->
     <string name="agent_back_to_bottom_new">New output · Back to bottom</string>
     <string name="agent_back_to_bottom">Back to bottom</string>
-    <string name="agent_screen_label">Screen</string>
     <string name="agent_layout_chat">Chat</string>
     <string name="agent_layout_terminal">Terminal</string>
     <string name="agent_role_user">You</string>
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">Tool</string>
     <string name="agent_role_approval">Decision</string>
+    <string name="agent_approval_below">Choose below</string>
     <string name="agent_role_system">Notice</string>
     <string name="agent_block_cut">start cut off</string>
     <string name="agent_input_placeholder">Type a command, Enter to run</string>
@@ -106,4 +112,6 @@
     <string name="agent_tool_lines">%1$s · %2$d lines</string>
     <string name="agent_role_thinking">Thinking</string>
     <string name="agent_thinking_lines">%1$s · %2$d lines</string>
+    <string name="agent_expand_block">Show full text</string>
+    <string name="agent_collapse_block">Collapse</string>
 </resources>

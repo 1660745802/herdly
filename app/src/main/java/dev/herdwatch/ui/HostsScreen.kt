@@ -79,7 +79,8 @@ fun HostsScreen(
     onTerminal: (String) -> Unit,
     onManage: (String) -> Unit,
     onOpenHelp: () -> Unit,
-    onTrustNewKey: (String) -> Unit,
+    // hostId to displayed fingerprint: the dialog's decision is only valid for the key it showed.
+    onTrustNewKey: (String, String) -> Unit,
 ) {
     var pendingDelete by remember { mutableStateOf<HostConfig?>(null) }
     var pendingTrust by remember { mutableStateOf<HostRuntime?>(null) }
@@ -155,7 +156,8 @@ fun HostsScreen(
                 pending = pending,
                 onDismiss = { pendingTrust = null },
                 onTrust = {
-                    onTrustNewKey(runtime.host.id)
+                    val shown = mismatch?.actual ?: pending?.fingerprint
+                    if (shown != null) onTrustNewKey(runtime.host.id, shown)
                     pendingTrust = null
                 },
             )
@@ -354,6 +356,25 @@ private fun HostCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // With a fallback address the primary one above is only half the story: say which
+            // route the live session took, so "home goes over Wi-Fi" is verifiable, not assumed.
+            val route = runtime.activeAddress
+            if (host.hasFallback && route != null) {
+                // Compare the rendered form: `HostEndpoint` drops `:22`, so "host" and
+                // "host:22" are the same route and must not be reported as the fallback.
+                val primary = host.endpoints.firstOrNull()?.toString()
+                Text(
+                    stringResource(
+                        if (route == primary) R.string.hosts_route_primary
+                        else R.string.hosts_route_fallback,
+                        route,
+                    ),
+                    style = DsTypography.caption,
+                    color = colors.textFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.height(DsSpace.s))
             val fadeInMs = motionMillis(180)
             val fadeOutMs = motionMillis(120)
@@ -451,10 +472,13 @@ private fun HostCard(
                         compact = true,
                         modifier = Modifier.weight(1f),
                     )
+                    // Ghost, not Quiet: Quiet paints a plate the same size as the primary button,
+                    // so the row read as two equal choices with a stray chevron beside them. The
+                    // sessions page is the secondary door and should look like one.
                     NeoButton(
                         label = stringResource(R.string.hosts_sessions),
                         onClick = onManage,
-                        tone = NeoButtonTone.Quiet,
+                        tone = NeoButtonTone.Ghost,
                         icon = NeoGlyph.Workspace,
                         compact = true,
                         modifier = Modifier.weight(1f),

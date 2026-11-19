@@ -77,6 +77,11 @@ class ShellSession(
     var fingerprint: String? = null
         private set
 
+    /** `host:port` the live shell is on; null until a connection succeeded. */
+    @Volatile
+    var activeAddress: String? = null
+        private set
+
     val isConnected: Boolean get() = !closed && channel?.isConnected == true
 
     suspend fun connect() = connectMutex.withLock {
@@ -176,39 +181,57 @@ class ShellSession(
                 passphrase,
             )
         }
-        val s = jsch.getSession(config.user, config.host, config.port)
-        s.setConfig(
-            "PreferredAuthentications",
-            if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey",
+        // One host, up to two addresses: the shell page uses the same fallback logic as the
+        // bridge, so a config that works for agents also works for a raw terminal. Only an
+        // address that never answered is skipped; a rejected key or password stops here.
+        var opened: Session? = null
+        var lastFailure: Exception? = null
+        for ((index, endpoint) in config.endpoints.withIndex()) {
+            lastSeenFingerprint = null
+            val candidate = jsch.getSession(config.user, endpoint.host, endpoint.port)
+            candidate.setConfig(
+                "PreferredAuthentications",
+                if (config.authType == AuthType.PASSWORD) "password,keyboard-interactive" else "publickey",
+            )
+            // Strict checking always runs inside the handshake. With no pin the repository rejects
+            // the key after recording its fingerprint, so credentials are never sent before
+            // confirmation.
+            candidate.setConfig("StrictHostKeyChecking", "yes")
+            // Match OpenSSH's preference so the fingerprint shown to the user is the one an
+            // administrator gets from ssh-keygen, not whichever curve JSch happens to like first.
+            candidate.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
+            candidate.serverAliveInterval = 30_000
+            candidate.serverAliveCountMax = 3
+            if (config.authType == AuthType.PASSWORD) candidate.setPassword(config.secret)
+            candidate.timeout = SOCKET_TIMEOUT_MS
+            synchronized(stateGate) {
+                check(!closed) { Str.get(R.string.ssh_session_closed) }
+                session = candidate
+            }
+            try {
+                candidate.connect(CONNECT_TIMEOUT_MS)
+            } catch (e: Exception) {
+                forget(candidate)
+                runCatching { candidate.disconnect() }
+                val observed = lastSeenFingerprint
+                if (pinned != null && observed != null && observed != pinned) {
+                    throw HostKeyMismatchException(pinned, observed)
+                }
+                if (pinned == null && observed != null) {
+                    throw UnknownHostKeyException(observed, lastSeenType ?: candidate.hostKey?.type)
+                }
+                lastFailure = e
+                if (index < config.endpoints.lastIndex && e.isUnreachableAddress()) continue
+                throw ShellConnectException(Str.get(R.string.ssh_connect_failed, endpoint.toString(), detail(e)), e)
+            }
+            activeAddress = endpoint.toString()
+            opened = candidate
+            break
+        }
+        val s = opened ?: throw ShellConnectException(
+            Str.get(R.string.ssh_connect_failed, config.host, lastFailure?.let(::detail).orEmpty()),
+            lastFailure,
         )
-        // Strict checking always runs inside the handshake. With no pin the repository rejects the
-        // key after recording its fingerprint, so credentials are never sent before confirmation.
-        s.setConfig("StrictHostKeyChecking", "yes")
-        // Match OpenSSH's preference so the fingerprint shown to the user is the one an
-        // administrator gets from ssh-keygen, not whichever curve JSch happens to like first.
-        s.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
-        s.serverAliveInterval = 30_000
-        s.serverAliveCountMax = 3
-        if (config.authType == AuthType.PASSWORD) s.setPassword(config.secret)
-        s.timeout = SOCKET_TIMEOUT_MS
-        synchronized(stateGate) {
-            check(!closed) { Str.get(R.string.ssh_session_closed) }
-            session = s
-        }
-        try {
-            s.connect(CONNECT_TIMEOUT_MS)
-        } catch (e: Exception) {
-            forget(s)
-            runCatching { s.disconnect() }
-            val observed = lastSeenFingerprint
-            if (pinned != null && observed != null && observed != pinned) {
-                throw HostKeyMismatchException(pinned, observed)
-            }
-            if (pinned == null && observed != null) {
-                throw UnknownHostKeyException(observed, lastSeenType ?: s.hostKey?.type)
-            }
-            throw ShellConnectException(Str.get(R.string.ssh_connect_failed, config.host, detail(e)), e)
-        }
         val actual = fingerprintOf(s)
         if (pinned != null && pinned != actual) {
             forget(s)

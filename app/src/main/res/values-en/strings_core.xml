@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_cancel">Cancel</string>
+    <string name="common_create">Create</string>
     <string name="common_save">Save</string>
     <string name="common_remove">Remove</string>
     <string name="common_close">Close</string>
@@ -20,5 +21,5 @@
     <string name="status_review">To review</string>
     <string name="status_idle">Idle</string>
     <string name="status_unknown">Unknown</string>
-    <string name="mode_shell_tag">SHELL</string>
+    <string name="mode_shell_tag">SHELL · TERMINAL</string>
 </resources>

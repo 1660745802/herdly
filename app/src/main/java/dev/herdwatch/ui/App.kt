@@ -28,7 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import dev.herdwatch.ConnectionService
 import dev.herdwatch.R
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,6 +52,17 @@ fun HerdwatchRoot(vm: AppViewModel) {
     val version = vm.version
     val snackbar = remember { SnackbarHostState() }
     val processLifecycle = ProcessLifecycleOwner.get()
+    val context = LocalContext.current
+
+    // The keep-alive service starts while the app is visible (starting a foreground service from
+    // the background is restricted on Android 12+) and then survives `ON_STOP`, which is exactly
+    // when the connection used to be dropped. No hosts, no reason to hold the process.
+    val hasHosts = ui.repo.hosts.isNotEmpty()
+    LaunchedEffect(hasHosts) {
+        runCatching {
+            if (hasHosts) ConnectionService.start(context) else ConnectionService.stop(context)
+        }
+    }
 
     DisposableEffect(processLifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -221,8 +234,8 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                     runtime = runtime,
                                     agents = ui.repo.agents,
                                     onBack = vm::back,
-                                    onCreateWorkspace = { vm.createWorkspace(runtime.host.id) },
-                                    onCreateTab = { ws -> vm.createTab(runtime.host.id, ws) },
+                                    onCreateWorkspace = { cwd -> vm.createWorkspace(runtime.host.id, cwd) },
+                                    onCreateTab = { ws, cwd -> vm.createTab(runtime.host.id, ws, cwd) },
                                     onSplit = { pane, dir -> vm.splitPane(runtime.host.id, pane, dir) },
                                     onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
                                     onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
@@ -243,6 +256,10 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onFontSize = vm::terminalFontSize,
                             onResetFingerprints = vm::resetFingerprints,
                             version = version,
+                            update = update,
+                            onCheckUpdate = vm::checkForUpdate,
+                            onInstallUpdate = vm::installUpdate,
+                            onOpenInstallPermission = vm::retryInstall,
                         )
                         is Screen.Detail -> AgentScreen(
                             detail = ui.detail,

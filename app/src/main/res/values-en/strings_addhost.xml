@@ -15,7 +15,7 @@
     <string name="addhost_expanded">Expanded</string>
     <string name="addhost_collapsed">Collapsed</string>
     <string name="addhost_advanced_hide">Hide advanced settings</string>
-    <string name="addhost_advanced_show">Advanced: session and command path</string>
+    <string name="addhost_advanced_show">Advanced: fallback address and command</string>
     <string name="addhost_session_optional">Herdr session (optional)</string>
     <string name="addhost_session_placeholder">Default session</string>
     <string name="addhost_herdr_command">Herdr command</string>
@@ -29,4 +29,8 @@
     <string name="addhost_err_key_required">Private key cannot be empty</string>
     <string name="addhost_err_port_range">Port must be 1–65535</string>
     <string name="addhost_err_herdr_required">Enter the herdr command or an absolute path</string>
+    <string name="addhost_fallback_host_optional">Fallback address (optional)</string>
+    <string name="addhost_fallback_host_placeholder">Public IP or domain</string>
+    <string name="addhost_fallback_hint">A second route to the same machine: the address above is tried first, this one only when it cannot be reached. Credentials and the key pin are shared — LAN at home, public elsewhere.</string>
+    <string name="addhost_err_fallback_same">The fallback address is identical to the primary one</string>
 </resources>

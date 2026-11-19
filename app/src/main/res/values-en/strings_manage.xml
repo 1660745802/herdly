@@ -4,6 +4,12 @@
     <string name="manage_create_title">Create</string>
     <string name="manage_new_workspace">Workspace</string>
     <string name="manage_new_tab">Tab</string>
+    <string name="manage_create_workspace_title">New workspace</string>
+    <string name="manage_create_tab_title">New tab</string>
+    <string name="manage_create_folder">Directory (optional)</string>
+    <string name="manage_create_folder_hint">An absolute path starts there; leave it empty to use Herdr\'s default directory.</string>
+    <string name="manage_create_folder_recent">Recently used</string>
+    <string name="manage_pick_workspace">Create inside</string>
     <string name="manage_connect_first">Connect to this machine before creating or editing sessions.</string>
     <string name="manage_empty">No workspaces yet. Create one to start.</string>
     <string name="manage_empty_offline">Not connected. Sessions appear once the machine is reachable.</string>
@@ -29,4 +35,5 @@
         <item quantity="one">%1$d pane</item>
         <item quantity="other">%1$d panes</item>
     </plurals>
+    <string name="manage_create_folder_placeholder">/mnt/Data/your-project</string>
 </resources>

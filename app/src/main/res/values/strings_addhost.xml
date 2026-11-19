@@ -15,7 +15,7 @@
     <string name="addhost_expanded">已展开</string>
     <string name="addhost_collapsed">已收起</string>
     <string name="addhost_advanced_hide">收起高级设置</string>
-    <string name="addhost_advanced_show">高级：session 与命令路径</string>
+    <string name="addhost_advanced_show">高级：备用地址与命令</string>
     <string name="addhost_session_optional">Herdr session（可空）</string>
     <string name="addhost_session_placeholder">默认 session</string>
     <string name="addhost_herdr_command">herdr 命令</string>
@@ -29,4 +29,8 @@
     <string name="addhost_err_key_required">私钥不能为空</string>
     <string name="addhost_err_port_range">端口须为 1–65535</string>
     <string name="addhost_err_herdr_required">请填写 herdr 命令或绝对路径</string>
+    <string name="addhost_fallback_host_optional">备用地址（可选）</string>
+    <string name="addhost_fallback_host_placeholder">公网 IP 或域名</string>
+    <string name="addhost_fallback_hint">同一个用户的第二台入口：优先用上面的地址，连不上才换这个。认证和指纹共用，适合家里走局域网、外面走公网。</string>
+    <string name="addhost_err_fallback_same">备用地址和主地址一样，不用填</string>
 </resources>

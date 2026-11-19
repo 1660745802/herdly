@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_channel_name">连接保活</string>
+    <string name="service_channel_desc">退到后台后继续保持 SSH 连接并轮询任务状态。</string>
+    <string name="service_title">Herdly 正在保持连接</string>
+    <plurals name="service_summary_hosts">
+        <item quantity="other">%1$d 台机器已连接</item>
+    </plurals>
+    <plurals name="service_summary_waiting">
+        <item quantity="other">%1$d 项待处理</item>
+    </plurals>
+    <string name="service_summary_idle">没有待处理的任务</string>
+    <string name="service_summary_offline">所有机器离线，正在重试</string>
+</resources>

@@ -2,7 +2,7 @@
 
 ## 环境
 
-- JDK 21。
+- JDK 17 或 21（字节码目标 17）。
 - Android SDK Platform 35、Build Tools 35.0.0、Platform Tools。
 - Python 3.10+ 与 Paramiko，用于模拟 SSH 和实际 JSch 传输测试。
 - 设备或模拟器：Android API 26+。
@@ -26,6 +26,8 @@ adb install -r app/build/outputs/apk/uxTest/app-uxTest.apk
 ```
 
 `debug` 包名为 `dev.herdwatch`；`uxTest` 为 `dev.herdwatch.uxtest`。这两种构建使用开发签名。正式分发需要自行配置发布签名，签名文件及密码不得提交。
+
+已安装正式版时替换安装调试包会失败（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`）：调试签名与发布签名不同。要么先 `adb uninstall dev.herdwatch`（会清掉本机主机与凭据），要么只装 `uxTest` 包名测试。
 
 ## 完整检查
 
@@ -52,6 +54,48 @@ $env:HERDR_TEST_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
 JVM 测试覆盖解析、协议、审批证据、操作状态、存储、仓库生命周期、阅读与连续使用流程。`HerdrClientTransportTest` 使用真实 JSch 连接本地 Paramiko 子进程，测试超时、取消、丢失回包、认证与主机指纹。
 
 找不到可用 Python / Paramiko 时，SSH 传输测试会明确跳过；绿色构建本身不能证明这部分通过。完整检查应确认 XML 报告中没有跳过。报告位于 `app/build/reports/tests/testDebugUnitTest/`，Lint 报告位于 `app/build/reports/`。
+
+## 发布
+
+发布签名从仓库根目录的 `keystore.properties` 读取（不提交）：
+
+```properties
+storeFile=signing/release.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+
+`storeFile` 相对仓库根目录。缺这个文件时 `release` 变体不带签名配置，`assembleRelease` 的产物不能用于分发。
+
+发版步骤：
+
+1. 改 `app/build.gradle.kts` 的 `versionCode`（必须递增）与 `versionName`。
+2. `./gradlew :app:test :app:lintDebug :app:assembleRelease`。
+3. 在 GitHub 创建 tag 与 Release，**必须挂一个 `.apk` 附件**：应用内更新只认 release 里第一个以 `.apk` 结尾的下载地址，没有附件时设置页会明确报“这个版本没有安装包”，不会下载网页。
+4. 用已安装的旧版打开设置 → 关于 → 检查更新，确认版本号、更新说明、下载进度、安装器交接都正常。
+
+应用内更新有两条硬约束：新包的包名必须是 `dev.herdwatch`，`versionCode` 必须大于已安装版本，否则 `UpdateInstaller` 在交给系统前就拒绝（`update_bad_apk` / `update_older_apk`）。用户首次使用需在系统设置里允许 Herdly 安装应用（Android 8+），之后直接进安装器。
+
+## 截图
+
+`assets/screens/` 里的图只用本地夹具拍，不出现真实主机、路径或终端输出：
+
+```sh
+.venv/bin/python tools/dev_fake_ssh.py --canned
+adb reverse tcp:2222 tcp:2222
+./gradlew :app:assembleUxTest && adb install -r app/build/outputs/apk/uxTest/app-uxTest.apk
+```
+
+在测试版里添加主机 `127.0.0.1:2222`（`root` / `secret`），确认指纹，然后：
+
+```sh
+adb exec-out screencap -p > /tmp/inbox.png
+```
+
+拍完停掉夹具并 `adb reverse --remove tcp:2222`。`uxTest` 包名独立，不会覆盖正在用的 debug 配置。
+
+注意：密码框会唤起 MIUI/EMUI 的安全键盘，它的窗口是 `SECURE` 的，期间 `screencap` 是全黑。先关键盘再截图；`uiautomator dump` 不受影响。
 
 ## 本地模拟主机
 

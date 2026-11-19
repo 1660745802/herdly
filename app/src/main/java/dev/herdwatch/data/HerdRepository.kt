@@ -62,6 +62,8 @@ class HerdRepository internal constructor(
     private val dispatcher: CoroutineDispatcher,
     private val connectTimeoutMillis: Long = 25_000,
     private val pollIntervalMillis: Long = 5_000,
+    // Background polling is still polling, just cheaper. Connections stay up; the cadence drops.
+    private val backgroundPollIntervalMillis: Long = 20_000,
 ) {
     constructor(store: HostStore) : this(
         store, ::HerdrClient, CoroutineScope(SupervisorJob() + Dispatchers.IO), Dispatchers.IO,
@@ -80,6 +82,7 @@ class HerdRepository internal constructor(
     private val networkSlots = Semaphore(4)
     private var generation = 0L
     private var pollJob: Job? = null
+    @Volatile private var visible = true
     private var storedHosts = store.load()
     private val cached = storedHosts.flatMap { host ->
         store.loadAgents(host.id).filter { it.hostId == host.id }.map { it.copy(hostLabel = host.label) }
@@ -109,6 +112,15 @@ class HerdRepository internal constructor(
     }
 
     suspend fun bootstrap() = connectAll()
+
+    /**
+     * Whether the UI is on screen. Unlike [setForeground] this does not tear anything down: the
+     * keep-alive service owns the process precisely so a switch to another app stops costing a
+     * reconnect. Background work runs at a slower cadence instead of stopping.
+     */
+    fun setVisible(visible: Boolean) {
+        this.visible = visible
+    }
 
     fun setForeground(foreground: Boolean) {
         val close = synchronized(gate) {
@@ -356,9 +368,10 @@ class HerdRepository internal constructor(
     } catch (e: CancellationException) { throw e }
       catch (e: Exception) { Result.failure(e) }
 
-    suspend fun createWorkspace(hostId: String, label: String?) = mutate(hostId) { it.createWorkspace(label) }
-    suspend fun createTab(hostId: String, workspaceId: String, label: String?) =
-        mutate(hostId) { it.createTab(workspaceId, label) }
+    suspend fun createWorkspace(hostId: String, label: String?, cwd: String? = null) =
+        mutate(hostId) { it.createWorkspace(label, cwd)?.paneId }
+    suspend fun createTab(hostId: String, workspaceId: String, label: String?, cwd: String? = null) =
+        mutate(hostId) { it.createTab(workspaceId, label, cwd)?.paneId }
     suspend fun splitPane(hostId: String, paneId: String, direction: String) =
         mutate(hostId) { it.splitPane(paneId, direction) }
     suspend fun closePane(hostId: String, paneId: String) = mutate(hostId) { it.closePane(paneId) }
@@ -374,9 +387,27 @@ class HerdRepository internal constructor(
 
     suspend fun startInNewTab(hostId: String, workspaceId: String?, kind: String, name: String, args: List<String>): Result<Unit> = accepted {
         mutate(hostId) { client ->
-            val paneId = (if (workspaceId == null) client.createWorkspace(null) else client.createTab(workspaceId, null))
+            val newWorkspace = workspaceId == null
+            val created = (if (newWorkspace) client.createWorkspace(null) else client.createTab(workspaceId, null))
                 ?: throw IllegalStateException(Str.get(R.string.repo_no_new_pane))
-            client.startAgent(paneId, kind, name, args)
+            try {
+                client.startAgent(created.paneId, kind, name, args)
+            } catch (e: HerdrRpcException) {
+                // The server answered "no" to the start, so the container we just created is empty
+                // and retrying would pile up duplicates. Undo it — for a new workspace that means
+                // the workspace, not its root tab, or an empty workspace would be left behind.
+                // A timeout or dropped transport is different: the start may already have happened,
+                // and closing would kill it.
+                val containerId = if (newWorkspace) created.workspaceId else created.tabId
+                try {
+                    if (containerId != null) {
+                        if (newWorkspace) client.closeWorkspace(containerId) else client.closeTab(containerId)
+                    }
+                } catch (t: Exception) {
+                    e.addSuppressed(t)
+                }
+                throw e
+            }
         }
     }
 
@@ -466,14 +497,26 @@ class HerdRepository internal constructor(
         }
     }
 
-    fun trustNewFingerprint(hostId: String) {
-        val fingerprint = synchronized(gate) {
+    /**
+     * Pins [fingerprint] for [hostId] — but only while it is still the key awaiting confirmation.
+     *
+     * The confirmation dialog renders a snapshot of the pending key, and the background poll keeps
+     * reconnecting every few seconds. Without this check a dialog showing key A could be confirmed
+     * after a retry had already observed key B, silently pinning B — the exact key the user never
+     * looked at. Comparing against the value captured when the dialog opened makes the confirmation
+     * all-or-nothing: if the remote changed in between, the user is asked again.
+     */
+    fun trustNewFingerprint(hostId: String, fingerprint: String) {
+        val pending = synchronized(gate) {
             mismatches[hostId]?.actual ?: unknownKeys[hostId]?.fingerprint
         } ?: throw IllegalStateException(Str.get(R.string.repo_no_new_fingerprint))
+        if (!pending.equals(fingerprint, ignoreCase = true)) {
+            throw IllegalStateException(Str.get(R.string.repo_stale_fingerprint))
+        }
         // Store the decision, then invalidate the lease that produced it: updateHost clears the
         // pending key and closes the refused client, so the reconnect below is built from the
         // config that now carries the pin instead of re-asking for the same confirmation.
-        updateFingerprint(hostId, fingerprint)
+        updateFingerprint(hostId, pending)
         synchronized(gate) { unknownKeys.remove(hostId) }
         scope.launch { connectHost(hostId) }
     }
@@ -498,7 +541,7 @@ class HerdRepository internal constructor(
                 conn = ConnState.Connected,
                 agentCount = incoming.size,
                 waitingCount = incoming.count { it.status == AgentStatus.WAITING || it.status == AgentStatus.UNKNOWN },
-                lastSyncAt = now, fingerprint = fingerprint,
+                lastSyncAt = now, fingerprint = fingerprint, activeAddress = lease.client.activeAddress,
                 structure = snapshot.structure,
                 keyMismatch = null,
                 pendingKey = null,
@@ -515,7 +558,7 @@ class HerdRepository internal constructor(
         val epoch = generation
         pollJob = scope.launch {
             while (isActive && synchronized(gate) { generation == epoch && _state.value.foreground }) {
-                delay(pollIntervalMillis)
+                delay(if (visible) pollIntervalMillis else backgroundPollIntervalMillis)
                 refreshAll(silent = true)
             }
         }
