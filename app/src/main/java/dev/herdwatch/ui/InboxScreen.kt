@@ -209,7 +209,7 @@ fun InboxScreen(
         if (ui.repo.hosts.size > 1) {
             HostStrip(
                 hosts = ui.repo.hosts,
-                agents = agents,
+                agents = ui.repo.agents.markSeen(seen),
                 selectedHostId = selectedHostId,
                 onSelectHost = { selectedHostId = it },
             )
@@ -1201,8 +1201,12 @@ private fun HostStrip(
             ) { onSelectHost(null) }
         }
         items(hosts, key = { it.host.id }) { host ->
-            val count = agents.count { it.hostId == host.host.id }
-            val waiting = agents.count { it.hostId == host.host.id && it.status == AgentStatus.WAITING }
+            val hostAgents = agents.filter { it.hostId == host.host.id }
+            val connected = host.conn is ConnState.Connected
+            // Cached agents describe the last successful snapshot. They are useful once the host
+            // reconnects, but must not override an offline/connecting connection state.
+            val count = if (connected) hostAgents.size else 0
+            val waiting = if (connected) hostAgents.count { it.status == AgentStatus.WAITING } else 0
             val status = when {
                 waiting > 0 -> pluralStringResource(R.plurals.inbox_host_waiting, waiting, waiting)
                 host.conn is ConnState.Connected -> stringResource(R.string.inbox_host_online)

@@ -5,6 +5,7 @@ import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
+import com.jcraft.jsch.SocketFactory
 import com.jcraft.jsch.UserInfo
 import dev.herdwatch.R
 import dev.herdwatch.i18n.Str
@@ -20,6 +21,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.MessageDigest
 import java.util.Base64
 import kotlin.coroutines.EmptyCoroutineContext
@@ -72,6 +75,14 @@ class ShellSession(
 
     @Volatile
     private var session: Session? = null
+
+    /** Session whose blocking handshake has started but is not yet safe to publish as connected. */
+    @Volatile
+    private var connectingSession: Session? = null
+
+    /** Raw TCP socket while JSch is still below its connected state. */
+    @Volatile
+    private var connectingSocket: Socket? = null
 
     @Volatile
     private var channel: ChannelShell? = null
@@ -152,17 +163,21 @@ class ShellSession(
     }
 
     override fun close() {
-        val (ch, s) = synchronized(stateGate) {
+        val (ch, resources) = synchronized(stateGate) {
             if (closed) return
             closed = true
             val currentChannel = channel
-            val currentSession = session
+            val currentSessions = listOfNotNull(session, connectingSession).distinct()
+            val currentSocket = connectingSocket
             channel = null
             session = null
-            currentChannel to currentSession
+            connectingSession = null
+            connectingSocket = null
+            currentChannel to (currentSessions to currentSocket)
         }
         runCatching { ch?.disconnect() }
-        runCatching { s?.disconnect() }
+        resources.first.forEach { candidate -> runCatching { candidate.disconnect() } }
+        runCatching { resources.second?.close() }
     }
 
     // ------------------------------------------------------------------ internals
@@ -223,16 +238,22 @@ class ShellSession(
                 candidate.userInfo = passwordUserInfo(config.secret)
             }
             candidate.timeout = SOCKET_TIMEOUT_MS
-            synchronized(stateGate) { check(!closed) { Str.get(R.string.ssh_session_closed) } }
+            candidate.setSocketFactory(cancellableSocketFactory())
+            synchronized(stateGate) {
+                check(!closed) { Str.get(R.string.ssh_session_closed) }
+                connectingSession = candidate
+            }
             try {
                 candidate.connect(CONNECT_TIMEOUT_MS)
-                // Publishing before connect() left the candidate unreachable to close(): a page
-                // exit during the handshake orphaned the socket.
                 synchronized(stateGate) {
                     if (closed) {
+                        if (connectingSession === candidate) connectingSession = null
+                        connectingSocket = null
                         runCatching { candidate.disconnect() }
                         throw ShellConnectException(Str.get(R.string.ssh_session_closed), null)
                     }
+                    if (connectingSession === candidate) connectingSession = null
+                    connectingSocket = null
                     session = candidate
                 }
             } catch (e: Exception) {
@@ -309,8 +330,35 @@ class ShellSession(
         }
     }
 
+    /** Makes TCP establishment cancellable. JSch's Session.disconnect() does nothing until its
+     * internal connected flag is set, so cancellation must also close this lower-level socket. */
+    private fun cancellableSocketFactory(): SocketFactory = object : SocketFactory {
+        override fun createSocket(host: String, port: Int): Socket {
+            val socket = Socket()
+            synchronized(stateGate) {
+                check(!closed) { Str.get(R.string.ssh_session_closed) }
+                connectingSocket = socket
+            }
+            try {
+                socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                return socket
+            } catch (t: Throwable) {
+                synchronized(stateGate) { if (connectingSocket === socket) connectingSocket = null }
+                runCatching { socket.close() }
+                throw t
+            }
+        }
+
+        override fun getInputStream(socket: Socket) = socket.getInputStream()
+        override fun getOutputStream(socket: Socket) = socket.getOutputStream()
+    }
+
     private fun forget(s: Session) {
-        synchronized(stateGate) { if (session === s) session = null }
+        synchronized(stateGate) {
+            if (session === s) session = null
+            if (connectingSession === s) connectingSession = null
+            connectingSocket = null
+        }
     }
 
     private fun pinningRepository(pinned: String?): HostKeyRepository = object : HostKeyRepository {

@@ -322,6 +322,12 @@ class AppViewModel(
 
     fun onForeground() {
         foreground = true
+        // Backgrounding clears both fields so alerts remain eligible while another app is in
+        // front. Restore the detail atomically enough for the service's next state emission:
+        // otherwise the agent still visible after resume is treated as unwatched.
+        val current = _ui.value
+        AppPresence.detailKey = (current.screen as? Screen.Detail)?.agentKey
+            ?.takeIf { current.detail.agent?.key == it }
         AppPresence.foreground = true
         // The system installer is another app's screen: when we come back and the version is
         // unchanged, the user cancelled or it failed. Without this the row said "Installing…"

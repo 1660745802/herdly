@@ -61,6 +61,7 @@ class UpdateChecker(
     companion object {
         const val RELEASES_API = "https://api.github.com/repos/1660745802/herdly/releases/latest"
         private const val TIMEOUT_MS = 12_000
+        private const val MAX_RELEASE_BYTES = 1024 * 1024
 
         /**
          * Fetches the latest release document. Uses the platform HTTP stack so proxied or
@@ -79,7 +80,21 @@ class UpdateChecker(
                 if (code == HttpURLConnection.HTTP_NOT_FOUND) throw IOException("no release")
                 if (code == 403) throw IOException("rate limited")
                 if (code !in 200..299) throw IOException("http $code")
-                connection.inputStream.bufferedReader().use { it.readText() }
+                val declared = connection.contentLengthLong
+                if (declared > MAX_RELEASE_BYTES) throw IOException("release metadata too large")
+                connection.inputStream.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8 * 1024)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > MAX_RELEASE_BYTES) throw IOException("release metadata too large")
+                        output.write(buffer, 0, read)
+                    }
+                    output.toString(Charsets.UTF_8.name())
+                }
             } finally {
                 connection.disconnect()
             }

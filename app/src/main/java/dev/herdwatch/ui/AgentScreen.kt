@@ -378,7 +378,7 @@ fun AgentScreen(
                 }
                 // Terminal mode hides the layout switch to give the grid its full band, so the way
                 // back to the conversation has to exist somewhere the user will look for it.
-                if (!showChat && !paneOnly && transcript.reliable) {
+                if (!showChat && !paneOnly) {
                     NeoMenuItem(
                         label = stringResource(R.string.agent_menu_chat_view),
                         icon = NeoGlyph.Tray,
@@ -1402,7 +1402,10 @@ private fun SelectionSheet(
                 // about, and selecting it by hand on a phone is not a reasonable price.
                 val links = remember(text) { urlsIn(text) }
                 if (links.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().padding(top = DsSpace.xs), horizontalArrangement = Arrangement.spacedBy(DsSpace.xs)) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = DsSpace.xs),
+                        verticalArrangement = Arrangement.spacedBy(DsSpace.xs),
+                    ) {
                         links.forEach { link ->
                             NeoButton(
                                 label = link,
@@ -1410,6 +1413,7 @@ private fun SelectionSheet(
                                 tone = NeoButtonTone.Quiet,
                                 compact = true,
                                 icon = NeoGlyph.Link,
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }

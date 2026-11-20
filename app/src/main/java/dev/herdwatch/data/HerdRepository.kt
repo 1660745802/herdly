@@ -380,10 +380,6 @@ class HerdRepository internal constructor(
                 if (!acceptedMutation) synchronized(gate) { check(current(lease)) { Str.get(R.string.repo_connection_stale) } }
                 result
             }
-            // A cancelled request is not a broken connection. Superseding a read (a newer poll,
-            // a history fetch, a page leave) used to close the shared client and mark the host
-            // failed, which is why scrolling for history looked like the machine had dropped.
-            catch (e: CancellationException) { throw e }
             catch (e: TimeoutCancellationException) {
                 if (!failFast) {
                     // Reading further back is a guess about how much the host can serve. When the
@@ -393,6 +389,10 @@ class HerdRepository internal constructor(
                 }
                 fail(lease, e); throw e
             }
+            // A cancelled request is not a broken connection. Superseding a read (a newer poll,
+            // a history fetch, a page leave) used to close the shared client and mark the host
+            // failed, which is why scrolling for history looked like the machine had dropped.
+            catch (e: CancellationException) { throw e }
             catch (e: Exception) { fail(lease, e); throw e }
         }
     }

@@ -2,11 +2,30 @@ package dev.herdwatch.ui
 
 import androidx.compose.ui.graphics.Color
 import dev.herdwatch.term.VtRun
+import dev.herdwatch.term.VtSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TerminalScreenTest {
+    @Test
+    fun `terminal focus row includes leading scrollback`() {
+        val snapshot = VtSnapshot(
+            cols = 80,
+            rows = 24,
+            revision = 1,
+            cursorRow = 7,
+            cursorCol = 0,
+            cursorVisible = true,
+            lines = emptyList(),
+            scrollbackCount = 120,
+            alternateScreen = false,
+            applicationCursorKeys = false,
+        )
+        assertEquals(127, terminalFocusRow(snapshot, fullScreen = false))
+        assertEquals(0, terminalFocusRow(snapshot, fullScreen = true))
+    }
+
     @Test
     fun `arrow keys follow application cursor mode`() {
         "ABCD".forEach { final ->

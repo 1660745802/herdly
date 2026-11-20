@@ -13,6 +13,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.os.Build
 import android.os.IBinder
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -77,6 +78,9 @@ class ConnectionService : Service() {
         )
         if (watcher == null) {
             watcher = scope.launch {
+                // START_STICKY may recreate only the service in a fresh process. In that path no
+                // Activity/ViewModel exists to bootstrap the application-scoped repository.
+                repository.bootstrap()
                 repository.state.collect { state ->
                     // Re-posting the same text every five seconds made the shade flicker on some
                     // OEMs and woke the notification pipeline for nothing. Post on change only.
@@ -188,11 +192,17 @@ class ConnectionService : Service() {
         }
     }
 
-    /** One alert per agent, so two agents needing a decision do not overwrite each other. */
+    /** One alert per agent. The tag is the stable identity; unlike a truncated integer hash it
+     * cannot make two simultaneous agents replace each other's notification. */
     @SuppressLint("MissingPermission")
     private fun postAlert(alert: AttentionAlerts.Alert) {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            data = Uri.Builder()
+                .scheme("herdly")
+                .authority("agent")
+                .appendPath(alert.agentKey)
+                .build()
             putExtra(EXTRA_PANE, alert.agentKey)
         }
         val content = PendingIntent.getActivity(
@@ -212,7 +222,11 @@ class ConnectionService : Service() {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        NotificationManagerCompat.from(this).notify(ALERT_BASE_ID + (alert.agentKey.hashCode() and 0xFF), notification)
+        NotificationManagerCompat.from(this).notify(
+            alert.agentKey,
+            ALERT_BASE_ID,
+            notification,
+        )
     }
 
     private fun build(summary: String): Notification {

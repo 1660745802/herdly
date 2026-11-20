@@ -25,6 +25,7 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     var onConnect: suspend () -> Unit = {}
     var onSnapshot: suspend () -> Snapshot = { initialSnapshot }
     var onStartAgent: suspend () -> Unit = {}
+    var onReadPane: suspend () -> PaneText = { PaneText("", null, false) }
     /** Workspaces/tabs handed back by the fake create calls, and what cleanup closed. */
     var created = HostConnection.PaneCreated("root", tabId = "tab-1", workspaceId = "ws-1")
     var onCreate: suspend () -> Unit = {}
@@ -48,7 +49,7 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
 
     // Unexpected RPCs fail loudly so tests cannot pass by silently accepting the wrong operation.
     override suspend fun explain(target: String): JsonObject = unexpected()
-    override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = unexpected()
+    override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = onReadPane()
     override suspend fun sendKeys(paneId: String, keys: List<String>): Unit = unexpected()
     override suspend fun sendInput(paneId: String, text: String?, keys: List<String>): Unit = unexpected()
     override suspend fun createWorkspace(label: String?, cwd: String?): HostConnection.PaneCreated {

@@ -797,7 +797,8 @@ private fun TerminalGrid(
         // rows are padding: scrolling to the bottom of the buffer hides a prompt that sits at the
         // top of a mostly empty screen. The cursor is where the shell is attending; below it there
         // is nothing to read.
-        val focusRow = if (fullScreen) 0 else snapshot.cursorRow.coerceIn(0, visibleLast.coerceAtLeast(0))
+        val focusRow = terminalFocusRow(snapshot, fullScreen)
+            .coerceIn(0, visibleLast.coerceAtLeast(0))
         val bottomTarget = (focusRow - rowsInView + 1).coerceAtLeast(0)
         LaunchedEffect(snapshot.revision, stickToBottom, fullScreen, rowsInView) {
             if (fullScreen) {
@@ -1167,6 +1168,9 @@ private data class TerminalKey(
 )
 
 /** DECCKM switches cursor keys from CSI to SS3 sequences. */
+internal fun terminalFocusRow(snapshot: VtSnapshot, fullScreen: Boolean): Int =
+    if (fullScreen) 0 else snapshot.scrollbackCount + snapshot.cursorRow
+
 internal fun arrowKeySequence(final: Char, applicationCursorKeys: Boolean): String {
     require(final in "ABCD") { "unsupported cursor key: $final" }
     return if (applicationCursorKeys) "\u001bO$final" else "\u001b[$final"

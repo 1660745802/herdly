@@ -95,6 +95,7 @@ class AndroidUpdateInstaller(private val context: Context) : UpdateInstaller {
                 val code = connection.responseCode
                 if (code !in 200..299) throw IOException("http $code")
                 val total = connection.contentLengthLong
+                if (total > MAX_APK_BYTES) throw IOException("download too large")
                 var written = 0L
                 var lastPercent = -1
                 connection.inputStream.use { input ->
@@ -103,8 +104,9 @@ class AndroidUpdateInstaller(private val context: Context) : UpdateInstaller {
                         while (true) {
                             val read = input.read(buffer)
                             if (read < 0) break
-                            output.write(buffer, 0, read)
                             written += read
+                            if (written > MAX_APK_BYTES) throw IOException("download too large")
+                            output.write(buffer, 0, read)
                             if (total > 0) {
                                 val percent = ((written * 100) / total).toInt().coerceIn(0, 100)
                                 if (percent != lastPercent) {
@@ -220,6 +222,7 @@ class AndroidUpdateInstaller(private val context: Context) : UpdateInstaller {
     private companion object {
         const val CONNECT_TIMEOUT_MS = 20_000
         const val READ_TIMEOUT_MS = 30_000
+        const val MAX_APK_BYTES = 200L * 1024 * 1024
         const val APK_MIME = "application/vnd.android.package-archive"
     }
 }

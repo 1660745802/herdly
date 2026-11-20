@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -190,6 +191,26 @@ class HerdRepositoryTest {
         assertEquals(1, client.mutationCalls)
         runCurrent()
         assertTrue(repo.isHostReady(host.id))
+    }
+
+    @Test fun `ordinary read timeout invalidates connection but history timeout preserves it`() = runTest {
+        suspend fun exercise(history: Boolean): Pair<HerdRepository, FakeHostConnection> {
+            val prefs = preferences(host)
+            val client = connection(host)
+            val repo = repository(prefs) { client }
+            repo.connectHost(host.id)
+            client.onReadPane = { kotlinx.coroutines.withTimeout(1) { awaitCancellation() } }
+            runCatching { repo.readPane(snapshot(host, "agent").agents.single(), history = history) }
+            return repo to client
+        }
+
+        val (ordinaryRepo, ordinaryClient) = exercise(history = false)
+        assertTrue(ordinaryClient.closed)
+        assertFalse(ordinaryRepo.isHostReady(host.id))
+
+        val (historyRepo, historyClient) = exercise(history = true)
+        assertFalse(historyClient.closed)
+        assertTrue(historyRepo.isHostReady(host.id))
     }
 
     @Test fun `concurrent refresh in same generation coalesces without clearing active flag`() = runTest {

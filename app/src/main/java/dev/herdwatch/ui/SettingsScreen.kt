@@ -447,25 +447,23 @@ private fun UpdateRow(
                 )
             }
         }
+        Text(
+            if (newer != null) {
+                stringResource(R.string.settings_update_available, newer.release.version)
+            } else {
+                stringResource(R.string.settings_update_title)
+            },
+            style = DsTypography.bodyStrong,
+            color = if (newer != null) colors.accent else colors.text,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(DsSpace.xs))
         Row(
             Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
-        ) {
-            Text(
-                if (newer != null) {
-                    stringResource(R.string.settings_update_available, newer.release.version)
-                } else {
-                    stringResource(R.string.settings_update_title)
-                },
-                style = DsTypography.bodyStrong,
-                color = if (newer != null) colors.accent else colors.text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            actions()
-        }
+            horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed, Alignment.End),
+            content = actions,
+        )
         val detail = when {
             update.error != null -> update.error
             update.installing -> stringResource(R.string.settings_update_installing)

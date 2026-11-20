@@ -100,8 +100,9 @@ class TerminalController(
         val newline: Boolean,
     )
 
-    /** One consumer preserves UI event order; independent IO coroutines may acquire a Mutex out of order. */
-    private val writes = Channel<PendingWrite>(Channel.UNLIMITED)
+    /** One consumer preserves UI event order; bounded capacity prevents a stalled SSH write from
+     * retaining an unbounded paste backlog (which can contain secrets) in process memory. */
+    private val writes = Channel<PendingWrite>(WRITE_QUEUE_CAPACITY)
 
     init {
         scope.launch(Dispatchers.IO) {
@@ -248,7 +249,7 @@ class TerminalController(
     fun write(text: String, submit: Boolean = false) {
         val s = session ?: return
         if (!_state.value.connected) return
-        writes.trySend(
+        val queued = writes.trySend(
             PendingWrite(
                 generation = generation,
                 session = s,
@@ -256,6 +257,17 @@ class TerminalController(
                 newline = submit,
             )
         )
+        if (queued.isFailure) {
+            // Dropping bytes would silently change a command or password. Fail the session instead;
+            // the screen preserves its output and offers an explicit reconnect.
+            val overloadedGeneration = generation
+            val overloadedSession = s
+            scope.launch {
+                if (generation == overloadedGeneration && session === overloadedSession) {
+                    fail(IllegalStateException("terminal input queue is full"))
+                }
+            }
+        }
     }
 
     /** Sends a literal escape sequence, e.g. ESC or an arrow key. */
@@ -291,11 +303,17 @@ class TerminalController(
     fun trustFingerprint() {
         val current = config ?: return
         val accepted = _state.value.pendingFingerprint ?: return
+        val reconnectGeneration = generation
         scope.launch {
             // The pin write is JSON + AES + SharedPreferences.commit(): disk I/O, not click work.
             val saved = withContext(Dispatchers.IO) {
                 runCatching { onFingerprintTrusted(current.id, accepted) }
             }
+            // Persistence can outlive this page. Never let its completion replace a newer host's
+            // session or accept a fingerprint that changed while the dialog was on screen.
+            if (generation != reconnectGeneration || config !== current ||
+                _state.value.hostId != current.id || _state.value.pendingFingerprint != accepted
+            ) return@launch
             saved.onFailure {
                 _state.update { state ->
                     state.copy(error = Str.get(R.string.term_pin_save_failed))
@@ -460,6 +478,7 @@ class TerminalController(
          * the desktop sessions people compare us to still have, and costs ~3 MB at 80 columns.
          */
         const val SCROLLBACK_LINES = 5_000
+        const val WRITE_QUEUE_CAPACITY = 256
     }
 }
 
