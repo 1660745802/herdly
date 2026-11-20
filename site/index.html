@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Herdly — 手机上的 SSH 终端与 agent 值守</title>
+<meta name="description" content="Herdly 是 Android 上的 SSH 终端：直连你的机器，把多台机器上等待决定的 coding agent 收进一个列表。凭据只存在本机，没有云端中转，没有遥测。">
+<meta property="og:title" content="Herdly — SSH terminal and agent watch for Android">
+<meta property="og:description" content="A real SSH terminal on your phone, plus one list of every agent waiting for a decision. Local credentials, no relay, no telemetry.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/agent.webp">
+<meta name="theme-color" content="#15171C">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2315171C'/%3E%3Cpath d='M5 8.5h14M8 8.5V6.2A1.2 1.2 0 0 1 9.2 5h5.6A1.2 1.2 0 0 1 16 6.2v2.3M6.5 8.5v8A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-8' stroke='%237B9BEA' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='13' r='1.4' fill='%237B9BEA'/%3E%3C/svg%3E">
+<style>
+  /* Tokens lifted from the app's own dark palette (ui/design/DsTokens.kt), so the page and the
+     product are the same instrument rather than a marketing skin over it. */
+  :root{
+    --base:#15171C; --raised:#1B1E24; --well:#101215; --deep:#0B0D10;
+    --text:#E8EBF2; --soft:#9AA3B2; --faint:#89929F;
+    --accent:#7B9BEA; --on-accent:#0F1116; --danger:#FF8B86; --ok:#45C7B0; --warn:#E3AE5E;
+    --rim:rgba(255,255,255,.08); --hair:rgba(255,255,255,.07);
+    --shadow:0 1px 0 rgba(255,255,255,.05), 0 18px 40px -24px rgba(0,0,0,.9);
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono","Cascadia Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --gut:clamp(20px,5vw,64px);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--base); color:var(--text);
+    font-family:var(--sans); font-size:16px; line-height:1.65;
+    letter-spacing:.01em;
+  }
+  /* One light source, top left — the same rule the app's surfaces follow. */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(123,155,234,.10), transparent 70%),
+      radial-gradient(700px 420px at 100% 0%, rgba(69,199,176,.05), transparent 70%);
+  }
+  main,header,footer{position:relative; z-index:1}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline; text-underline-offset:3px}
+  h1,h2,h3{line-height:1.2; letter-spacing:-.01em; margin:0}
+  p{margin:0}
+  .wrap{max-width:1120px; margin:0 auto; padding:0 var(--gut)}
+  /* Grid items default to min-width:auto, so one wide <pre> or a nowrap label can push the whole
+     page past the viewport. Every column must be allowed to shrink. */
+  .hero>*,.row>*,.install>*,.ledger>*{min-width:0}
+  body{overflow-wrap:break-word}
+  .mono{font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint)}
+
+  /* ── instrument bar ───────────────────────────────────────────── */
+  .bar{
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    padding:14px var(--gut); border-bottom:1px solid var(--hair);
+    background:linear-gradient(180deg,rgba(255,255,255,.03),transparent);
+  }
+  .mark{display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:.02em}
+  .mark svg{width:22px; height:22px; flex:none}
+  .bar .spec{font-family:var(--mono); font-size:12px; color:var(--faint)}
+  .bar .grow{flex:1}
+  .lang{
+    display:flex; gap:2px; padding:3px; border-radius:999px;
+    background:var(--well); border:1px solid var(--hair);
+  }
+  .lang button{
+    font:inherit; font-size:13px; color:var(--soft); background:none; border:0;
+    padding:5px 12px; border-radius:999px; cursor:pointer;
+  }
+  .lang button[aria-pressed="true"]{background:var(--raised); color:var(--text); box-shadow:var(--shadow)}
+  .lang button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* ── hero ─────────────────────────────────────────────────────── */
+  .hero{display:grid; grid-template-columns:1.05fr .95fr; gap:clamp(24px,5vw,72px); align-items:center; padding:clamp(48px,8vw,104px) 0 clamp(40px,6vw,72px)}
+  .hero h1{font-size:clamp(34px,5.4vw,58px); font-weight:650; text-wrap:balance}
+  .hero h1 em{font-style:normal; color:var(--accent); white-space:nowrap}
+  .lede{margin-top:20px; font-size:clamp(16px,1.6vw,19px); color:var(--soft); max-width:46ch}
+  .cta{display:flex; gap:12px; flex-wrap:wrap; margin-top:32px}
+  .btn{
+    display:inline-flex; align-items:center; gap:9px; font:inherit; font-weight:600;
+    padding:13px 22px; border-radius:14px; border:1px solid transparent; cursor:pointer;
+    transition:transform .12s ease, background .16s ease;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--accent); color:var(--on-accent)}
+  .btn-primary:hover{background:#8CA9F0; text-decoration:none}
+  .btn-quiet{background:var(--raised); color:var(--text); border-color:var(--rim); box-shadow:var(--shadow)}
+  .btn-quiet:hover{background:#22262E; text-decoration:none}
+  .fine{margin-top:16px; font-family:var(--mono); font-size:12px; color:var(--faint); letter-spacing:.04em}
+
+  /* ── device plate ─────────────────────────────────────────────── */
+  .plate{
+    padding:14px; border-radius:34px; background:var(--raised);
+    border:1px solid var(--rim); box-shadow:var(--shadow);
+  }
+  .plate img{display:block; width:100%; height:auto; border-radius:22px; background:var(--deep)}
+  .shot{margin:0}
+  /* A phone screenshot is 2.15:1 — at column width it would tower over the copy and leave the
+     text floating in empty space. Cap the plate, not the column. */
+  .hero .shot{max-width:330px; justify-self:center}
+  .row .shot{max-width:290px; justify-self:center}
+  .shot figcaption{margin-top:14px; font-family:var(--mono); font-size:11.5px; color:var(--faint); letter-spacing:.06em; text-align:center}
+
+  /* ── sections ─────────────────────────────────────────────────── */
+  section{padding:clamp(40px,6vw,76px) 0; border-top:1px solid var(--hair)}
+  .head{display:flex; align-items:baseline; gap:14px; margin-bottom:28px}
+  .head .num{font-family:var(--mono); font-size:12px; color:var(--accent)}
+  .head h2{font-size:clamp(22px,2.6vw,30px); font-weight:620}
+  .rows{display:grid; gap:clamp(28px,4vw,56px)}
+  .row{display:grid; grid-template-columns:1fr .8fr; gap:clamp(24px,4vw,56px); align-items:center}
+  .row.flip .copy{order:2}
+  .row h3{font-size:20px; font-weight:620; margin-bottom:12px}
+  .row p{color:var(--soft)}
+  .row p + p{margin-top:12px}
+  .kv{margin-top:20px; display:grid; gap:8px}
+  .kv div{display:grid; grid-template-columns:minmax(0,auto) minmax(0,1fr); gap:12px; align-items:start; font-size:14.5px; color:var(--soft)}
+  .kv b{font-family:var(--mono); font-size:11.5px; letter-spacing:.06em; color:var(--accent); font-weight:500; padding-top:3px; white-space:nowrap}
+
+  /* ── boundary ledger ──────────────────────────────────────────── */
+  .ledger{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:1px; background:var(--hair); border:1px solid var(--hair); border-radius:18px; overflow:hidden}
+  .ledger div{background:var(--base); padding:22px}
+  .ledger h3{font-size:15px; font-weight:620; margin-bottom:8px; display:flex; align-items:center; gap:8px}
+  .ledger p{font-size:14.5px; color:var(--soft)}
+  .dot{width:7px; height:7px; border-radius:50%; flex:none}
+  .dot.no{background:var(--danger)} .dot.yes{background:var(--ok)}
+
+  /* ── install ──────────────────────────────────────────────────── */
+  .install{display:grid; grid-template-columns:1fr 1fr; gap:clamp(24px,4vw,48px); align-items:start}
+  pre{
+    margin:0; padding:18px 20px; border-radius:16px; background:var(--well);
+    border:1px solid var(--hair); overflow-x:auto;
+    font-family:var(--mono); font-size:13px; line-height:1.8; color:var(--soft);
+  }
+  pre b{color:var(--text); font-weight:500}
+  pre span{color:var(--faint)}
+  .steps{display:grid; gap:14px; counter-reset:s}
+  .steps li{list-style:none; display:grid; grid-template-columns:auto 1fr; gap:14px; color:var(--soft); font-size:15px}
+  .steps li::before{
+    counter-increment:s; content:counter(s); font-family:var(--mono); font-size:12px;
+    color:var(--accent); background:var(--well); border:1px solid var(--hair);
+    width:26px; height:26px; border-radius:8px; display:grid; place-items:center;
+  }
+  footer{border-top:1px solid var(--hair); padding:32px 0 56px; color:var(--faint); font-size:14px}
+  footer .wrap{display:flex; gap:18px; flex-wrap:wrap; align-items:center}
+
+  @media (max-width:860px){
+    .hero,.row,.install{grid-template-columns:1fr}
+    .row.flip .copy{order:0}
+    .hero .shot{max-width:300px; margin:0 auto}
+    .row .shot{max-width:280px}
+    .kv div{grid-template-columns:1fr; gap:4px}
+    .kv b{padding-top:0}
+    .bar{gap:10px}
+    .bar .spec{order:3; flex-basis:100%}
+  }
+  @media (prefers-reduced-motion:reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <span class="mark">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5h14M8 8.5V6.2A1.2 1.2 0 0 1 9.2 5h5.6A1.2 1.2 0 0 1 16 6.2v2.3M6.5 8.5v8A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-8" stroke="#7B9BEA" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.4" fill="#7B9BEA"/></svg>
+    Herdly
+  </span>
+  <span class="spec" data-i="spec">v0.2.2 · Android 8.0+</span>
+  <span class="grow"></span>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="zh" aria-pressed="true">简体中文</button>
+    <button type="button" data-lang="en" aria-pressed="false">English</button>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <p class="mono" data-i="kicker">SSH 终端 · agent 值守</p>
+        <h1 data-i="h1">离开电脑，<em>也不丢掉</em><br>正在等你的 agent。</h1>
+        <p class="lede" data-i="lede">Herdly 先是一个能用的 SSH 终端：真 PTY、颜色、按键条、vim 与 tmux。在此之上，它把多台机器上停下来的 coding agent 收进一个列表——谁在等你、原文是什么、点哪一项，都在一屏里。</p>
+        <div class="cta">
+          <a class="btn btn-primary" id="dl" href="https://github.com/1660745802/herdly/releases/latest" data-i="cta_dl">下载 APK</a>
+          <a class="btn btn-quiet" href="https://github.com/1660745802/herdly" data-i="cta_src">源码与文档</a>
+        </div>
+        <p class="fine" data-i="fine">开源 · 无账号 · 无云端中转 · 无遥测</p>
+      </div>
+      <figure class="shot">
+        <div class="plate"><img src="assets/terminal.webp" data-shot="terminal" width="640" height="1375" alt="Herdly 终端页：彩色输出、程序状态条与两排按键"></div>
+        <figcaption data-i="cap_hero">真机截图 · 终端页</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">01</span><h2 data-i="s1">一个列表，回答「现在该看谁」</h2></div>
+      <div class="rows">
+        <div class="row">
+          <div class="copy">
+            <h3 data-i="s1a_h">等你决定的排在最前</h3>
+            <p data-i="s1a_p">agent 不是在跑就是在等你。列表按紧急度排：需要你 &gt; 完成未看 &gt; 工作中 &gt; 空闲，并写清它属于哪台机器、哪个工作区、哪个分屏。</p>
+            <div class="kv">
+              <div><b data-i="s1a_k1">完成 ≠ 已看过</b><span data-i="s1a_v1">跑完的 agent 只在你还没看过那一屏时才算「待查看」；进过一次就记为看过，同一分屏在列表、机器页和通知里同时安静下来。</span></div>
+              <div><b data-i="s1a_k2">按需提醒</b><span data-i="s1a_v2">被阻塞一定提醒；只是完成时，只有你没看着那一屏才提醒。重连不会把一堆旧状态补发成通知。</span></div>
+            </div>
+          </div>
+          <figure class="shot">
+            <div class="plate"><img src="assets/inbox.webp" data-shot="inbox" width="640" height="1375" alt="Herdly 任务列表：四个 agent 按紧急度排列"></div>
+            <figcaption data-i="cap_inbox">任务页</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">02</span><h2 data-i="s2">审批看原文，不看你猜的摘要</h2></div>
+      <div class="rows">
+        <div class="row flip">
+          <div class="copy">
+            <h3 data-i="s2a_h">选项就是屏幕上那几行字</h3>
+            <p data-i="s2a_p">Herdly 不替你重写 agent 的问题。它把命令原文、完整选项和授权范围原样摆出来：只此一次、本会话、还是永久。长期授权单独标红，发送前再核对一次问题与上下文。</p>
+            <div class="kv">
+              <div><b data-i="s2a_k1">两种读法</b><span data-i="s2a_v1">对话模式读内容，终端模式看原始屏幕，随时切换；解析不确定时它会说，而不是硬编一个漂亮的界面。</span></div>
+              <div><b data-i="s2a_k2">不替你决定</b><span data-i="s2a_v2">没有自动批准，没有后台替你按键。每一次发送都是你点的。</span></div>
+            </div>
+          </div>
+          <figure class="shot">
+            <div class="plate"><img src="assets/agent.webp" data-shot="agent" width="640" height="1375" alt="Herdly agent 页：对话视图与三个原文选项的审批卡"></div>
+            <figcaption data-i="cap_agent">agent 页 · 审批卡</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">03</span><h2 data-i="s3">先是个合格的终端</h2></div>
+      <div class="rows">
+        <div class="row">
+          <div class="copy">
+            <h3 data-i="s3a_h">手机上少见的完整度</h3>
+            <p data-i="s3a_p">自己写的 VT 解析：16/256/真彩色、粗体斜体下划线、备用屏幕（vim、less、htop、tmux 都能用）、5000 行回滚、括号粘贴、查找与复制。</p>
+            <div class="kv">
+              <div><b data-i="s3a_k1">按键条</b><span data-i="s3a_v1">Ctrl / Alt / Esc / Tab / ⇧Tab / ⌫ / 方向 / PgUp / PgDn 常驻两排，长按连发；双指缩放字号，双击补 Tab。</span></div>
+              <div><b data-i="s3a_k2">状态来自程序</b><span data-i="s3a_v2">解析 OSC 7501，程序自己报 working / blocked / 进度时才显示状态条——不靠猜屏幕。</span></div>
+              <div><b data-i="s3a_k3">断线不丢事</b><span data-i="s3a_v3">前台服务保持连接，网络恢复按 1/2/4/8 秒退避重连，并告诉你第几次；密码错误这类不会重试的问题直接说原因。</span></div>
+            </div>
+          </div>
+          <figure class="shot">
+            <div class="plate"><img src="assets/hosts.webp" data-shot="hosts" width="640" height="1375" alt="Herdly 机器页：连接状态、agent 数与打开终端入口"></div>
+            <figcaption data-i="cap_hosts">机器页</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">04</span><h2 data-i="s4">凭据与信任留在本机</h2></div>
+      <div class="rows">
+        <div class="row flip">
+          <div class="copy">
+            <h3 data-i="s4a_h">第一次连接一定问你</h3>
+            <p data-i="s4a_p">首次连接先显示主机密钥指纹（并标出算法），你核对确认后才发送凭据。之后指纹变了，连接停下来等你再确认——不会静默信任。</p>
+            <div class="kv">
+              <div><b data-i="s4a_k1">加密保存</b><span data-i="s4a_v1">密码与私钥用 Android Keystore 派生的密钥加密后存本机，不上传，不参与备份。</span></div>
+              <div><b data-i="s4a_k2">可核对</b><span data-i="s4a_v2">指纹算法与 ssh-keygen 一致，方便你和主机上的输出逐字对比。</span></div>
+            </div>
+          </div>
+          <figure class="shot">
+            <div class="plate"><img src="assets/fingerprint.webp" data-shot="fingerprint" width="640" height="1375" alt="Herdly 首次连接的主机指纹确认对话框"></div>
+            <figcaption data-i="cap_fp">首次连接 · 指纹确认</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">05</span><h2 data-i="s5">它不做的事</h2></div>
+      <div class="ledger">
+        <div><h3><span class="dot no"></span><span data-i="n1h">没有云端中转</span></h3><p data-i="n1p">SSH 从手机直连你的机器。没有我们的服务器，也没有账号。</p></div>
+        <div><h3><span class="dot no"></span><span data-i="n2h">没有遥测</span></h3><p data-i="n2p">不上报使用数据、崩溃日志或终端内容。唯一的联网请求是你主动点的「检查更新」。</p></div>
+        <div><h3><span class="dot no"></span><span data-i="n3h">不自动批准</span></h3><p data-i="n3p">不会在后台替你回答 agent 的问题，也不会批量操作多个 agent。</p></div>
+        <div><h3><span class="dot yes"></span><span data-i="n4h">只做前台该做的</span></h3><p data-i="n4p">常驻通知只用来保持 SSH 连接；提醒只在你没看着那一屏时出现。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">06</span><h2 data-i="s5b">设置里只有习惯</h2></div>
+      <div class="rows">
+        <div class="row">
+          <div class="copy">
+            <h3 data-i="s5b_h">语言、主题、字号，就这些</h3>
+            <p data-i="s5b_p">能改的是你的习惯：界面语言、浅色或深色、终端字号。排版节奏、输入方式、按键栏层数这类决定由产品负责——用开关把设计问题推给用户，等于同时交付两套没调好的界面。</p>
+            <div class="kv">
+              <div><b data-i="s5b_k1">中英双语</b><span data-i="s5b_v1">全部界面、通知与错误文案都有两种语言，应用内即时切换，不重建页面。</span></div>
+              <div><b data-i="s5b_k2">安全项不可关</b><span data-i="s5b_v2">首次连接必须核对指纹、指纹变化必须停下、凭据不可导出——这些没有开关。</span></div>
+            </div>
+          </div>
+          <figure class="shot">
+            <div class="plate"><img src="assets/settings.webp" data-shot="settings" width="640" height="1375" alt="Herdly 设置页：语言、主题、终端字号与本机安全"></div>
+            <figcaption data-i="cap_settings">设置页</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="head"><span class="num">07</span><h2 data-i="s6">装上，连一台机器</h2></div>
+      <div class="install">
+        <div>
+          <ol class="steps">
+            <li data-i="i1">下载最新 APK 并安装（Android 8.0 及以上，允许安装未知来源应用）。</li>
+            <li data-i="i2">在「机器」里添加主机：地址、端口、用户名，密码或私钥。</li>
+            <li data-i="i3">第一次连接核对指纹，确认后连接；「打开终端」就能用。</li>
+            <li data-i="i4">想让 agent 进列表：在主机上装 Herdr，确认 <code>herdr remote-api-bridge --check</code> 输出 <code>herdr-api-bridge-v1</code>。没有它，终端照样能用。</li>
+          </ol>
+          <div class="cta">
+            <a class="btn btn-primary" href="https://github.com/1660745802/herdly/releases/latest" data-i="cta_dl2">下载最新 APK</a>
+            <a class="btn btn-quiet" href="https://github.com/1660745802/herdly/releases" data-i="cta_rel">全部版本与校验和</a>
+          </div>
+        </div>
+        <div>
+          <p class="mono" style="margin-bottom:12px" data-i="build_h">从源码构建</p>
+<pre><span># JDK 21</span>
+<b>./gradlew :app:assembleDebug</b>
+<span># 单元测试 · Lint</span>
+<b>./gradlew :app:testDebugUnitTest :app:lintDebug</b>
+<span># 回环模拟主机（不执行本地命令）</span>
+<b>python tools/dev_fake_ssh.py --canned</b></pre>
+          <p class="fine" data-i="build_note">Kotlin · Jetpack Compose · JSch · 自绘设计系统，无第三方 UI 库。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span data-i="foot">Herdly · 开源 Android SSH 终端</span>
+    <a href="https://github.com/1660745802/herdly">GitHub</a>
+    <a href="https://github.com/1660745802/herdly/blob/main/docs/product.md" data-i="foot_product">产品说明</a>
+    <a href="https://github.com/1660745802/herdly/blob/main/docs/engineering.md" data-i="foot_eng">工程说明</a>
+    <a href="https://github.com/herdrdev/herdr-app" data-i="foot_herdr">官方 Herdr</a>
+  </div>
+</footer>
+
+<script>
+// Every string lives here, so switching language never re-fetches or re-renders the page.
+const EN = {
+  spec:"v0.2.2 · Android 8.0+",
+  kicker:"SSH terminal · agent watch",
+  h1:"Leave the desk.<br><em>Keep</em> the agent that waits.",
+  lede:"Herdly is a working SSH terminal first: a real PTY, colour, a key bar, vim and tmux. On top of that it collects the coding agents that stopped across your machines into one list — who is waiting, what the screen actually says, and which option to press.",
+  cta_dl:"Download APK", cta_src:"Source & docs", cta_dl2:"Download latest APK", cta_rel:"All releases & checksums",
+  fine:"Open source · no account · no relay · no telemetry",
+  cap_hero:"Real device · terminal", cap_inbox:"Tasks", cap_agent:"Agent · approval card",
+  cap_hosts:"Machines", cap_fp:"First connection · host key",
+  s1:"One list that answers “who needs me now”",
+  s1a_h:"Whatever waits for a decision comes first",
+  s1a_p:"An agent is either running or waiting for you. The list sorts by urgency — needs you &gt; finished unseen &gt; working &gt; idle — and names the machine, workspace and pane it belongs to.",
+  s1a_k1:"Finished ≠ seen", s1a_v1:"A finished agent only claims attention until you have looked at that screen once. Open it and it is marked seen; the same pane goes quiet in the list, on the machine card and in the notification at the same time.",
+  s1a_k2:"Alerts only when they matter", s1a_v2:"Being blocked always alerts. Merely finishing alerts only when that pane is not on your screen. A reconnect never replays a backlog of old states as notifications.",
+  s2:"Approvals show the screen, not a guessed summary",
+  s2a_h:"The options are the lines the agent printed",
+  s2a_p:"Herdly does not rewrite the agent's question. It lays out the literal command, every option and its scope: once, this session, or standing. Standing grants are flagged in red, and the question and context are re-checked before anything is sent.",
+  s2a_k1:"Two ways to read", s2a_v1:"Chat mode reads the content, terminal mode shows the raw screen; switch at any time. When parsing is unsure it says so instead of inventing a tidy interface.",
+  s2a_k2:"Never decides for you", s2a_v2:"No auto-approval, no background key presses. Every send is one you tapped.",
+  s3:"A competent terminal first",
+  s3a_h:"Completeness you rarely get on a phone",
+  s3a_p:"A VT parser written for this app: 16/256/truecolour, bold, italic, underline, the alternate screen (vim, less, htop and tmux all work), 5000 lines of scrollback, bracketed paste, find and copy.",
+  s3a_k1:"Key bar", s3a_v1:"Ctrl / Alt / Esc / Tab / ⇧Tab / ⌫ / arrows / PgUp / PgDn in two fixed rows, with long-press repeat. Pinch to resize text, double-tap for Tab.",
+  s3a_k2:"Status from the program", s3a_v2:"OSC 7501 is parsed, so a status chip appears only when the program itself reports working / blocked / progress — never guessed from pixels.",
+  s3a_k3:"A drop does not lose the thread", s3a_v3:"A foreground service holds the SSH session; when the network returns it retries at 1/2/4/8 seconds and tells you which attempt it is. Problems that must not be retried, like a wrong password, say why instead.",
+  s4:"Credentials and trust stay on the phone",
+  s4a_h:"The first connection always asks you",
+  s4a_p:"The host key fingerprint (with its algorithm) is shown before any credential is sent. If it changes later, the connection stops and waits for you again — it is never trusted silently.",
+  s4a_k1:"Encrypted at rest", s4a_v1:"Passwords and private keys are encrypted with a key derived from the Android Keystore, stored locally, never uploaded and excluded from backup.",
+  s4a_k2:"Verifiable", s4a_v2:"The fingerprint algorithm matches ssh-keygen, so you can compare it word for word with the output on the host.",
+  s5:"What it does not do",
+  n1h:"No cloud relay", n1p:"SSH goes straight from the phone to your machine. There is no server of ours and no account.",
+  n2h:"No telemetry", n2p:"No usage data, crash logs or terminal content is reported. The only network request the app makes on its own is the update check you tap.",
+  n3h:"No auto-approval", n3p:"It will not answer an agent for you in the background, and it does not act on many agents at once.",
+  n4h:"Only what foreground needs", n4p:"The ongoing notification exists to hold the SSH session; alerts appear only when that pane is not on your screen.",
+  s5b:"Settings hold habits, not escapes",
+  s5b_h:"Language, theme, text size — that is the list",
+  s5b_p:"What you can change is what you are used to: interface language, light or dark, terminal text size. Layout rhythm, input behaviour and how many key rows to show are the product's job — handing those over as switches ships two half-tuned interfaces at once.",
+  s5b_k1:"Two languages", s5b_v1:"Every screen, notification and error message exists in Chinese and English, switched inside the app without rebuilding the page.",
+  s5b_k2:"Safety has no switch", s5b_v2:"Verify the fingerprint on first connection, stop when it changes, never export credentials — none of these can be turned off.",
+  cap_settings:"Settings",
+  s6:"Install it, connect one machine",
+  i1:"Download the latest APK and install it (Android 8.0+, allow installs from unknown sources).",
+  i2:"Add a host under Machines: address, port, user, then a password or a private key.",
+  i3:"Verify the fingerprint on first connection, confirm, and Open terminal.",
+  i4:"To get agents into the list: install Herdr on the host and check that <code>herdr remote-api-bridge --check</code> prints <code>herdr-api-bridge-v1</code>. Without it the terminal still works.",
+  build_h:"Build from source",
+  build_note:"Kotlin · Jetpack Compose · JSch · a self-drawn design system, no third-party UI library.",
+  foot:"Herdly · open-source SSH terminal for Android",
+  foot_product:"Product notes", foot_eng:"Engineering notes", foot_herdr:"Official Herdr",
+};
+const ALT_EN = {
+  terminal:"Herdly terminal: colour output, a program status chip and two key rows",
+  inbox:"Herdly task list: four agents ordered by urgency",
+  agent:"Herdly agent page: chat view with an approval card carrying three literal options",
+  hosts:"Herdly machines page: connection state, agent count and the terminal entry",
+  settings:"Herdly settings: language, theme, terminal text size and local security",
+  fingerprint:"Herdly host key confirmation on first connection",
+};
+const ALT_ZH = new Map();
+document.querySelectorAll("[data-shot]").forEach(img => ALT_ZH.set(img.dataset.shot, img.alt));
+const nodes = [...document.querySelectorAll("[data-i]")];
+const ZH = new Map(nodes.map(n => [n.dataset.i, n.innerHTML]));
+function apply(lang){
+  const dict = lang === "en" ? EN : null;
+  nodes.forEach(n => {
+    const key = n.dataset.i;
+    n.innerHTML = dict ? (dict[key] ?? ZH.get(key)) : ZH.get(key);
+  });
+  document.querySelectorAll("[data-shot]").forEach(img => {
+    const base = img.dataset.shot;
+    img.src = lang === "en" ? `assets/${base}-en.webp` : `assets/${base}.webp`;
+    img.alt = lang === "en" ? (ALT_EN[base] || img.alt) : (ALT_ZH.get(base) || img.alt);
+  });
+  document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+  document.title = lang === "en"
+    ? "Herdly — SSH terminal and agent watch for Android"
+    : "Herdly — 手机上的 SSH 终端与 agent 值守";
+  document.querySelectorAll(".lang button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+  try { localStorage.setItem("herdly-lang", lang); } catch(e){}
+}
+document.querySelectorAll(".lang button").forEach(b =>
+  b.addEventListener("click", () => apply(b.dataset.lang)));
+let start = null;
+try { start = localStorage.getItem("herdly-lang"); } catch(e){}
+if (!start) start = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
+apply(start);
+</script>
+</body>
+</html>

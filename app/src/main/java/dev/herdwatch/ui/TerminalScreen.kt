@@ -507,14 +507,18 @@ private fun TerminalBar(
                 // No mode tag: this page is the ssh terminal — a badge saying so spent the width
                 // that the ssh target needed, and the agent page dropped its badge for the same
                 // reason. What is left is state plus one identifying line.
-                ConnectionPip(state, Modifier.weight(1f, fill = false))
+                ConnectionPip(state)
                 // The program's own status report (OSC 7501), beside the connection pip because both
                 // answer "what is happening now". Shown only while a record exists: no chip means
                 // the program said nothing, which is not the same as it saying "idle".
-                state.snapshot?.status?.let { status ->
+                val status = state.snapshot?.status
+                if (status != null) {
                     Spacer(Modifier.width(DsSpace.xs))
-                    ProgramStatusChip(status, Modifier.fillMaxWidth(0.4f))
-                }
+                    // The chip replaces the name slot rather than sharing it. Three facts on a
+                    // 360dp row cut whichever came last: first "working · …", then "已连". The
+                    // program's state is the one worth the width; the machine is the line above.
+                    ProgramStatusChip(status, Modifier.weight(1f, fill = false))
+                } else {
                 // One slot for two facts, because there is only room for one: what the program calls
                 // itself (OSC 0/2 — vim, tmux, less all set it) when it has a name, otherwise the
                 // ssh target. Printing both halved each and left "dev@…" and "vim model…".
@@ -537,6 +541,7 @@ private fun TerminalBar(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                }
             }
         }
         // Icon only: the word "Reconnect" between the pip and the overflow menu had no room at

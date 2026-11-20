@@ -26,4 +26,5 @@
     <string name="repo_request_timeout">请求超时</string>
     <string name="repo_operation_timeout">操作超时</string>
     <string name="repo_host_key_first">首次连接：需要确认主机密钥</string>
+    <string name="repo_bridge_unavailable">连上了 SSH，但这台机器没有 Herdr 桥接命令。先在主机上运行 herdr remote-api-bridge --check。</string>
 </resources>

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
+import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
@@ -340,7 +341,10 @@ private fun HostCard(
                 // One word for the whole machine, the most urgent agent's own status: this is the
                 // rollup rule the official client uses for a space, and it answers "which machine
                 // do I look at first" without opening anything.
-                if (mostUrgent != null && mostUrgent != AgentStatus.IDLE) {
+                if (connected && mostUrgent != null && mostUrgent != AgentStatus.IDLE) {
+                    // Only while connected: an offline card shows the last snapshot, and calling
+                    // that "waiting for you" beside "connection failed" promises something the
+                    // app cannot currently deliver.
                     // No lamp here: the card already opens with the connection lamp, and two dots
                     // of different colours on one line read as a contradiction. The word carries
                     // the urgency; the colour only accents it.
@@ -440,9 +444,12 @@ private fun HostCard(
                 style = DsTypography.caption,
                 color = colors.textFaint,
             )
-            if (conn is ConnState.Failed && runtime.keyMismatch == null && runtime.pendingKey == null) {
+            if (conn is ConnState.Failed && runtime.keyMismatch == null && runtime.pendingKey == null &&
+                conn.message != Str.get(R.string.repo_bridge_unavailable)
+            ) {
                 // The card is a summary: two lines of red plus a paragraph of advice pushed the
-                // actual actions below the fold. Raw transport text lives in Details.
+                // actual actions below the fold. Raw transport text lives in Details. When the
+                // reason already names the command to run, generic advice would only repeat it.
                 Text(
                     stringResource(R.string.hosts_failure_hint),
                     style = DsTypography.caption,

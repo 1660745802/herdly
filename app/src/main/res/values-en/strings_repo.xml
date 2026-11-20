@@ -24,4 +24,5 @@
     <string name="repo_request_timeout">Request timed out</string>
     <string name="repo_operation_timeout">Operation timed out</string>
     <string name="repo_host_key_first">First connection: confirm the host key</string>
+    <string name="repo_bridge_unavailable">SSH works, but this machine has no Herdr bridge command. Run herdr remote-api-bridge --check on the host.</string>
 </resources>

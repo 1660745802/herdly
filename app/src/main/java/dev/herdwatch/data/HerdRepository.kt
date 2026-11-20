@@ -647,6 +647,12 @@ fun humanize(t: Throwable): String = when (t) {
         t.message?.contains("timeout", true) == true -> Str.get(R.string.repo_connect_timeout)
         t.message?.contains("session is down", true) == true -> Str.get(R.string.repo_ssh_session_down)
         t.message?.contains("reject HostKey", true) == true -> Str.get(R.string.repo_host_key_rejected)
+        // A plain SSH machine accepts the login and then refuses the exec channel, or runs a shell
+        // that has no bridge command. The transport words ("failed to send channel request") name
+        // neither the cause nor the next step, so say what to check on the host instead.
+        t.message?.contains("channel is not opened", true) == true ||
+            t.message?.contains("failed to send channel request", true) == true ->
+            Str.get(R.string.repo_bridge_unavailable)
         else -> Str.get(R.string.repo_ssh_failed, t.message ?: Str.get(R.string.repo_unknown_error))
     }
     is java.net.SocketTimeoutException -> Str.get(R.string.repo_request_timeout)

@@ -29,6 +29,11 @@
 
 需要 JDK 17 或 21（字节码目标 17）与 Android SDK 35。签名发布见 [docs/development.md](docs/development.md)。
 
+## 宣传页
+
+`site/` 是 GitHub Pages 上的宣传单页（纯 HTML + WebP，无构建步骤，中英双语，截图取自回环模拟主机）。
+改完提交后运行 `tools/publish-site.sh` 发布；首次需在仓库 Settings → Pages 选择 `gh-pages` 分支。
+
 ## 文档
 
 - [docs/product.md](docs/product.md)：产品范围、每页职责与验收口径（唯一权威）。
