@@ -180,8 +180,11 @@ private data class Sgr(
         val background = bg?.let { xtermColor(it, defaultBackground) } ?: defaultBackground
         val effectiveForeground = if (inverse) background else foreground
         val effectiveBackground = if (inverse) foreground else background
+        // Programs pick ink for the background they expect. Keep their hue but not their
+        // invisibility: a black separator on our dark surface would simply be missing.
+        val legible = ensureContrast(effectiveForeground, effectiveBackground)
         return SpanStyle(
-            color = if (dim) effectiveForeground.copy(alpha = 0.7f) else effectiveForeground,
+            color = if (dim) legible.copy(alpha = 0.7f) else legible,
             background = if (inverse || bg != null) effectiveBackground else Color.Unspecified,
             fontWeight = if (bold) FontWeight.Bold else null,
             fontStyle = if (italic) FontStyle.Italic else null,

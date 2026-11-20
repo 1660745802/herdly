@@ -66,14 +66,16 @@
     <!-- Summary row: the chevron carries the expand affordance, so the text stays a noun phrase. -->
     <string name="inbox_panes_empty_title">No panes from this machine yet</string>
     <string name="inbox_panes_empty_body">Connect the machine and read its session structure once; every pane then shows up here.</string>
-    <string name="inbox_env_offline">%1$s offline</string>
     <string name="inbox_env_retry">Retry</string>
     <string name="inbox_pane_shell">Shell</string>
     <plurals name="inbox_count_hosts">
         <item quantity="one">%1$d machines</item>
         <item quantity="other">%1$d machines</item>
     </plurals>
-    <string name="inbox_connected_hosts">%1$d connected</string>
+    <plurals name="inbox_connected_hosts">
+        <item quantity="one">%1$d connected</item>
+        <item quantity="other">%1$d connected</item>
+    </plurals>
     <string name="inbox_host_up">Connected</string>
     <string name="inbox_host_down">Offline</string>
     <plurals name="inbox_group_agents">
@@ -91,4 +93,5 @@
     </plurals>
     <string name="inbox_block_agents">AGENTS</string>
     <string name="inbox_block_panes">SESSIONS</string>
-        </resources>
+            <string name="inbox_cd_open_host">Open sessions on %1$s</string>
+</resources>

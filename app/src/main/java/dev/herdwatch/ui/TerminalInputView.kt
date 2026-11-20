@@ -1,7 +1,6 @@
 package dev.herdwatch.ui
 
 import android.content.Context
-import android.os.Build
 import android.text.InputType
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -22,6 +21,13 @@ import android.view.inputmethod.InputMethodManager
 internal class TerminalInputView(context: Context) : View(context) {
     var onBytes: (String) -> Unit = {}
     var applicationCursorKeys: () -> Boolean = { false }
+
+    /**
+     * Mirrors DECSET 2004. Our own "paste" menu item already wraps its payload, but text pasted
+     * through the keyboard — the way most people paste — went out raw, so a five-line paste ran as
+     * five commands even in shells that asked to be told the difference.
+     */
+    var bracketedPaste: () -> Boolean = { false }
 
     /**
      * Which editing session the view currently represents.
@@ -52,13 +58,9 @@ internal class TerminalInputView(context: Context) : View(context) {
     private val line = StringBuilder()
 
     fun markCommitted(text: String) {
-        val lastBreak = text.lastIndexOf('\n')
-        if (lastBreak >= 0) {
-            line.setLength(0)
-            line.append(text.substring(lastBreak + 1))
-        } else {
-            line.append(text)
-        }
+        val next = shadowAfterCommit(line.toString(), text)
+        line.setLength(0)
+        line.append(next)
     }
 
     fun markDeleted(count: Int) {
@@ -83,22 +85,21 @@ internal class TerminalInputView(context: Context) : View(context) {
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // FILTER, not VISIBLE_PASSWORD: password variations make some OEM keyboards (MIUI, EMUI)
-        // switch to their secure IME, which blocks screenshots, disables suggestions differently and
-        // tells the user they are typing a secret. FILTER is an ordinary text keyboard that still
-        // turns off autocorrect and predictions, which is what a shell needs.
+        // A shell expects ASCII, so the keyboard should open in ASCII. With FILTER (or plain text)
+        // a Chinese IME stays in pinyin composition: every command becomes a candidate row the user
+        // has to confirm, and while composing we deliberately send nothing, so typing looks broken.
+        // VISIBLE_PASSWORD would be the usual "latin only" trick, but MIUI marks password fields as
+        // secure: the app then becomes impossible to screenshot or screen-share. URI is the next best
+        // signal — IMEs switch to a latin layout with "/" and the suggestion row off, and it carries
+        // no secure flag.
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
-            InputType.TYPE_TEXT_VARIATION_FILTER
+            InputType.TYPE_TEXT_VARIATION_URI
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or
             EditorInfo.IME_FLAG_NO_EXTRACT_UI or
             EditorInfo.IME_FLAG_NO_FULLSCREEN or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-            } else {
-                0
-            }
+            EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
         return TerminalInputConnection(this)
     }
 
@@ -129,14 +130,8 @@ internal class TerminalInputView(context: Context) : View(context) {
         private val composing = StringBuilder()
         private var composingCursor = 0
 
-        /**
-         * Text that [finishComposingText] already transmitted.
-         *
-         * Some IMEs finalize composition and then call [commitText] with the same string; sending
-         * both would duplicate the character at the prompt. The next identical commit is swallowed
-         * once instead.
-         */
-        private var finalized: String? = null
+        /** Deduplicates the finalize-then-commit pattern some IMEs use. See [CompositionCommitGate]. */
+        private val commitGate = CompositionCommitGate()
 
         /** The editing session this connection belongs to. A reconnect invalidates it. */
         private val generation = this@TerminalInputView.generation
@@ -152,15 +147,15 @@ internal class TerminalInputView(context: Context) : View(context) {
 
         override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
             val value = text?.toString().orEmpty()
-            if (finalized != null && finalized == value) {
-                finalized = null
-                return true
-            }
-            finalized = null
+            if (commitGate.commit(value)) return true
             composing.setLength(0)
             composingCursor = 0
             if (value.isEmpty()) return true
-            emit(terminalInputPayload(value))
+            val payload = terminalInputPayload(value)
+            // Multi-line paste goes out wrapped in ESC[200~ .. ESC[201~ when the remote asked
+            // for it (DECSET 2004), exactly like our own paste menu item.
+            val wrap = bracketedPaste() && (value.contains('\n') || value.contains('\r'))
+            emit(if (wrap) "\u001b[200~$payload\u001b[201~" else payload)
             markCommitted(value)
             return true
         }
@@ -169,6 +164,10 @@ internal class TerminalInputView(context: Context) : View(context) {
             // Composition belongs to the IME until it is committed. Sending each pinyin rewrite
             // would duplicate and garble the eventual Chinese character at the remote PTY.
             val value = text?.toString().orEmpty()
+            // A new composition is a new word, even when it repeats the previous one verbatim
+            // (CJK/handwriting IMEs do this constantly). Without this the dedup gate would swallow
+            // the commit of the repeated word and it would never reach the PTY.
+            commitGate.composing(value)
             composing.setLength(0)
             composing.append(value)
             composingCursor = cursorFor(value, newCursorPosition)
@@ -183,7 +182,7 @@ internal class TerminalInputView(context: Context) : View(context) {
                 val value = composing.toString()
                 composing.setLength(0)
                 composingCursor = 0
-                finalized = value
+                commitGate.finalized(value)
                 emit(terminalInputPayload(value))
                 markCommitted(value)
             }
@@ -212,9 +211,23 @@ internal class TerminalInputView(context: Context) : View(context) {
                 return true
             }
             val delBefore = beforeUnits?.let { line.utf16ToCodePoints(line.length, it) } ?: beforePoints
-            val delAfter = afterUnits?.let { 0 } ?: afterPoints
+            // Forward delete counts code points too: one emoji is one remote character, never two
+            // deletes. The conversion scans the same shadow text backspace uses; the shadow ends at
+            // the cursor (getTextAfterCursor reports nothing), so units the IME claims beyond it
+            // cannot be verified and must not be replayed blindly per UTF-16 unit — that is what
+            // split surrogate pairs into half-character deletes.
+            val delAfter = afterUnits
+                ?.let { units ->
+                    val known = line.utf16ToCodePoints(line.length, units, forward = true)
+                    // Anything the IME counts beyond our shadow cannot be inspected. Assume one
+                    // unit per character there: dropping the request entirely made forward delete
+                    // silently do nothing on keyboards that use it, and replaying it per unit is
+                    // what split emoji into half-character deletes.
+                    val unseen = (units - line.length).coerceAtLeast(0)
+                    known + unseen
+                }
+                ?: afterPoints
             if (delBefore > 0) emit("\u007f".repeat(delBefore))
-            if (afterUnits != null && afterUnits > 0) emit("\u001b[3~".repeat(afterUnits))
             if (delAfter > 0) emit("\u001b[3~".repeat(delAfter))
             // (0, 0) is defined as deleting nothing. Keyboards may issue it while synchronizing, and
             // turning that into a Backspace deleted characters the user never asked to remove.
@@ -236,8 +249,10 @@ internal class TerminalInputView(context: Context) : View(context) {
         }
 
         override fun performEditorAction(actionCode: Int): Boolean {
-            composing.setLength(0)
-            composingCursor = 0
+            // Some IMEs route Enter here instead of commitText("\n"). Discarding the composition
+            // dropped unfinished pinyin the user expected to commit; finalize it through the same
+            // path as finishComposingText first, then press return.
+            finishComposingText()
             emit("\r")
             markReturn()
             return true
@@ -281,8 +296,53 @@ internal class TerminalInputView(context: Context) : View(context) {
         if (newCursorPosition <= 0) 0 else (newCursorPosition - 1).coerceAtMost(text.length)
 }
 
-/** How many code points sit in [units] UTF-16 units before or after [at]. */
-private fun CharSequence.utf16ToCodePoints(at: Int, units: Int, forward: Boolean = false): Int {
+/**
+ * Dedup state machine for the finalize-then-commit IME pattern.
+ *
+ * States: idle (nothing finalized) and armed (a finalize transmitted [text]).
+ * - [finalized] arms the gate with the text finishComposingText just sent.
+ * - [commit] disarms unconditionally; it returns true only when the commit repeats the armed text,
+ *   which the caller must swallow (sending both would duplicate the character at the prompt).
+ * - [composing] with non-empty text disarms: a NEW composition starts a new word, so a later commit
+ *   of the same string is a legitimate repeat, not a duplicate. Empty composition text only ends a
+ *   composition (some IMEs clear it after finalizing) and must keep the gate armed.
+ */
+internal class CompositionCommitGate {
+    private var armed: String? = null
+
+    fun composing(text: String) {
+        if (text.isNotEmpty()) armed = null
+    }
+
+    fun finalized(text: String) {
+        armed = text
+    }
+
+    /** True when [value] duplicates the finalize and must be swallowed. Consumes the arm either way. */
+    fun commit(value: String): Boolean {
+        val duplicate = armed != null && armed == value
+        armed = null
+        return duplicate
+    }
+}
+
+/**
+ * Shadow line after a commit. A line break resets the shadow to the committed tail; IME Enter can
+ * arrive as '\n', '\r\n' or a lone '\r' (commitText from some keyboards), so both break characters
+ * count — otherwise the submitted text stayed in the shadow and skewed later DEL counts.
+ */
+internal fun shadowAfterCommit(previous: String, commit: String): String {
+    val lastBreak = maxOf(commit.lastIndexOf('\n'), commit.lastIndexOf('\r'))
+    return if (lastBreak >= 0) commit.substring(lastBreak + 1) else previous + commit
+}
+
+/**
+ * How many code points sit in [units] UTF-16 units before or after [at].
+ *
+ * Units that run past the end of the known text are ignored here; callers decide what an
+ * unverifiable request means (see the forward-delete path).
+ */
+internal fun CharSequence.utf16ToCodePoints(at: Int, units: Int, forward: Boolean = false): Int {
     if (units <= 0) return 0
     var remaining = units
     var index = at.coerceIn(0, length)
@@ -341,7 +401,7 @@ internal fun terminalKeySequence(event: KeyEvent, applicationCursorKeys: Boolean
     // A dead key (e.g. ^ then e) reports a combining accent flag instead of a code point. Passing
     // the raw value to Character.toChars throws, which would crash the page on a physical keyboard.
     if (unicode and KeyCharacterMap.COMBINING_ACCENT != 0) {
-        val base = KeyCharacterMap.COMBINING_ACCENT_MASK.let { _ -> unicode and 0x7FFFFFFF }
+        val base = unicode and KeyCharacterMap.COMBINING_ACCENT_MASK
         return String(Character.toChars(base))
     }
     val text = String(Character.toChars(unicode))

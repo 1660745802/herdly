@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="common_cancel">Cancel</string>
-    <string name="common_create">Create</string>
     <string name="common_save">Save</string>
     <string name="common_remove">Remove</string>
     <string name="common_close">Close</string>
@@ -12,10 +11,10 @@
     <string name="common_collapse">Collapse</string>
     <string name="common_add">Add</string>
     <string name="common_refresh">Refresh</string>
+    <string name="common_reconnect_now">Reconnect now</string>
     <string name="common_reconnect">Reconnect</string>
     <string name="common_agent">Agent</string>
     <string name="mode_agent_tag">AGENT · DECISIONS</string>
-    <string name="mode_terminal_tag">SSH · TERMINAL</string>
     <string name="status_waiting">Waiting for you</string>
     <string name="status_working">Working</string>
     <string name="status_review">To review</string>

@@ -16,4 +16,7 @@
     <string name="ssh_unknown_host">找不到主机 %1$s</string>
     <string name="ssh_bridge_no_reply">bridge 没有返回（%1$s）：%2$s</string>
     <string name="ssh_unknown_host_key">首次连接，需要确认主机指纹：%1$s</string>
+    <string name="ssh_network_down">网络不可用，等网络恢复会自动重连</string>
+    <string name="ssh_challenge_unsupported">这台机器要求动态口令或二次验证，Herdly 目前只支持密码和密钥</string>
+    <string name="ssh_challenge_not_password">这台机器要输入的不是密码（用户名、域或选项），Herdly 无法代答</string>
 </resources>

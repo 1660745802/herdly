@@ -50,7 +50,6 @@
     <string name="vm_explain_warning">注意：%1$s</string>
 
     <!-- 读屏 -->
-    <string name="vm_read_cancelled">读取已取消，显示上次内容。</string>
     <string name="vm_read_failed">读取失败，显示上次内容：%1$s</string>
 
     <!-- 审批：没送到 / 送到了但没证据 / 不确定 -->

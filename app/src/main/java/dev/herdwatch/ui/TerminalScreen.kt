@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,36 +31,53 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+
+
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import android.widget.Toast
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -73,8 +92,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -82,6 +99,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
 import dev.herdwatch.term.VtRun
+import dev.herdwatch.ui.design.PageBarSpec
+import dev.herdwatch.ui.design.DsMono
+import dev.herdwatch.ui.design.NeoSheet
 import dev.herdwatch.ui.design.DsElev
 import dev.herdwatch.ui.design.DsRadius
 import dev.herdwatch.ui.design.DsSpace
@@ -93,9 +113,7 @@ import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
 import dev.herdwatch.ui.design.NeoMenu
-import dev.herdwatch.ui.design.NeoMenuDivider
 import dev.herdwatch.ui.design.NeoMenuItem
-import dev.herdwatch.ui.design.NeoModeTag
 import dev.herdwatch.ui.design.NeoSpinner
 import dev.herdwatch.ui.design.NeoShadowBleed
 import dev.herdwatch.ui.design.NeoWell
@@ -116,6 +134,7 @@ private const val PROBE_COLUMNS = 40
 /** How long the grid must hold still before the PTY is told about a new size. */
 private const val RESIZE_SETTLE_MS = 220L
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalScreen(
     state: TerminalUiState,
@@ -137,6 +156,7 @@ fun TerminalScreen(
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
     val requestTerminalInput = { if (state.connected) terminalInputView?.requestInput() }
     val showKeyboardLabel = stringResource(R.string.terminal_show_keyboard)
+    val selectLabel = stringResource(R.string.terminal_select_text)
     val hideKeysDesc = stringResource(R.string.terminal_keys_collapse_desc)
     val showKeysDesc = stringResource(R.string.terminal_keys_expand_desc)
 
@@ -148,6 +168,56 @@ fun TerminalScreen(
         if (text.isEmpty() || !state.connected) return@paste
         onKey(bracketedPastePayload(text, state.snapshot?.bracketedPaste == true))
         onFollow()
+    }
+
+    // Ctrl is latched for the next key, whichever keyboard sends it. Putting the latch inside the
+    // key bar meant "Ctrl then c" only worked for the on-screen key — the system keyboard, which is
+    // the one most people actually type on, ignored the latch entirely.
+    var ctrlLatched by rememberSaveable { mutableStateOf(false) }
+    var altLatched by rememberSaveable { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
+    // Search state. The buffer is the whole snapshot the app already holds, so a lookup is a scan
+    // of rows we are drawing anyway — no request, no cursor, and it works offline.
+    var findOpen by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var matchAt by remember { mutableIntStateOf(0) }
+    val searchLines = state.snapshot?.let { snap ->
+        if (snap.alternateScreen) snap.lines.takeLast(snap.rows) else snap.lines
+    }.orEmpty()
+    val matches = remember(searchLines, query) {
+        if (query.isBlank()) emptyList() else searchLines.indices.filter { index ->
+            searchLines[index].runs.joinToString("").contains(query, ignoreCase = true)
+        }
+    }
+    val activeLine = if (matches.isEmpty()) -1 else matches[matchAt.coerceIn(0, matches.lastIndex)]
+    // One funnel for every key source: the on-screen bar, the system keyboard and hardware keys.
+    // Ctrl+C has to mean the same thing whichever of them produced the "c".
+    // A BEL is the program asking for attention. A phone cannot beep politely, so it ticks —
+    // the same signal a key press gives, which is enough to look up from whatever else you were
+    // reading without becoming a notification.
+    val bellFeedback = LocalHapticFeedback.current
+    var lastBell by remember { mutableLongStateOf(state.snapshot?.bellCount ?: 0L) }
+    LaunchedEffect(state.snapshot?.bellCount) {
+        val now = state.snapshot?.bellCount ?: 0L
+        if (now > lastBell) bellFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        lastBell = now
+    }
+
+    val sendKey: (String) -> Unit = { sequence ->
+        val ch = sequence.singleOrNull()?.lowercaseChar()
+        val wasCtrl = ctrlLatched
+        val wasAlt = altLatched
+        // Both latches clear on the next key, whatever that key was: a modifier that stayed latched
+        // after an arrow key would quietly corrupt the following command.
+        ctrlLatched = false
+        altLatched = false
+        val body = if (wasCtrl && ch != null && ch in 'a'..'z') {
+            (ch - 'a' + 1).toChar().toString()
+        } else {
+            sequence
+        }
+        // Alt is a single ESC prefix — the same thing a desktop terminal sends for `Alt+b`.
+        onKey(if (wasAlt) "\u001B$body" else body)
     }
 
     // The status bar inset belongs to this page, not to the app scaffold: the terminal paints its
@@ -164,17 +234,67 @@ fun TerminalScreen(
             onPaste = pasteFromClipboard,
             keysExpanded = keyboardExpanded,
             onToggleKeys = { keyboardExpanded = !keyboardExpanded },
+            onFind = { findOpen = true },
         )
+        // A tap opens the keyboard; a double tap sends Tab, the key a shell needs most and the one
+        // no phone keyboard offers by default. Termius and Blink both teach this pair.
+        var lastTapAt by remember { mutableLongStateOf(0L) }
+        val tapHaptics = LocalHapticFeedback.current
         Box(
-            Modifier.weight(1f).fillMaxWidth().clickable(
+            Modifier.weight(1f).fillMaxWidth().combinedClickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null,
                 onClickLabel = showKeyboardLabel,
-                onClick = requestTerminalInput,
+                onLongClickLabel = selectLabel,
+                // Selection inside a LazyColumn that also answers taps never reliably won the gesture
+                // round in testing, so a long press does the one thing a reader wants there — opens
+                // the buffer as selectable text — instead of starting a selection nobody could drag.
+                onLongClick = {
+                    tapHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    selecting = true
+                },
+                onClick = {
+                    val now = System.currentTimeMillis()
+                    if (now - lastTapAt in 1..280L) {
+                        lastTapAt = 0L
+                        if (state.connected) {
+                            tapHaptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onKey("	")
+                            onFollow()
+                        }
+                    } else {
+                        lastTapAt = now
+                        requestTerminalInput()
+                    }
+                },
             ),
         ) {
             val snapshot = state.snapshot
             if (snapshot != null && snapshot.lines.isNotEmpty()) {
+                // Two-finger pinch resizes the text, exactly as it does in every mature terminal on
+                // a phone. One finger must keep scrolling the buffer, so the gesture only takes
+                // over once a second pointer is down.
+                val currentFont = rememberUpdatedState(state.fontSize)
+                val pinch = Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        var base = 0f
+                        var accumulated = 1f
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.count { it.pressed }
+                            if (pressed >= 2) {
+                                if (base == 0f) {
+                                    base = currentFont.value
+                                    accumulated = 1f
+                                }
+                                accumulated *= event.calculateZoom()
+                                onFontSize((base * accumulated).coerceIn(9f, 22f))
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
+                Box(pinch) {
                 TerminalGrid(
                     snapshot = snapshot,
                     fontSize = state.fontSize,
@@ -182,7 +302,10 @@ fun TerminalScreen(
                     onResize = onResize,
                     onFollow = onFollow,
                     onScrolledUp = { gridScrolledUp = it },
+                    query = if (findOpen) query else "",
+                    activeLine = if (findOpen) activeLine else -1,
                 )
+                }
             } else if (state.error == null || state.connected) {
                 // With a failure card in the middle, the empty-state text behind it printed the
                 // same target twice and left a stray cursor block at the top of the screen.
@@ -206,22 +329,41 @@ fun TerminalScreen(
                 enabled = state.connected,
                 sessionNonce = state.sessionNonce,
                 applicationCursorKeys = state.snapshot?.applicationCursorKeys == true,
-                onKey = { onKey(it); onFollow() },
+                bracketedPaste = state.snapshot?.bracketedPaste == true,
+                onKey = { sendKey(it); onFollow() },
                 onView = { terminalInputView = it },
                 modifier = Modifier.align(Alignment.BottomStart),
             )
             state.error?.takeIf { !state.connected }?.let { message ->
                 Column(
+                    // A card painted with the page's own background was invisible: only the text
+                    // and the button floated. A raised ink wash plus a hairline makes it a panel.
                     Modifier.align(Alignment.Center).padding(20.dp)
                         .clip(RoundedCornerShape(DsRadius.card))
-                        .background(term.background)
+                        .background(term.text.copy(alpha = 0.05f))
+                        .border(1.dp, term.muted.copy(alpha = 0.22f), RoundedCornerShape(DsRadius.card))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(stringResource(R.string.terminal_connection_lost), color = term.risk, style = DsTypography.headline)
                     Text(message, color = term.text, style = DsTypography.body)
+                    if (state.retrying) {
+                        // Say that the app is already working on it: a bare error plus a button makes
+                        // the user think nothing happens until they tap.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            NeoSpinner(Modifier.size(12.dp), color = term.accent, strokeWidth = 1.6.dp)
+                            Spacer(Modifier.width(DsSpace.s))
+                            Text(
+                                stringResource(R.string.terminal_retrying, state.retryAttempt),
+                                color = term.muted,
+                                style = DsTypography.caption,
+                            )
+                        }
+                    }
                     NeoButton(
-                        label = stringResource(R.string.common_reconnect),
+                        label = stringResource(
+                            if (state.retrying) R.string.common_reconnect_now else R.string.common_reconnect,
+                        ),
                         onClick = onReconnect,
                         tone = NeoButtonTone.Primary,
                     )
@@ -244,6 +386,18 @@ fun TerminalScreen(
                 active = keyboardExpanded,
             )
         }
+        if (findOpen) {
+            TerminalFindBar(
+            query = query,
+            onQuery = { query = it; matchAt = 0 },
+            matches = matches.size,
+            position = if (matches.isEmpty()) 0 else matchAt + 1,
+            onPrev = { if (matches.isNotEmpty()) matchAt = (matchAt - 1 + matches.size) % matches.size },
+            onNext = { if (matches.isNotEmpty()) matchAt = (matchAt + 1) % matches.size },
+            onClose = { findOpen = false; query = "" },
+        )
+    }
+
         Box(Modifier.fillMaxWidth().background(term.background)) {
             Column(
                 Modifier.fillMaxWidth()
@@ -259,8 +413,12 @@ fun TerminalScreen(
                     exit = fadeOut(tween(motionMillis(100))) + shrinkVertically(tween(motionMillis(140))),
                 ) {
                     TerminalKeys(
-                        onKey = onKey,
+                        onKey = sendKey,
                         enabled = state.connected,
+                        ctrl = ctrlLatched,
+                        onToggleCtrl = { ctrlLatched = !ctrlLatched },
+                        alt = altLatched,
+                        onToggleAlt = { altLatched = !altLatched },
                         // Both rows, always: ^C / ^D / arrows are not an option the user should
                         // have to discover, and a one-row bar hid the second row behind a default.
                         secondRow = true,
@@ -281,6 +439,30 @@ fun TerminalScreen(
             onTrust = onTrustFingerprint,
         )
     }
+    val uiContext = LocalContext.current
+    // A terminal is watched, not tapped: keep the screen awake for as long as the session is up,
+    // the same way an SSH client on a desktop never dims while a build is running.
+    val hostView = LocalView.current
+    DisposableEffect(state.connected) {
+        hostView.keepScreenOn = state.connected
+        onDispose { hostView.keepScreenOn = false }
+    }
+    if (selecting) {
+        val buffer = snapshotTextForCopy(state.snapshot)
+        TerminalSelectionSheet(
+            text = buffer,
+            fontSize = state.fontSize,
+            onCopy = {
+                clipboard.setText(AnnotatedString(it))
+                Toast.makeText(uiContext, uiContext.getString(R.string.terminal_copied), Toast.LENGTH_SHORT).show()
+            },
+            onOpen = { link ->
+                selecting = false
+                openLink(uiContext, link)
+            },
+            onDismiss = { selecting = false },
+        )
+    }
 }
 
 @Composable
@@ -292,12 +474,15 @@ private fun TerminalBar(
     onPaste: () -> Unit,
     keysExpanded: Boolean,
     onToggleKeys: () -> Unit,
+    onFind: () -> Unit,
 ) {
     val term = LocalTerminalTokens.current
+    val shareContext = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     val fontSizeLabel = stringResource(R.string.terminal_font_size, state.fontSize.roundToInt())
     Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 2.dp),
+        Modifier.fillMaxWidth()
+            .padding(start = PageBarSpec.start, end = PageBarSpec.end, top = PageBarSpec.top, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NeoIconButton(
@@ -318,9 +503,32 @@ private fun TerminalBar(
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                NeoModeTag(stringResource(R.string.mode_terminal_tag))
-                Spacer(Modifier.width(DsSpace.xs))
+                // No mode tag: this page is the ssh terminal — a badge saying so spent the width
+                // that the ssh target needed, and the agent page dropped its badge for the same
+                // reason. What is left is state plus one identifying line.
                 ConnectionPip(state, Modifier.weight(1f, fill = false))
+                // One slot for two facts, because there is only room for one: what the program calls
+                // itself (OSC 0/2 — vim, tmux, less all set it) when it has a name, otherwise the
+                // ssh target. Printing both halved each and left "dev@…" and "vim model…".
+                // Just the account: the machine name is the line above and the full target is one
+                // tap away in the machine list. `user@192.0.2.10:22` never fit and always
+                // ended in an ellipsis, which reads as a truncation bug rather than a choice.
+                // bash publishes `user@host:cwd` as the title on every prompt, which is not a
+                // program name and made this slot truncate itself ("dev@build-h…"). Titles
+                // that look like a prompt are ignored; vim's `vim model.py` and tmux's session
+                // name are what this slot is for.
+                val programTitle = state.snapshot?.title
+                    ?.takeIf { it.isNotBlank() && !SHELL_PROMPT_TITLE.containsMatchIn(it) }
+                val subline = programTitle ?: state.target.substringBefore('@')
+                Spacer(Modifier.width(DsSpace.xs))
+                Text(
+                    subline,
+                    style = DsTypography.micro,
+                    color = term.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
             }
         }
         // Icon only: the word "Reconnect" between the pip and the overflow menu had no room at
@@ -363,6 +571,28 @@ private fun TerminalBar(
                 NeoMenuItem(
                     label = stringResource(R.string.terminal_paste),
                     onClick = { menu = false; onPaste() },
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.terminal_find),
+                    onClick = { menu = false; onFind() },
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.terminal_share),
+                    onClick = {
+                        menu = false
+                        val body = snapshotTextForCopy(state.snapshot)
+                        if (body.isNotBlank()) {
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                                .setType("text/plain")
+                                .putExtra(android.content.Intent.EXTRA_TEXT, body)
+                            shareContext.startActivity(
+                                android.content.Intent.createChooser(
+                                    send,
+                                    shareContext.getString(R.string.terminal_share),
+                                ),
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -423,6 +653,10 @@ private fun TerminalGrid(
     onResize: (Int, Int) -> Unit,
     onFollow: () -> Unit,
     onScrolledUp: (Boolean) -> Unit,
+    /** Text to mark inside the buffer; blank means no search is active. */
+    query: String = "",
+    /** Line the search is currently on, so the grid can jump to it. */
+    activeLine: Int = -1,
 ) {
     // No bottom reserve for controls: the screen already lays out its own strip above this grid,
     // and reserving a second one here would spend that height twice.
@@ -430,10 +664,11 @@ private fun TerminalGrid(
     val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
+    var viewportPx by remember { mutableIntStateOf(0) }
     val lineHeightSp = fontSize * 1.3f
     val lineHeight = with(density) { lineHeightSp.sp.toDp() }
     val textStyle = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = DsMono,
         fontSize = fontSize.sp,
         lineHeight = lineHeightSp.sp,
         color = term.text,
@@ -442,9 +677,9 @@ private fun TerminalGrid(
     // Measure the real advance width once per font size, and measure a full run of glyphs: the
     // single-glyph result is rounded to whole pixels, and that ~1% error accumulates across 46
     // columns until the right edge becomes unreachable.
-    val probeStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp)
+    val probeStyle = TextStyle(fontFamily = DsMono, fontSize = fontSize.sp)
     val measurer = rememberTextMeasurer()
-    val charWidthPx = remember(fontSize) {
+    val charWidthPx = remember(fontSize, probeStyle, measurer, density) {
         (measurer.measure("M".repeat(PROBE_COLUMNS), probeStyle).size.width.toFloat() / PROBE_COLUMNS)
             .coerceAtLeast(1f)
     }
@@ -458,7 +693,17 @@ private fun TerminalGrid(
         // One column of slack: glyph advances are fractional, so the measured estimate can be a
         // hair short and the last character would sit past the end of the pan range.
         val cols = (maxWidth / charWidth).toInt().coerceAtLeast(20)
-        val rows = (maxHeight / lineHeight).toInt()
+        // The grid is sized by the largest window it has had, not the current one. Both the IME and
+        // the key bar shrink this box, and every shrink used to send a TIOCSWINSZ; a shell answers
+        // a window change by redrawing its prompt, so tapping the screen three times left three
+        // copies of the prompt in scrollback. The PTY keeps one stable size and the visible window
+        // is simply shorter while typing.
+        var tallestHeight by remember(fontSize) { mutableStateOf(0.dp) }
+        LaunchedEffect(maxHeight, fontSize) {
+            if (maxHeight > tallestHeight) tallestHeight = maxHeight
+        }
+        val gridHeight = if (maxHeight > tallestHeight) maxHeight else tallestHeight
+        val rows = (gridHeight / lineHeight).toInt()
         // Debounced: while the keyboard slides in, height changes one row at a time and each
         // change would emit a TIOCSWINSZ. A full-screen TUI redraws on every one of those, and the
         // resize notices pile up in scrollback. Waiting for the layout to settle sends exactly one.
@@ -480,32 +725,76 @@ private fun TerminalGrid(
         // no scrollback above it — which is what a real terminal does — and keep the top row pinned.
         val fullScreen = snapshot.alternateScreen
         val visibleLines = if (fullScreen) snapshot.lines.takeLast(snapshot.rows) else snapshot.lines
+        // Stable ordinal keys: scrollback prepends shift every index, and index keys would re-anchor
+        // the first visible row to different content whenever history loads. Ordinals survive
+        // prepends, so LazyColumn keeps the reader on the same line.
+        val identityState = remember { mutableStateOf(emptyLineIndex<dev.herdwatch.term.VtLine>()) }
+        val lineIndex = remember(visibleLines) {
+            advanceLineIndex(identityState.value, visibleLines).also { identityState.value = it }
+        }
         val visibleLast = visibleLines.lastIndex
-        LaunchedEffect(snapshot.revision, stickToBottom, fullScreen) {
+        // Aligning the LAST row to the TOP of the viewport leaves the rest of the screen empty.
+        // Once the grid is taller than the visible area — which is exactly what happens when the
+        // keyboard opens over a fixed-size grid — that reads as "the terminal went blank". Keep the
+        // last row at the bottom instead, by scrolling to the first row that is still on screen.
+        val lineHeightPx = with(density) { lineHeight.toPx() }
+        val rowsInView = if (lineHeightPx > 0f && viewportPx > 0) {
+            (viewportPx / lineHeightPx).toInt().coerceAtLeast(1)
+        } else {
+            Int.MAX_VALUE
+        }
+        // Follow the CURSOR, not the last row. The grid is deliberately taller than the visible
+        // area (that is what keeps the PTY from resizing when the keyboard opens), so its trailing
+        // rows are padding: scrolling to the bottom of the buffer hides a prompt that sits at the
+        // top of a mostly empty screen. The cursor is where the shell is attending; below it there
+        // is nothing to read.
+        val focusRow = if (fullScreen) 0 else snapshot.cursorRow.coerceIn(0, visibleLast.coerceAtLeast(0))
+        val bottomTarget = (focusRow - rowsInView + 1).coerceAtLeast(0)
+        LaunchedEffect(snapshot.revision, stickToBottom, fullScreen, rowsInView) {
             if (fullScreen) {
                 if (listState.firstVisibleItemIndex != 0) listState.scrollToItem(0)
             } else if (stickToBottom && visibleLast >= 0) {
-                listState.scrollToItem(visibleLast)
+                listState.scrollToItem(bottomTarget)
+            }
+        }
+        LaunchedEffect(activeLine, fullScreen) {
+            if (activeLine >= 0 && activeLine <= visibleLast) {
+                listState.animateScrollToItem(activeLine)
             }
         }
         LaunchedEffect(followRequests, fullScreen) {
-            if (fullScreen) listState.scrollToItem(0) else if (visibleLast >= 0) listState.scrollToItem(visibleLast)
+            if (fullScreen) listState.scrollToItem(0) else if (visibleLast >= 0) listState.scrollToItem(bottomTarget)
         }
 
         // Long lines must stay readable: the grid is as wide as the PTY, which on a phone is wider
         // than the viewport, so the whole grid pans horizontally instead of clipping the right edge.
         // One shared scroll state keeps every row aligned — per-row scrolling would tear columns.
         // Width comes from the measured font metrics, not the sizing estimate: a few percent of
-        // drift over 47 columns would leave the last character permanently clipped.
-        val gridWidth = charWidthPx * cols
+        // drift over 47 columns would leave the last character permanently clipped. Wide glyphs
+        // (CJK, emoji) occupy two cells, so a row can outgrow the viewport-derived column count;
+        // the grid must cover the widest row or its tail is clipped. Limitation (deliberate): rows
+        // are one Text each, not a positioned cell grid, so alignment relies on the monospace font
+        // painting wide glyphs at exactly twice the ASCII advance.
+        val widestCells = remember(visibleLines) {
+            visibleLines.maxOfOrNull { line -> line.runs.sumOf { terminalCells(it.text) } } ?: 0
+        }
+        val gridWidth = charWidthPx * maxOf(cols, widestCells)
         SelectionContainer {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().horizontalScroll(gridScroll),
+                modifier = Modifier.fillMaxSize()
+                    .onSizeChanged { viewportPx = it.height }
+                    .horizontalScroll(gridScroll),
             ) {
-                itemsIndexed(visibleLines) { _, line ->
+                itemsIndexed(visibleLines, key = { index, _ -> lineIndex.keys[index] }) { index, line ->
                     Text(
-                        text = line.annotated(term.text, term.background),
+                        text = line.annotated(
+                            defaultText = term.text,
+                            defaultBackground = term.background,
+                            query = query,
+                            strong = index == activeLine,
+                            mark = term.accent,
+                        ),
                         style = textStyle,
                         softWrap = false,
                         maxLines = 1,
@@ -516,6 +805,91 @@ private fun TerminalGrid(
         }
 
 
+    }
+}
+
+/**
+ * Find inside the buffer the app already holds.
+ *
+ * Deliberately not a remote search: the app has every row it draws, so matching is instant, works
+ * offline, and cannot disturb the session. Position is shown as "3 / 12" because "3 matches" leaves
+ * the user wondering where they are.
+ */
+@Composable
+private fun TerminalFindBar(
+    query: String,
+    onQuery: (String) -> Unit,
+    matches: Int,
+    position: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val term = LocalTerminalTokens.current
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier.weight(1f)
+                .clip(RoundedCornerShape(DsRadius.key))
+                .background(term.text.copy(alpha = 0.07f))
+                .padding(horizontal = DsSpace.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NeoIcon(NeoGlyph.Search, Modifier.size(14.dp), tint = term.muted)
+            Spacer(Modifier.width(DsSpace.xs))
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                textStyle = DsTypography.body.copy(color = term.text),
+                cursorBrush = SolidColor(term.accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onNext() }),
+                modifier = Modifier.weight(1f).focusRequester(focus),
+                decorationBox = { inner ->
+                    if (query.isEmpty()) {
+                        Text(
+                            stringResource(R.string.terminal_find_hint),
+                            color = term.muted,
+                            style = DsTypography.body,
+                        )
+                    }
+                    inner()
+                },
+            )
+        }
+        if (query.isNotEmpty()) {
+            Text(
+                if (matches == 0) stringResource(R.string.terminal_find_none) else "$position / $matches",
+                color = term.muted,
+                style = DsTypography.caption,
+                modifier = Modifier.padding(horizontal = DsSpace.xs),
+            )
+        }
+        NeoIconButton(
+            glyph = NeoGlyph.ChevronUp,
+            onClick = onPrev,
+            contentDescription = stringResource(R.string.terminal_find_prev),
+            tint = term.text,
+            enabled = matches > 0,
+        )
+        NeoIconButton(
+            glyph = NeoGlyph.ChevronDown,
+            onClick = onNext,
+            contentDescription = stringResource(R.string.terminal_find_next),
+            tint = term.text,
+            enabled = matches > 0,
+        )
+        NeoIconButton(
+            glyph = NeoGlyph.Close,
+            onClick = onClose,
+            contentDescription = stringResource(R.string.terminal_find_close),
+            tint = term.text,
+        )
     }
 }
 
@@ -574,8 +948,11 @@ private fun TerminalKeys(
     enabled: Boolean,
     secondRow: Boolean,
     applicationCursorKeys: Boolean,
+    ctrl: Boolean,
+    onToggleCtrl: () -> Unit,
+    alt: Boolean,
+    onToggleAlt: () -> Unit,
 ) {
-    var ctrl by rememberSaveable { mutableStateOf(false) }
     val ctrlDesc = stringResource(R.string.terminal_key_ctrl)
     val shiftTabLabel = stringResource(R.string.terminal_key_shift_tab)
     // A key bar that scrolls sideways hid PgDn behind the screen edge with no hint that anything
@@ -584,33 +961,26 @@ private fun TerminalKeys(
     // Split so each row fits a 360dp screen without scrolling: row 1 edits the line,
     // row 2 sends signals and moves through history/scrolling. Ctrl lives at the head of row 1.
     val primary = listOf(
-        TerminalKey("Esc", "", R.string.terminal_key_escape, repeatable = false),
+        TerminalKey("Esc", "\u001B", R.string.terminal_key_escape, repeatable = false),
         TerminalKey("Tab", "	", R.string.terminal_key_tab, repeatable = false),
         // Shift+Tab (back-tab): cycles permission modes in agent CLIs, tabs in tmux.
-        TerminalKey(shiftTabLabel, "[Z", R.string.terminal_key_shift_tab_a11y, repeatable = false),
+        TerminalKey(shiftTabLabel, "\u001B[Z", R.string.terminal_key_shift_tab_a11y, repeatable = false),
         TerminalKey("⌫", "", R.string.terminal_key_backspace),
         TerminalKey("←", arrowKeySequence('D', applicationCursorKeys), R.string.terminal_key_left),
         TerminalKey("→", arrowKeySequence('C', applicationCursorKeys), R.string.terminal_key_right),
     )
     val secondary = listOf(
-        TerminalKey("^C", "", R.string.terminal_key_ctrl_c, repeatable = false),
-        TerminalKey("^D", "", R.string.terminal_key_ctrl_d, repeatable = false),
-        TerminalKey("^Z", "", R.string.terminal_key_ctrl_z, repeatable = false),
+        TerminalKey("^C", "\u0003", R.string.terminal_key_ctrl_c, repeatable = false),
+        TerminalKey("^D", "\u0004", R.string.terminal_key_ctrl_d, repeatable = false),
+        TerminalKey("^Z", "\u001A", R.string.terminal_key_ctrl_z, repeatable = false),
         TerminalKey("↑", arrowKeySequence('A', applicationCursorKeys), R.string.terminal_key_up),
         TerminalKey("↓", arrowKeySequence('B', applicationCursorKeys), R.string.terminal_key_down),
-        TerminalKey("PgUp", "[5~", R.string.terminal_key_page_up, repeatable = false),
-        TerminalKey("PgDn", "[6~", R.string.terminal_key_page_down, repeatable = false),
+        TerminalKey("PgUp", "\u001B[5~", R.string.terminal_key_page_up, repeatable = false),
+        TerminalKey("PgDn", "\u001B[6~", R.string.terminal_key_page_down, repeatable = false),
     )
 
-    val fire: (String) -> Unit = { sequence ->
-        if (ctrl) {
-            ctrl = false
-            val ch = sequence.firstOrNull()?.lowercaseChar()
-            if (ch != null && ch in 'a'..'z') onKey((ch - 'a' + 1).toChar().toString()) else onKey(sequence)
-        } else {
-            onKey(sequence)
-        }
-    }
+    // Ctrl is applied once, on the page, so the bar and the system keyboard cannot disagree.
+    val fire: (String) -> Unit = onKey
 
     // Keys are lifted surfaces sitting side by side. With a 4dp gap the next key's fill painted
     // over the previous key's highlight, so the second row looked cut off; the gap now includes the
@@ -629,7 +999,7 @@ private fun TerminalKeys(
                 enabled = enabled,
                 latched = ctrl,
                 repeatable = false,
-                onPress = { ctrl = !ctrl },
+                onPress = onToggleCtrl,
                 modifier = Modifier.weight(1f),
             )
             primary.forEach { key ->
@@ -650,6 +1020,17 @@ private fun TerminalKeys(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
             ) {
+                // Alt prefixes the next key with ESC, which is how vim, tmux and readline reach
+                // their second layer (`Alt+b`, `Alt+.`). It sits on row 2 because row 1 is full.
+                TerminalKeyButton(
+                    label = "Alt",
+                    description = stringResource(R.string.terminal_key_alt),
+                    enabled = enabled,
+                    latched = alt,
+                    repeatable = false,
+                    onPress = onToggleAlt,
+                    modifier = Modifier.weight(1f),
+                )
                 secondary.forEach { key ->
                     val description = stringResource(key.descriptionRes)
                     TerminalKeyButton(
@@ -680,6 +1061,10 @@ private fun TerminalKeyButton(
 ) {
     val term = LocalTerminalTokens.current
     val scope = rememberCoroutineScope()
+    // A key bar is a keyboard replacement, and keyboards tick. Without feedback a thumb cannot tell
+    // a missed press from a slow remote, which on a 48dp row is the difference between typing and
+    // guessing.
+    val haptics = LocalHapticFeedback.current
     val fill = if (latched) term.accent.copy(alpha = 0.24f) else term.text.copy(alpha = if (enabled) 0.07f else 0.03f)
     Box(
         modifier = modifier
@@ -693,17 +1078,23 @@ private fun TerminalKeyButton(
             }
             .combinedClickable(
                 enabled = enabled,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onPress()
+                },
                 onLongClick = {
                     if (repeatable) {
                         scope.launch {
-                            repeat(6) {
+                            // A long press is a repeat, not a burst: people hold ← to cross a long
+                            // line, and six cells left them tapping. Capped so a stuck finger
+                            // cannot flood the PTY.
+                            repeat(60) {
                                 onPress()
-                                delay(70)
+                                delay(55)
                             }
                         }
                     }
                 },
-                onClick = onPress,
             )
             .padding(horizontal = 2.dp),
         contentAlignment = Alignment.Center,
@@ -732,124 +1123,12 @@ internal fun arrowKeySequence(final: Char, applicationCursorKeys: Boolean): Stri
     return if (applicationCursorKeys) "\u001bO$final" else "\u001b[$final"
 }
 
-/** What a terminal line editor erases with: DEL (0x7f), not backspace (0x08). */
-private const val DIRECT_DELETE = "\u007f"
-
-/**
- * How much of the line the composer keeps as a mirror of the remote one.
- *
- * The mirror only exists so the next edit has something to diff against; past a few dozen
- * characters the extra copy buys nothing and only grows the IME's editing buffer. When the mirror
- * exceeds this budget the field and the watermark are cleared in the same step, so the following
- * edit diffs against an empty mirror (a shorter, safer epoch rather than an unbounded one).
- */
-internal const val DIRECT_MIRROR_BUDGET = 24
-
-/**
- * One direct-mode edit translated into PTY bytes.
- *
- * [text] is what the connection must write (DEL bytes for removed characters, then new text),
- * [sent] is the watermark to remember for the next edit — the text the PTY now holds — and
- * [clearField] says the caller must reset both the field and the watermark to empty.
- */
-internal data class DirectInputEdit(
-    val text: String,
-    val sent: String,
-    val clearField: Boolean,
-)
-
-/**
- * Length of the shared leading run of two strings, in UTF-16 code units.
- *
- * The result never lands between the halves of a supplementary code point (an emoji, for one): a
- * shared prefix that stops after a lone high surrogate would leave half a character on each side,
- * and the PTY has no way to erase that half by itself.
- */
-private fun commonPrefixLength(a: String, b: String): Int {
-    val limit = minOf(a.length, b.length)
-    var index = 0
-    while (index < limit && a[index] == b[index]) index++
-    if (index > 0 && index < limit &&
-        Character.isHighSurrogate(a[index - 1]) && Character.isLowSurrogate(a[index])
-    ) {
-        index--
-    }
-    return index
-}
-
-/** Code points in [text]: a supplementary character is one character on the remote line. */
-private fun codePointLength(text: String): Int = text.codePointCount(0, text.length)
-
-/**
- * The bytes that make the PTY mirror [text] given the [sent] watermark: erase what the watermark
- * holds beyond the shared prefix, then append the new suffix.
- *
- * Erasure counts code points, not UTF-16 code units — deleting one emoji must emit one DEL, not two.
- */
-private fun mirrorDiff(sent: String, text: String): String {
-    val shared = commonPrefixLength(sent, text)
-    val erase = codePointLength(sent.substring(shared))
-    return DIRECT_DELETE.repeat(erase) + text.substring(shared)
-}
-
-/**
- * Direct-mode transmission is a diff, never a replay.
- *
- * [sent] is the watermark: the text the PTY already holds for the current field epoch. Only what
- * the field now shows beyond the longest common prefix with [sent] is new, and a shortened field
- * means that many characters have to be erased first. An IME that re-delivers a value we already
- * transmitted therefore produces an empty diff instead of a second copy of those characters — the
- * old sentinel code sent the whole committed prefix on every edit, so any repeat of an already
- * transmitted value was transmitted again.
- *
- * Nothing here rewrites the field's text, which is what kept the IME's editing session intact:
- * replacing the value with a truncated one made the IME re-deliver its pre-reset buffer.
- *
- * An unfinished composition is never transmitted: while `next.composition != null` the watermark
- * stays put and the committed characters go out on the edit that clears the composition.
- */
-internal fun directInputEdit(sent: String, next: TextFieldValue): DirectInputEdit {
-    if (next.composition != null) return DirectInputEdit(text = "", sent = sent, clearField = false)
-    val text = next.text
-    val outgoing = mirrorDiff(sent, text)
-    return if (text.length > DIRECT_MIRROR_BUDGET) {
-        DirectInputEdit(text = outgoing, sent = "", clearField = true)
-    } else {
-        DirectInputEdit(text = outgoing, sent = text, clearField = false)
-    }
-}
-
-/** The committed part of a field value: everything the IME is not still composing. */
-private fun committedInputText(value: TextFieldValue): String {
-    val composition = value.composition ?: return value.text
-    val start = composition.min.coerceIn(0, value.text.length)
-    val end = composition.max.coerceIn(start, value.text.length)
-    return value.text.removeRange(start, end)
-}
-
-/**
- * Enter in direct mode: flush only what the user actually committed, then press return.
- *
- * Unfinished pinyin is not text the user has chosen yet, so with a live composition nothing is
- * sent and the composition is kept for the next Enter. The committed part is diffed like any other
- * edit, so a mirror that already matches cannot duplicate it, and an empty mirror still sends the
- * bare carriage return.
- */
-internal fun directSubmitEdit(sent: String, next: TextFieldValue): DirectInputEdit {
-    val committed = committedInputText(next)
-    val flushed = mirrorDiff(sent, committed)
-    return if (next.composition != null) {
-        DirectInputEdit(text = flushed, sent = committed, clearField = false)
-    } else {
-        DirectInputEdit(text = flushed + "\r", sent = "", clearField = true)
-    }
-}
-
 @Composable
 private fun TerminalImeCapture(
     enabled: Boolean,
     sessionNonce: Long,
     applicationCursorKeys: Boolean,
+    bracketedPaste: Boolean,
     onKey: (String) -> Unit,
     onView: (TerminalInputView) -> Unit,
     modifier: Modifier = Modifier,
@@ -860,6 +1139,7 @@ private fun TerminalImeCapture(
             view.isEnabled = enabled
             view.onBytes = onKey
             view.applicationCursorKeys = { applicationCursorKeys }
+            view.bracketedPaste = { bracketedPaste }
             // A new SSH channel must not inherit the previous line, composition, or a commit the
             // keyboard queued for the old session.
             if (view.tag != sessionNonce) {
@@ -988,9 +1268,30 @@ private val TERM_PALETTE = listOf(
 internal fun dev.herdwatch.term.VtLine.annotated(
     defaultText: Color,
     defaultBackground: Color,
-): AnnotatedString = buildAnnotatedString {
-    runs.forEach { run ->
-        withStyle(run.spanStyle(defaultText, defaultBackground)) { append(run.text) }
+    query: String = "",
+    strong: Boolean = false,
+    mark: Color = defaultText,
+): AnnotatedString {
+    val plain = runs.joinToString("") { it.text }
+    return buildAnnotatedString {
+        runs.forEach { run ->
+            withStyle(run.spanStyle(defaultText, defaultBackground)) { append(run.text) }
+        }
+        if (query.isNotBlank()) {
+            // Search has to be visible on the screen it searches: the hit keeps the program's own
+            // colour and gains a wash behind it; the line the user is on is the bright one.
+            var from = 0
+            while (true) {
+                val at = plain.indexOf(query, from, ignoreCase = true)
+                if (at < 0) break
+                addStyle(
+                    SpanStyle(background = mark.copy(alpha = if (strong) 0.45f else 0.18f)),
+                    at,
+                    at + query.length,
+                )
+                from = at + query.length
+            }
+        }
     }
 }
 
@@ -999,11 +1300,120 @@ internal fun VtRun.spanStyle(defaultText: Color, defaultBackground: Color = Colo
     val background = bg?.let { xtermColor(it, defaultBackground) } ?: defaultBackground
     val effectiveForeground = if (inverse) background else foreground
     val effectiveBackground = if (inverse) foreground else background
+    // Same floor as the snapshot renderer: keep the remote program's hue, fix the lightness it
+    // assumed a different background for.
+    val legible = if (effectiveBackground.alpha == 0f) {
+        effectiveForeground
+    } else {
+        ensureContrast(effectiveForeground, effectiveBackground)
+    }
     return SpanStyle(
-        color = if (dim) effectiveForeground.copy(alpha = 0.7f) else effectiveForeground,
+        color = if (dim) legible.copy(alpha = 0.7f) else legible,
         background = effectiveBackground,
         fontWeight = if (bold) androidx.compose.ui.text.font.FontWeight.Bold else null,
         fontStyle = if (italic) androidx.compose.ui.text.font.FontStyle.Italic else null,
         textDecoration = if (underline) androidx.compose.ui.text.style.TextDecoration.Underline else null,
     )
+}
+
+/**
+ * The buffer as one block of selectable text.
+ *
+ * Every row is kept, including blank ones — a copy that silently drops empty lines stops being the
+ * screen. Trailing padding is trimmed per line, because a 120-column PTY pads every row.
+ */
+/** `user@host:cwd`, the title bash republishes on every prompt. */
+private val SHELL_PROMPT_TITLE = Regex("^[^\\s@]+@[^\\s:]+:")
+
+internal fun snapshotTextForCopy(snapshot: dev.herdwatch.term.VtSnapshot?): String {
+    val rows = snapshot?.lines
+        ?.map { line -> line.runs.joinToString("") { run -> run.text }.trimEnd() }
+        ?.dropLastWhile { it.isEmpty() }
+        .orEmpty()
+    // A 24-row screen is mostly padding. A run of empty rows is layout, not content, so it collapses
+    // to a single blank line — otherwise a copied prompt arrives with half a page of nothing after it.
+    val kept = ArrayList<String>(rows.size)
+    var blanks = 0
+    for (row in rows) {
+        if (row.isEmpty()) {
+            blanks++
+            if (blanks > 1) continue
+        } else {
+            blanks = 0
+        }
+        kept.add(row)
+    }
+    return kept.joinToString("\n")
+}
+
+@Composable
+private fun TerminalSelectionSheet(
+    text: String,
+    fontSize: Float,
+    onCopy: (String) -> Unit,
+    onOpen: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val term = LocalTerminalTokens.current
+    NeoSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = DsSpace.xl, end = DsSpace.xl, bottom = DsSpace.xxl),
+        ) {
+            Text(stringResource(R.string.terminal_select_title), style = DsTypography.title, color = ds().text)
+            Spacer(Modifier.size(DsSpace.s))
+            // The buffer is shown on the terminal's own surface: white-on-white mono is unreadable,
+            // and the point of picking text out of a terminal is that it still looks like one.
+            val lineHeightDp = fontSize * 1.32f
+            // Height follows the content up to a ceiling. A scroll container measured with an
+            // unbounded child fills whatever it is given, which left a tall dark panel holding two
+            // lines of prompt.
+            val bufferHeight = (text.lines().size * lineHeightDp + DsSpace.m.value * 2).dp
+                .coerceIn(56.dp, 360.dp)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(bufferHeight)
+                    .clip(RoundedCornerShape(DsRadius.control))
+                    .background(term.background)
+                    .padding(DsSpace.m),
+            ) {
+                SelectionContainer {
+                    Text(
+                        text,
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = fontSize.sp,
+                            lineHeight = lineHeightDp.sp,
+                        ),
+                        color = term.text,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
+            // Links that appear on a terminal are usually the reason the screen matters (a review,
+            // a CI job). Opening one must not require selecting the text by hand.
+            val links = remember(text) { urlsIn(text) }
+            links.forEach { link ->
+                Spacer(Modifier.size(DsSpace.s))
+                NeoButton(
+                    label = link,
+                    onClick = { onOpen(link) },
+                    tone = NeoButtonTone.Quiet,
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = NeoGlyph.Link,
+                )
+            }
+            Spacer(Modifier.size(DsSpace.m))
+            NeoButton(
+                label = stringResource(R.string.terminal_copy_all),
+                onClick = { onCopy(text) },
+                tone = NeoButtonTone.Quiet,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }

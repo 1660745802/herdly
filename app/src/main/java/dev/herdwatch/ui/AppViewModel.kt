@@ -63,6 +63,18 @@ data class DetailState(
     val loadedAt: Long? = null,
     /** How many lines from the tail we ask for. Grows when the reader scrolls to the top. */
     val historyLines: Int = PANE_READ_LINES,
+    /** When the snapshot text last differed. Polls that return the same screen do not count. */
+    val textChangedAt: Long = 0L,
+    /**
+     * When the remote last reported a different screen revision.
+     *
+     * A TUI that only animates a spinner changes the revision without changing a character of the
+     * flattened text, so this is the honest "the far end is still working" signal: it separates
+     * "quiet but alive" from "nothing has happened at all".
+     */
+    val revisionChangedAt: Long = 0L,
+    /** Set once a wider read failed: the page stops retrying and says so inline instead. */
+    val historyEnded: Boolean = false,
     /**
      * What this app has sent to the pane, newest last.
      *
@@ -134,15 +146,12 @@ private const val PANE_READ_LINES = 1200
 private var nextSendId: Long = 1
 
 /**
- * Ceiling for the "read further back" request.
- *
- * The bridge has no cursor, so every step re-reads the whole tail: 19,200 lines was roughly a
- * megabyte of ANSI on a long agent run and people still hit the wall mid-conversation. 48,000 costs
- * a few megabytes at worst (the text is parsed once per load, and rows are rendered lazily) and
- * covers a day of terminal scrollback. Past this the honest answer is "this is a pane, not an
- * archive" — durable history would have to live on the host.
+ * Ceiling for "read further back". The bridge has no cursor, so every step re-reads the whole tail:
+ * wider history costs a bigger payload, not a cheaper page. 48k lines was 20 MB of text through one
+ * exec channel and timed out, which the page then reported as a disconnect. Past 12k the honest
+ * answer is "this is a pane, not an archive" — durable history would have to live on the host.
  */
-private const val MAX_HISTORY_LINES = 48_000
+private const val MAX_HISTORY_LINES = 12_000
 
 class AppViewModel(
     private val repository: HerdRepository,
@@ -153,6 +162,8 @@ class AppViewModel(
      * Null in JVM tests, where none of it can run; the update row then only offers the check.
      */
     private val updateInstaller: UpdateInstaller? = null,
+    /** Application context for the terminal's network callback; null in JVM tests. */
+    private val appContext: android.content.Context? = null,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -162,6 +173,7 @@ class AppViewModel(
     private val terminal = TerminalController(
         scope = viewModelScope,
         onFingerprintTrusted = { hostId, fingerprint -> repository.updateFingerprint(hostId, fingerprint) },
+        applicationContext = appContext,
     )
     val terminalState: StateFlow<TerminalUiState> = terminal.state
 
@@ -290,6 +302,12 @@ class AppViewModel(
 
     fun onForeground() {
         foreground = true
+        // The system installer is another app's screen: when we come back and the version is
+        // unchanged, the user cancelled or it failed. Without this the row said "Installing…"
+        // forever and the button stayed disabled until the process restarted.
+        if (_update.value.installing) {
+            _update.update { it.copy(installing = false) }
+        }
         repository.setVisible(true)
         repository.setForeground(true)
         val capturedPage = ticket()
@@ -310,6 +328,13 @@ class AppViewModel(
         // and the connection. Closing them here was what made every return a reconnect.
         repository.setVisible(false)
         _ui.update { it.copy(detail = decorate(it.detail.copy(stale = true, loading = false, explainLoading = false))) }
+    }
+
+    override fun onCleared() {
+        // The network callback lives on the application context; without this every finished
+        // Activity kept its view model alive through it.
+        terminal.dispose()
+        super.onCleared()
     }
 
     fun refresh() {
@@ -468,7 +493,8 @@ class AppViewModel(
         }
     }
 
-    fun clearUpdateResult() {
+    /** Forget a finished check, including a downloaded APK we are no longer offering. */
+    fun dismissUpdate() {
         updateJob?.cancel()
         updateJob = null
         pendingApk = null
@@ -755,7 +781,7 @@ class AppViewModel(
             dev.herdwatch.domain.AgentKinds.resumeArgs(kind.lowercase())
     }
 
-    fun openAgent(agent: Agent, hostFilterId: String? = null) {
+    fun openAgent(agent: Agent) {
         val state = _ui.value
         val live = state.repo.agents.firstOrNull { it.key == agent.key } ?: return
         rememberPage()
@@ -772,19 +798,17 @@ class AppViewModel(
             _ui.update { it.copy(message = Str.get(R.string.vm_host_not_found)) }
             return
         }
-        if (pushPage) rememberPage()
         val key = "$hostId:$paneId"
         val live = _ui.value.repo.agents.firstOrNull { it.key == key }
-        if (live != null) {
-            showAgent(live)
-            return
-        }
         val pane = runtime.structure.panes.firstOrNull { it.id == paneId }
-        if (pane == null) {
+        // Resolve before pushing: a pane that vanished must not cost the user an extra Back press.
+        val target = live ?: pane?.let { paneDetailAgent(runtime, it) }
+        if (target == null) {
             _ui.update { it.copy(message = Str.get(R.string.vm_pane_not_found)) }
             return
         }
-        showAgent(paneDetailAgent(runtime, pane))
+        if (pushPage) rememberPage()
+        showAgent(target)
     }
 
     private fun showAgent(agent: Agent) {
@@ -858,8 +882,16 @@ class AppViewModel(
         if (!matches(page)) return
         operations.observe(page.agentKey, ApprovalPolicy.evidence(pane))
         updateDetail(page) { current ->
+            val changed = current.text != pane.text
             reconcileSent(current, pane.text).copy(
-                text = pane.text, ask = ApprovalPolicy.evidence(pane).ask,
+                text = pane.text,
+                textChangedAt = if (changed || current.textChangedAt == 0L) System.currentTimeMillis() else current.textChangedAt,
+                revisionChangedAt = if (pane.revision != current.revision || current.revisionChangedAt == 0L) {
+                    System.currentTimeMillis()
+                } else {
+                    current.revisionChangedAt
+                },
+                ask = ApprovalPolicy.evidence(pane).ask,
                 loading = false, revision = pane.revision, shownSeq = shownSeq,
                 truncated = pane.truncated, loadedAt = System.currentTimeMillis(),
                 // A pane read and the agent snapshot are separate requests. A status
@@ -872,7 +904,7 @@ class AppViewModel(
         }
     }
 
-    private fun loadPane(agent: Agent, quiet: Boolean = false) {
+    private fun loadPane(agent: Agent, quiet: Boolean = false, history: Boolean = false) {
         val page = ticket() ?: return
         if (!matches(page) || page.agentKey != agent.key || !foreground) return
         val lines = _ui.value.detail.historyLines
@@ -881,15 +913,26 @@ class AppViewModel(
         updateDetail(page) { it.copy(loading = !quiet, error = null) }
         loadJob = viewModelScope.launch {
             try {
-                val pane = repository.readPane(agent, lines)
+                val pane = repository.readPane(agent, lines, history = history)
                 currentCoroutineContext().ensureActive()
                 if (request == readGeneration) applyPane(page, pane, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
             } catch (cancelled: CancellationException) {
-                if (request == readGeneration) updateDetail(page) { it.copy(loading = false, stale = true, error = Str.get(R.string.vm_read_cancelled)) }
+                // Superseded, not broken: whoever replaced this read owns the page state now.
+                currentCoroutineContext().ensureActive()
                 throw cancelled
             } catch (t: Throwable) {
                 if (request == readGeneration) updateDetail(page) {
-                    it.copy(loading = false, stale = true, error = Str.get(R.string.vm_read_failed, dev.herdwatch.data.humanize(t)))
+                    if (history) {
+                        // The screen keeps what it already shows and says so quietly; an error strip
+                        // for "we could not fetch older lines" read as a broken connection.
+                        it.copy(loading = false, historyEnded = true)
+                    } else {
+                        it.copy(
+                            loading = false,
+                            stale = true,
+                            error = Str.get(R.string.vm_read_failed, dev.herdwatch.data.humanize(t)),
+                        )
+                    }
                 }
             }
         }
@@ -909,10 +952,11 @@ class AppViewModel(
         // `truncated == false` means the host already returned its whole buffer; there is nothing
         // further back to fetch and asking again would be a round trip for nothing.
         if (!detail.truncated && detail.text.isNotBlank()) return
+        if (detail.historyEnded) return
         val next = (detail.historyLines * 2).coerceAtMost(MAX_HISTORY_LINES)
         if (next == detail.historyLines) return
         updateDetail(ticket() ?: return) { it.copy(historyLines = next) }
-        loadPane(agent, quiet = true)
+        loadPane(agent, quiet = true, history = true)
     }
 
     private fun recordSent(agentKey: String, text: String) {
@@ -1065,6 +1109,7 @@ class AppViewModel(
         val value = text.trimEnd()
         if (value.isEmpty()) return
         val agent = _ui.value.detail.agent ?: return
+        if (!decorate(_ui.value.detail).canSend) return
         // A newline inside `text` is not Enter: `pane.send_input` types the characters and drops the
         // line break, so the command sat at the prompt unexecuted until the user pressed the key
         // strip. Submit is a key press, not a character.
@@ -1079,6 +1124,18 @@ class AppViewModel(
             if (operations.draft(agent.key) == captured) operations.clearDraft(agent.key, captured)
             syncOperation(agent.key)
         })
+    }
+
+    /**
+     * Literal bytes for the key strip: escape sequences such as Shift+Tab, or a lone DEL.
+     *
+     * Not routed through [sendInput]: that one is a composer submission — it stages the text as a
+     * draft so a failed send does not lose it. A key press has no draft, and staging one clobbered
+     * whatever the user had half-typed.
+     */
+    fun sendRawBytes(bytes: String) {
+        if (bytes.isEmpty()) return
+        sendManual(Str.get(R.string.vm_label_keys), rpc = { repository.sendInput(it, bytes, emptyList()) })
     }
 
     fun sendPrompt(text: String = _ui.value.detail.draft, onSent: () -> Unit = {}) {
@@ -1223,6 +1280,9 @@ class AppViewModel(
 
     fun eatMessage() = _ui.update { it.copy(message = null) }
 
+    /** One short line for the user about something the app could not do; never about a remote task. */
+    fun say(text: String) = _ui.update { it.copy(message = text) }
+
     class Factory(private val app: HerdwatchApp) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -1231,6 +1291,7 @@ class AppViewModel(
                 app.preferencesStore,
                 app.appVersion,
                 AndroidUpdateInstaller(app),
+                app.applicationContext,
             ) as T
     }
 }

@@ -16,4 +16,7 @@
     <string name="ssh_unknown_host">Host %1$s not found</string>
     <string name="ssh_bridge_no_reply">bridge returned nothing (%1$s): %2$s</string>
     <string name="ssh_unknown_host_key">First connection — confirm this host key: %1$s</string>
+    <string name="ssh_network_down">No network right now; this reconnects by itself</string>
+    <string name="ssh_challenge_unsupported">This host asks for a one-time code; Herdly supports passwords and keys only</string>
+    <string name="ssh_challenge_not_password">This host asks for something other than a password (a user name, domain or choice)</string>
 </resources>

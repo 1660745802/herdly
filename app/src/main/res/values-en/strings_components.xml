@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="components_status_a11y">Status: %1$s</string>
     <string name="components_just_now">Just now</string>
     <string name="components_not_synced">Not synced</string>
     <plurals name="components_seconds_ago">

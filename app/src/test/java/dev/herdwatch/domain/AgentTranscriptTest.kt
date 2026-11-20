@@ -384,7 +384,7 @@ class AgentTranscriptTest {
         val code = t.blocks.single { it.role == TranscriptRole.TOOL }
         assertTrue(code.text.contains("adb shell setprop x false"))
         assertTrue(code.text.contains("---"))
-        assertTrue(code.text.endsWith("```"))
+        assertEquals("```", code.text.lines().last().trim())
         assertEquals("● done", t.blocks[2].text)
         assertEquals("> next request", t.blocks[3].text)
         assertTrue(t.blocks.none { it.role == TranscriptRole.APPROVAL })

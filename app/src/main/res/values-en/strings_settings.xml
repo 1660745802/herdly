@@ -58,4 +58,6 @@
     <string name="update_bad_apk">The downloaded file is not a Herdly build</string>
     <string name="update_older_apk">That build is not newer than this one</string>
     <string name="update_no_apk">This release has no APK asset</string>
+    <string name="update_bad_signature">This package is not signed by the installed Herdly build; install refused.</string>
+    <string name="settings_update_dismiss">Dismiss</string>
 </resources>

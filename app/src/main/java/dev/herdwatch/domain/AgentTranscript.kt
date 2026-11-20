@@ -116,6 +116,8 @@ object AgentTranscript {
                     begin(TOOL, true, ln)
                     inFence = true
                 } else {
+                    // Both fences stay in the block text: re-parsing the joined text has to see a
+                    // closed fence, or every later turn gets swallowed. The UI strips them.
                     cur.add(ln)
                     ln.consumed = true
                     flush()
@@ -198,8 +200,16 @@ object AgentTranscript {
         val coverage = if (denom == 0) 0f else num.toFloat() / denom.toFloat()
         val reliable = coverage >= 0.6f && blocks.size >= 2 &&
             blocks.any { it.role == USER || it.role == ASSISTANT }
-        return Transcript(blocks, coverage, reliable)
+        // The agent's own TUI advertises its own folds ("(12 more lines, ctrl+o to expand)").
+        // On a phone that hotkey does not exist, so the sentence is a promise we never keep.
+        val cleaned = blocks.map { block ->
+            val text = foreignFold.replace(block.text, "")
+            if (text == block.text) block else block.copy(text = text)
+        }
+        return Transcript(cleaned, coverage, reliable)
     }
+
+    private val foreignFold = Regex("\\s*\\(\\s*\\d+\\s+more lines?[^)]*\\)", RegexOption.IGNORE_CASE)
 
     // ---------------------------------------------------------------- line classification
 

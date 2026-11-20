@@ -4,14 +4,13 @@ import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import dev.herdwatch.ui.design.NeoShadowBleed
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,12 +30,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
@@ -47,7 +43,6 @@ import dev.herdwatch.data.ThemeMode
 import dev.herdwatch.data.UpdateChecker
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.design.DsElev
-import dev.herdwatch.ui.design.DsMotion
 import dev.herdwatch.ui.design.DsRadius
 import dev.herdwatch.ui.design.DsSpace
 import dev.herdwatch.ui.design.DsTypography
@@ -56,14 +51,12 @@ import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
-import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoSection
 import dev.herdwatch.ui.design.NeoSegmented
 import dev.herdwatch.ui.design.NeoWell
 import dev.herdwatch.ui.design.ds
-import dev.herdwatch.ui.theme.MonoStyle
 import kotlin.math.roundToInt
 import dev.herdwatch.ui.design.spacing
 
@@ -87,6 +80,7 @@ fun SettingsScreen(
     version: String = "",
     update: UpdateUi = UpdateUi(),
     onCheckUpdate: () -> Unit = {},
+    onDismissUpdate: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
     onOpenInstallPermission: () -> Unit = {},
 ) {
@@ -145,6 +139,7 @@ fun SettingsScreen(
                 onCheck = onCheckUpdate,
                 onInstall = onInstallUpdate,
                 onPermission = onOpenInstallPermission,
+                onDismiss = onDismissUpdate,
             )
         }
 
@@ -376,35 +371,6 @@ private fun DangerRow(title: String, subtitle: String, action: String, onClick: 
     }
 }
 
-/** A navigate-away row: raised surface, whole row clickable, chevron on the right. */
-@Composable
-private fun EntryRow(title: String, subtitle: String, onClick: () -> Unit) {
-    val colors = ds()
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = DsSpace.m),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = DsTypography.bodyStrong, color = colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                subtitle,
-                style = DsTypography.caption,
-                color = colors.textSoft,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(DsSpace.m))
-        NeoIcon(NeoGlyph.ChevronRight, modifier = Modifier.size(18.dp), tint = colors.textFaint, contentDescription = null)
-    }
-}
-
-// ---------------------------------------------------------------- folded help
-
 @Composable
 private fun NeoChevron() {
     NeoIcon(
@@ -429,58 +395,18 @@ private fun UpdateRow(
     onCheck: () -> Unit,
     onInstall: () -> Unit,
     onPermission: () -> Unit,
+    onDismiss: () -> Unit = {},
 ) {
     val colors = ds()
     val newer = update.result as? UpdateChecker.Result.Newer
     val current = update.result as? UpdateChecker.Result.Current
     val failed = update.result as? UpdateChecker.Result.Failed
     val downloading = update.downloading
+    // One line for "what this is" and "what I can do about it": the title on the left, its actions
+    // on the right. Stacking title, status and a button row made a five-line block out of a row
+    // that is, most of the time, just "up to date — check again".
     Column(Modifier.fillMaxWidth().padding(vertical = DsSpace.m)) {
-        Text(
-            if (newer != null) {
-                stringResource(R.string.settings_update_available, newer.release.version)
-            } else {
-                stringResource(R.string.settings_update_title)
-            },
-            style = DsTypography.bodyStrong,
-            color = if (newer != null) colors.accent else colors.text,
-        )
-        val detail = when {
-            update.error != null -> update.error
-            update.installing -> stringResource(R.string.settings_update_installing)
-            downloading -> stringResource(R.string.settings_update_downloading, update.progress)
-            update.needsPermission -> stringResource(R.string.settings_update_permission)
-            update.readyVersion != null && newer != null ->
-                stringResource(R.string.settings_update_ready, newer.release.version)
-            newer != null -> newer.release.notes.lineSequence()
-                .map(String::trim)
-                .filter { it.isNotEmpty() && !it.startsWith("#") }
-                .take(3)
-                .joinToString(" ")
-
-            current != null -> stringResource(R.string.settings_update_current, current.version)
-            failed != null -> failureText(failed.reason)
-            update.checking -> stringResource(R.string.settings_update_checking)
-            else -> stringResource(R.string.settings_update_summary)
-        }
-        Text(
-            detail.orEmpty(),
-            style = DsTypography.caption,
-            color = if (failed != null || update.error != null) colors.danger else colors.textSoft,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (downloading) {
-            Spacer(Modifier.height(DsSpace.s))
-            NeoWell(Modifier.fillMaxWidth().height(6.dp), corner = DsRadius.pill) {
-                Box(
-                    Modifier.fillMaxWidth(update.progress / 100f).fillMaxSize()
-                        .background(colors.accent, RoundedCornerShape(DsRadius.pill)),
-                )
-            }
-        }
-        Spacer(Modifier.height(DsSpace.s))
-        Row(horizontalArrangement = Arrangement.spacedBy(DsSpace.s)) {
+        val actions: @Composable RowScope.() -> Unit = {
             when {
                 update.needsPermission -> NeoButton(
                     label = stringResource(R.string.settings_update_permission_action),
@@ -509,6 +435,71 @@ private fun UpdateRow(
                     compact = true,
                 )
             }
+            // Anything known can be put away. Without this the row kept the last answer for the
+            // rest of the session, including a cancelled install.
+            if (update.result != null || update.error != null || update.readyVersion != null) {
+                NeoButton(
+                    label = stringResource(R.string.settings_update_dismiss),
+                    onClick = onDismiss,
+                    tone = NeoButtonTone.Ghost,
+                    enabled = !downloading && !update.installing && !update.checking,
+                    compact = true,
+                )
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
+        ) {
+            Text(
+                if (newer != null) {
+                    stringResource(R.string.settings_update_available, newer.release.version)
+                } else {
+                    stringResource(R.string.settings_update_title)
+                },
+                style = DsTypography.bodyStrong,
+                color = if (newer != null) colors.accent else colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            actions()
+        }
+        val detail = when {
+            update.error != null -> update.error
+            update.installing -> stringResource(R.string.settings_update_installing)
+            downloading -> stringResource(R.string.settings_update_downloading, update.progress)
+            update.needsPermission -> stringResource(R.string.settings_update_permission)
+            update.readyVersion != null && newer != null ->
+                stringResource(R.string.settings_update_ready, newer.release.version)
+            newer != null -> newer.release.notes.lineSequence()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .take(3)
+                .joinToString(" ")
+
+            current != null -> stringResource(R.string.settings_update_current, current.version)
+            failed != null -> failureText(failed.reason)
+            update.checking -> stringResource(R.string.settings_update_checking)
+            else -> stringResource(R.string.settings_update_summary)
+        }
+        Spacer(Modifier.height(DsSpace.xs))
+        Text(
+            detail.orEmpty(),
+            style = DsTypography.caption,
+            color = if (failed != null || update.error != null) colors.danger else colors.textSoft,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (downloading) {
+            Spacer(Modifier.height(DsSpace.s))
+            NeoWell(Modifier.fillMaxWidth().height(6.dp), corner = DsRadius.pill) {
+                Box(
+                    Modifier.fillMaxWidth(update.progress / 100f).fillMaxSize()
+                        .background(colors.accent, RoundedCornerShape(DsRadius.pill)),
+                )
+            }
         }
     }
 }
@@ -525,15 +516,6 @@ private fun failureText(reason: String): String = when {
         stringResource(R.string.settings_update_failed_http, reason)
 
     else -> stringResource(R.string.settings_update_failed_network)
-}
-
-@Composable
-private fun DetailBlock(title: String, body: String) {
-    val colors = ds()
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(DsSpace.xxs)) {
-        Text(title, style = DsTypography.caption, color = colors.textSoft, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(body, style = DsTypography.body, color = colors.text)
-    }
 }
 
 /** Language: a preference, but on Android 12 and below it is the system's, so say so. */

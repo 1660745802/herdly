@@ -64,7 +64,7 @@ class PaneInputTest {
         }
 
         override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText =
-            PaneText("likunhong@host:/tmp$ ", 1, false)
+            PaneText("dev@host:/tmp$ ", 1, false)
     }
 
     @Test fun `composer submit types the command and presses enter`() = runTest {

@@ -72,4 +72,35 @@ class UpdateCheckerTest {
     fun `unparseable local version accepts any published release`() {
         assertTrue(ReleaseParser.isNewer("0.2.0", ""))
     }
+
+    @Test
+    fun `a tester on a prerelease is offered the next prerelease`() {
+        // Equal numeric cores used to compare as "not newer", so rc1 users were stranded.
+        assertTrue(ReleaseParser.isNewer("0.2.0-rc2", "0.2.0-rc1"))
+        assertFalse(ReleaseParser.isNewer("0.2.0-rc1", "0.2.0-rc2"))
+        assertFalse(ReleaseParser.isNewer("0.2.0-rc1", "0.2.0-rc1"))
+        assertTrue("numeric identifiers compare numerically", ReleaseParser.isNewer("0.2.0-rc10", "0.2.0-rc9"))
+        assertTrue("longer identifier list wins", ReleaseParser.isNewer("0.2.0-rc1.1", "0.2.0-rc1"))
+        assertTrue("a newer core still wins over any suffix", ReleaseParser.isNewer("0.3.0-rc1", "0.2.0"))
+    }
+
+    @Test
+    fun `escaped slashes in an asset url still resolve`() {
+        // GitHub escapes forward slashes in some responses; searching the body for the decoded
+        // URL found nothing and the app claimed the release had no APK.
+        val escaped = """{"tag_name":"v0.3.0","assets":[{"browser_download_url":"https:\/\/example.com\/herdly-0.3.0.apk"}]}"""
+        assertEquals("https://example.com/herdly-0.3.0.apk", ReleaseParser.parse(escaped)!!.apkUrl)
+    }
+
+    @Test
+    fun `the first apk asset wins regardless of asset order`() {
+        val json = """
+            {"tag_name":"v0.3.0","assets":[
+              {"name":"checksum","browser_download_url":"https://example.com/a.sha256"},
+              {"name":"first","browser_download_url":"https://example.com/first.apk"},
+              {"name":"second","browser_download_url":"https://example.com/second.apk"}
+            ]}
+        """.trimIndent()
+        assertEquals("https://example.com/first.apk", ReleaseParser.parse(json)!!.apkUrl)
+    }
 }

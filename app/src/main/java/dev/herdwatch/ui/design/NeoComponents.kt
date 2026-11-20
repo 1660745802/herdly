@@ -77,7 +77,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -276,10 +278,12 @@ fun NeoSegmented(
         animationSpec = tween(motionMillis(DsMotion.base)),
         label = "segmentThumb",
     )
+    // 48dp track: this is a mode switch, not the page's primary action. At 56dp it read as a
+    // button row and stole a band of height from the content on every visit.
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(48.dp)
             .neoInset(DsRadius.control, DsElev.inset, colors.well, colors)
             .clip(RoundedCornerShape(DsRadius.control))
             .padding(4.dp),
@@ -287,19 +291,19 @@ fun NeoSegmented(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(48.dp)
                 .onSizeChanged { trackWidth = it.width },
         ) {
             if (segmentPx > 0f) {
                 Box(
                     modifier = Modifier
                         .width(segmentDp)
-                        .height(48.dp)
+                        .height(40.dp)
                         .graphicsLayer { translationX = thumbOffset }
                         .neoRaised(DsRadius.control - 4.dp, DsElev.soft, colors.baseRaised, colors),
                 )
             }
-            Row(Modifier.fillMaxWidth().height(48.dp)) {
+            Row(Modifier.fillMaxWidth().height(40.dp)) {
                 options.forEachIndexed { index, label ->
                     val selected = index == selectedIndex
                     val textColor by animateColorAsState(
@@ -467,8 +471,10 @@ fun NeoChip(
         animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipFill",
     )
+    // Accent-on-accentWash measured 4.38:1, i.e. the selected chip was the least legible state.
+    // The accent now lives in the fill wash and the border, not in the label.
     val textColor by animateColorAsState(
-        targetValue = if (selected) colors.accent else colors.textSoft,
+        targetValue = if (selected) colors.text else colors.textSoft,
         animationSpec = tween(motionMillis(DsMotion.quick)),
         label = "chipText",
     )
@@ -536,6 +542,7 @@ fun NeoKey(
     active: Boolean = false,
 ) {
     val colors = ds()
+    val haptics = LocalHapticFeedback.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val sink by animateFloatAsState(
@@ -550,15 +557,21 @@ fun NeoKey(
     )
     Box(
         modifier = modifier
-            .height(44.dp)
+            // 48dp, the same floor as every other control: the key bar is the most-tapped surface
+            // in the app and 44dp was the largest sustained deviation from our own rule.
+            .height(48.dp)
             // A key bar is a compromise with the keyboard it replaces: the target stays above the
             // 40dp floor while the row costs 44dp of terminal rows instead of 48.
             // Free-standing keys keep a fixed width (56dp when wide); inside a weighted row the
             // caller passes stretch so the key fills its slot instead of leaving dead space.
-            .then(if (stretch) Modifier else Modifier.width(if (wide) 56.dp else 44.dp))
+            .then(if (stretch) Modifier else Modifier.width(if (wide) 60.dp else 48.dp))
             .neoState(DsRadius.key, DsElev.soft, fill, colors, sink)
             .clip(RoundedCornerShape(DsRadius.key))
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onPress),
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                // Same tick as the SSH key bar: one key shape, one feel, on both pages.
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onPress()
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -612,9 +625,6 @@ fun NeoDivider(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
             .background(colors.shadowDark.copy(alpha = if (colors.isDark) 0.35f else 0.18f)),
     )
 }
-
-@Composable
-fun SpacerHeight(height: Dp) = Spacer(Modifier.height(height))
 
 /**
  * The one loading indicator.

@@ -27,7 +27,23 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** A failure that happened while establishing or using an interactive shell. */
-class ShellConnectException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class ShellConnectException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * The server rejected the credentials. Retrying cannot help, so it is its own type: the terminal
+ * controller uses it to stop the automatic reconnect instead of hammering a wrong password.
+ */
+class ShellAuthException(message: String, cause: Throwable? = null) : ShellConnectException(message, cause)
+
+/**
+ * The host asked a question we cannot answer with what it stored, e.g. a one-time code.
+ *
+ * Only the user can answer it, so this is its own type: the page must not retry, and it must say
+ * why rather than showing "authentication failed", which sends people to re-check a password that
+ * was never the problem.
+ */
+class ShellChallengeUnsupportedException(message: String, cause: Throwable? = null) :
+    ShellConnectException(message, cause)
 
 /**
  * The host presents a key we have never stored. Nothing has been sent yet: the caller must show
@@ -202,17 +218,31 @@ class ShellSession(
             candidate.setConfig("server_host_key", HOST_KEY_ALGORITHMS)
             candidate.serverAliveInterval = 30_000
             candidate.serverAliveCountMax = 3
-            if (config.authType == AuthType.PASSWORD) candidate.setPassword(config.secret)
-            candidate.timeout = SOCKET_TIMEOUT_MS
-            synchronized(stateGate) {
-                check(!closed) { Str.get(R.string.ssh_session_closed) }
-                session = candidate
+            if (config.authType == AuthType.PASSWORD) {
+                candidate.setPassword(config.secret)
+                candidate.userInfo = passwordUserInfo(config.secret)
             }
+            candidate.timeout = SOCKET_TIMEOUT_MS
+            synchronized(stateGate) { check(!closed) { Str.get(R.string.ssh_session_closed) } }
             try {
                 candidate.connect(CONNECT_TIMEOUT_MS)
+                // Publishing before connect() left the candidate unreachable to close(): a page
+                // exit during the handshake orphaned the socket.
+                synchronized(stateGate) {
+                    if (closed) {
+                        runCatching { candidate.disconnect() }
+                        throw ShellConnectException(Str.get(R.string.ssh_session_closed), null)
+                    }
+                    session = candidate
+                }
             } catch (e: Exception) {
                 forget(candidate)
                 runCatching { candidate.disconnect() }
+                // JSch wraps whatever a UserInfo callback throws, so the typed reason is dug out of
+                // the cause chain instead of being flattened into "Auth fail".
+                generateSequence<Throwable>(e) { it.cause }
+                    .firstOrNull { it is ShellChallengeUnsupportedException }
+                    ?.let { throw ShellChallengeUnsupportedException(it.message.orEmpty(), e) }
                 val observed = lastSeenFingerprint
                 if (pinned != null && observed != null && observed != pinned) {
                     throw HostKeyMismatchException(pinned, observed)
@@ -222,7 +252,17 @@ class ShellSession(
                 }
                 lastFailure = e
                 if (index < config.endpoints.lastIndex && e.isUnreachableAddress()) continue
-                throw ShellConnectException(Str.get(R.string.ssh_connect_failed, endpoint.toString(), detail(e)), e)
+                val readable = detail(e)
+                // An authentication rejection is final: the controller must not auto-retry it.
+                // Classified on the transport message, never on the localized sentence: a copy edit
+                // must not turn a wrong password into a retryable failure.
+                if (e.isAuthRejection()) {
+                    throw ShellAuthException(
+                        Str.get(R.string.ssh_connect_failed, endpoint.toString(), readable),
+                        e,
+                    )
+                }
+                throw ShellConnectException(Str.get(R.string.ssh_connect_failed, endpoint.toString(), readable), e)
             }
             activeAddress = endpoint.toString()
             opened = candidate
@@ -318,6 +358,11 @@ class ShellSession(
             lower.contains("timeout") || lower.contains("timed out") || lower.contains("not established") ->
                 Str.get(R.string.ssh_connect_timeout, CONNECT_TIMEOUT_MS / 1000)
             lower.contains("connection refused") -> Str.get(R.string.ssh_refused)
+            // "failed to connect to /10.0.0.1 (port 22) ... ENETUNREACH" is the phone, not the host,
+            // and it is the one failure the app can recover from by waiting.
+            lower.contains("enetunreach") || lower.contains("network is unreachable") ||
+                lower.contains("no route to host") || lower.contains("ehostunreach") ->
+                Str.get(R.string.ssh_network_down)
             lower.contains("unknownhost") || lower.contains("name or service not known") ->
                 Str.get(R.string.ssh_unknown_host, config.host)
             message.isBlank() -> e.javaClass.simpleName
@@ -346,4 +391,81 @@ class ShellSession(
         /** A terminal Enter is CR, not LF: the remote PTY translates it. */
         val ENTER = byteArrayOf('\r'.code.toByte())
     }
+
 }
+/**
+ * Answers keyboard-interactive prompts from the stored secret.
+ *
+ * Many hardened sshd configurations turn password login off and leave `keyboard-interactive` on,
+ * which is the same password typed into a prompt. A prompt that asks for something only the person
+ * can supply — a one-time code, a push approval, a PIN token — is refused instead of answered with
+ * the wrong thing, because a wrong answer burns an attempt and looks like a wrong password.
+ *
+ * Returns null when this host needs the user.
+ */
+internal fun keyboardInteractiveAnswers(prompts: List<String>, echos: List<Boolean>, secret: String): List<String>? {
+    if (keyboardInteractiveRefusal(prompts, echos) != null) return null
+    return prompts.map { secret }
+}
+
+/** Why a prompt round cannot be answered from the stored secret; the two cases need different copy. */
+internal enum class ChallengeRefusal { ONE_TIME_CODE, NOT_A_PASSWORD }
+
+internal fun keyboardInteractiveRefusal(prompts: List<String>, echos: List<Boolean>): ChallengeRefusal? {
+    if (prompts.isEmpty()) return null
+    if (prompts.any { prompt -> looksLikeOneTimeCode(prompt) }) return ChallengeRefusal.ONE_TIME_CODE
+    // Only hidden answers are passwords. A visible prompt is a username, a domain or a selector,
+    // and answering it with the password would send the secret to the wrong field.
+    if (echos.size != prompts.size || echos.any { it }) return ChallengeRefusal.NOT_A_PASSWORD
+    return null
+}
+
+private val ONE_TIME_CODE_HINTS = listOf(
+    "one-time", "one time", "verification code", "passcode", "authenticator",
+    "yubikey", "security code", "动态", "验证码", "口令", "二次验证",
+)
+
+/** Short hints are whole words: "Allow pinning to this host?" is not a request for a PIN. */
+private val ONE_TIME_CODE_WORDS = Regex("""\b(otp|token|pin|duo|push)\b""")
+
+internal fun looksLikeOneTimeCode(prompt: String): Boolean {
+    val text = prompt.lowercase()
+    return ONE_TIME_CODE_HINTS.any { text.contains(it) } || ONE_TIME_CODE_WORDS.containsMatchIn(text)
+}
+
+
+/**
+ * JSch hands every keyboard-interactive round to a [com.jcraft.jsch.UserInfo]. Without one, a host
+ * that only offers `keyboard-interactive` looks like a wrong password.
+ */
+private fun passwordUserInfo(secret: String): com.jcraft.jsch.UserInfo =
+    object : com.jcraft.jsch.UserInfo, com.jcraft.jsch.UIKeyboardInteractive {
+        override fun getPassphrase(): String = secret
+
+        override fun getPassword(): String = secret
+
+        override fun promptPassword(message: String?): Boolean = true
+
+        override fun promptPassphrase(message: String?): Boolean = true
+
+        override fun promptYesNo(message: String?): Boolean = false
+
+        override fun showMessage(message: String?) = Unit
+
+        override fun promptKeyboardInteractive(
+            destination: String?,
+            name: String?,
+            instruction: String?,
+            prompt: Array<String>,
+            echo: BooleanArray,
+        ): Array<String> {
+            when (val refusal = keyboardInteractiveRefusal(prompt.toList(), echo.toList())) {
+                ChallengeRefusal.ONE_TIME_CODE ->
+                    throw ShellChallengeUnsupportedException(Str.get(R.string.ssh_challenge_unsupported))
+                ChallengeRefusal.NOT_A_PASSWORD ->
+                    throw ShellChallengeUnsupportedException(Str.get(R.string.ssh_challenge_not_password))
+                null -> Unit
+            }
+            return Array(prompt.size) { secret }
+        }
+    }

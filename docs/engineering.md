@@ -1,30 +1,31 @@
 # 工程
 
+界面行为契约见 [design/interaction-spec.md](design/interaction-spec.md)，范围与验收见 [product.md](product.md)，命令见 [development.md](development.md)。本文件只写实现层的约束与取舍。
+
 ## 1. 栈与版本
 
 | 项 | 选择 |
 | --- | --- |
-| 语言 / UI | Kotlin 2.1.0，Jetpack Compose + 自绘设计系统 `ui/design`（Material 3 只用于表单控件与系统弹层，颜色与字号均由应用调色板和 `DsTypography` 派生） |
+| 语言 / UI | Kotlin 2.1.0，Jetpack Compose + 自绘设计系统 `ui/design`（Material 3 只用于表单控件与系统弹层，颜色与字号由应用调色板和 `DsTypography` 派生） |
 | 构建 | AGP 8.7.3，Gradle 8.14（wrapper），JDK 17 或 21（字节码目标 17） |
 | SDK | compileSdk / targetSdk 35，minSdk 26 |
 | SSH | JSch 0.2.20，纯 JVM |
 | 序列化 | kotlinx.serialization JSON 1.7.3 |
 | 存储 | SharedPreferences + Android Keystore AES-GCM |
+| 字体 | 随包 `res/font/terminal_mono.ttf`（等宽 + CJK 等宽回退），不依赖系统等宽字体 |
 | 测试 | JUnit4、coroutines-test；Python unittest / Paramiko |
 
-应用名称为 Herdly，包名 `dev.herdwatch`。`uxTest` 构建使用独立包名 `dev.herdwatch.uxtest`，不覆盖正式应用的数据。
+应用名 Herdly，包名 `dev.herdwatch`。`uxTest` 构建用独立包名 `dev.herdwatch.uxtest`，不覆盖正式应用数据。
 
 ## 2. 传输
 
-Herdr bridge 一行一个 JSON 请求，一条 exec 通道处理一次请求，完成后关闭。默认命令通过登录 shell 运行：
+Herdr bridge 一行一个 JSON 请求，一条 exec 通道处理一次请求，完成后关闭。默认命令经登录 shell 运行，用于恢复非交互 SSH 缺少的 PATH：
 
 ```bash
 bash -lc 'herdr [--session <name>] remote-api-bridge'
 ```
 
-自定义命令按配置运行；默认命令的登录 shell 用于恢复非交互 SSH 缺少的 PATH。请求按字符串 `id` 匹配响应，最多跳过 20 行启动输出。RPC 错误转换为 `HerdrRpcException`。
-
-每个主机一条逻辑客户端，客户端内串行请求。阻塞 SSH 工作放在可取消的执行器任务中；取消会断开 session，关闭的客户端不会重用。认证、连接失败与真实主机密钥不匹配分别处理。主路径不需要主机额外安装 Python、代理或守护进程。
+自定义命令按配置运行。请求按字符串 `id` 匹配响应，最多跳过 20 行启动输出；RPC 错误转成 `HerdrRpcException`。每个主机一条逻辑客户端，客户端内串行请求。阻塞 SSH 工作放在可取消的执行器任务里：取消断开 session，关闭的客户端不复用。读屏取消只上抛 `CancellationException`，不拆会话；历史读取用 `failFast`，超时不牵连正常连接。主路径不需要主机额外安装 Python、代理或守护进程。
 
 ## 3. 数据流与并发
 
@@ -33,109 +34,107 @@ Compose Screen → AppViewModel → HerdRepository
                                ├─ HerdrClient → Herdr bridge
                                ├─ BridgeCodec
                                └─ HostStore → Keystore
-AppViewModel → AskParser / ApprovalPolicy / OperationState
+AppViewModel → AskParser / ApprovalPolicy / OperationState / AgentTranscript
 ```
 
-仓库的 `gate` 保护短内存状态转换；不跨网络调用持有。`configGate` 串行化配置的持久化事务，每个主机有独立 Mutex。连接持有客户端身份、配置版本、前后台 generation 的 lease；过期连接结果不能发布快照、错误或就绪状态。
+- `gate` 只保护短内存状态转换，不跨网络调用持有；`configGate` 串行化配置持久化事务；每主机独立 Mutex。
+- 连接持有客户端身份、配置版本、前后台 generation 的 lease，过期结果不能发布快照、错误或就绪状态。页 generation 与读请求 generation 防止旧异步结果覆盖新页。
+- 全量同步用 Semaphore 限 4 个主机任务，单主机 25 秒超时，一台失败不取消其他主机，`refreshing` 在 finally 收尾。
+- 写入 RPC 的接受结果与后续刷新分离：刷新失败不把已接受的写入改判为发送失败；所有 mutation 都不自动重试。
+- 重连按 `hostId` 去重，一次尝试未结束时的重复点击直接返回。
 
-全量同步通过 Semaphore 限制最多 4 个主机任务，单主机 25 秒超时；一个主机失败不取消其他主机。`refreshing` 在 finally 中收尾。写入 RPC 的接受结果与后续刷新分离：刷新失败不把已接受的写入改判为发送失败。所有 mutation 均不自动重试。
+## 4. 生命周期与同步节奏
 
-重连按 `hostId` 去重：同一次连接尝试未结束时的重复点击直接返回，不会并发发起第二个连接；尝试结束（成功或失败）后才允许再次重连。
+- `ProcessLifecycleOwner` ON_START 恢复连接并回到前台节奏；ON_STOP 不关客户端，只置 `visible=false` 并放慢轮询。
+- 前台 5 秒同步，后台 20 秒（`HerdRepository.backgroundPollIntervalMillis`），回前台立即刷新一次，手动刷新始终可立即触发。
+- 有主机时 `ConnectionService`（`dataSync` 前台服务）持有进程，通知文案由纯函数 `connectionSummary(RepoState)` 生成，只在文案变化时重发；主机清空或用户退出即 `stopSelf()`。Android 14 的 `dataSync` 预算耗尽走 `onTimeout`：先离开前台再停服务，并停掉 watcher，避免留下一条没人清理的常驻通知。
+- Android 13+ 拒绝 `POST_NOTIFICATIONS` 时服务照常运行，只是通知不可见。
+- 失败、断线、返回前台都保留最后快照并标注状态与成功同步时间；加密缓存只保存最新成功快照里真实存在的 agent。
+- 详情每 3 秒尝试读屏，已有读取时不取消重发；操作记录与草稿按 agent 保存，切页不解除操作锁。草稿只在 ViewModel 内，支持切页 / 后台 / 旋转，不承诺进程死亡后恢复。
+- 阅读位置按 pane 记在内存 LRU（上限 80，按访问顺序淘汰）：滚动偏移、是否跟随底部、用户手动暂停。TalkBack 触发的自动暂停与用户暂停分开记录。冻结期间状态序号变化标为待同步，读取期间发生变化的证据保持 stale。
+- 没有 WorkManager 或 Alarm；唯一常驻是上面那个由连接数决定生死的前台服务。
 
-## 4. 同步与生命周期
+整机终端另有自己的重连策略（`ui/TerminalController.kt`）：可重试失败按 1 / 2 / 4 / 8 / 16 / 30 秒退避，六次后停下等人处理；`retryDelayMs(attempt, error)` 是纯函数，自动重连不重置计数（否则永远停在第一档）。认证失败、指纹不符、需要动态口令不重试。网络恢复回调立刻重试一次并取消已排队的等待；回调注册在应用 Context 上，`AppViewModel.onCleared()` 必须 `terminal.dispose()` 注销。滚动历史 5000 行（`SCROLLBACK_LINES`）。
 
-- `ProcessLifecycleOwner` ON_START 恢复连接并回到前台节奏；ON_STOP 不关闭客户端，只把 `visible` 置 false 并放慢轮询。
-- 前台每 5 秒同步，后台每 20 秒（`HerdRepository.backgroundPollIntervalMillis`），回到前台立即刷新一次；手动刷新始终可立即触发。
-- 有主机时由 `ConnectionService`（前台服务，`dataSync` 类型）持有进程，通知栏写明已连接台数与待处理数；主机清空或用户退出时 `stopSelf()`，不常驻。
-- Android 13+ 需要 `POST_NOTIFICATIONS`：拒绝授权时服务照常运行，只是通知不可见；应用回到前台会立刻补齐一次同步。
-- 失败、断线与返回前台时保留最后快照，界面标注连接状态和成功同步时间；旧数据不代表实时状态。
-- 加密缓存只保存最新一次成功快照里真实存在的 agent；已消失的 agent 不缓存、不提示恢复。
-- 详情每 3 秒尝试读屏，已有读取时不取消重发。阅读历史时仅停止自动跟随，读取仍继续，有新内容入口可回到底部；“暂停更新”、选择复制和全屏原文阅读会冻结已显示证据，首次读取仍会完成，手动刷新始终可用。页面打开时检测 TalkBack 触摸探索并默认暂停更新。
-- 阅读位置按 agent 记在 ViewModel 的内存 LRU（上限 80，按访问顺序淘汰）中：页滚动偏移、原文滚动偏移、是否跟随底部、用户手动暂停。切页、返回和重新进入会恢复；不写盘，进程结束即丢失。TalkBack 触发的自动暂停与用户手动暂停分开记录，恢复自动更新不改写用户的暂停选择。
-- 冻结期间状态序号变化会标为待同步；读取期间发生状态变化，返回的证据也保持 stale，需重新读取后才允许辅助审批。
-- 详情离线时提供“重连并读取”，同主机重连合并重复点击；成功后仅在原页面 ticket 仍有效时读回当前任务，不跳页或清空草稿。
-- 没有 WorkManager 或 Alarm；唯一的常驻是上面那个由连接数决定生死的前台服务。
+尚未量化 4G RTT、耗电与大量 agent 的成本；事件订阅应在测量之后决定。
 
-尚未量化 4G RTT、耗电和大量 agent 的成本；事件订阅应在测量之后决定。
+## 5. 身份与排序
 
-## 5. 收件箱与详情身份
+BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REVIEW`、`working → WORKING`、`idle → IDLE`。每个 pane 一行，稳定 key `hostId:paneId`。等待时长由客户端观察同状态持续时间计算，不是服务端排队时间；REVIEW 只代表 Herdr 的 done，没有本地已读游标。
 
-BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REVIEW`、`working → WORKING`、`idle → IDLE`。每个 pane 一行，稳定 key 为 `hostId:paneId`。等待时长由客户端观察同状态持续时间计算，不是服务端排队时间。REVIEW 只代表 Herdr 的 done，没有本地已读游标。
+列表按机器分块（`hostQueueBlocks`），机器顺序为待处理数降序 → agent 数 → 分屏数 → 名称，保证刷新不跳格。agent 顺序由 `ui/InboxQueue.kt` 的 `inboxQueue(agents, filter, query)` 决定：WAITING → UNKNOWN → REVIEW → WORKING → IDLE，WAITING 内按等待开始时间升序，其余按状态变化序号降序，同序按名称。搜索不区分大小写，匹配名称、仓库、主机、类型、pane ID、工作区、标签页、cwd；收起搜索框保留 query 与结果。宽屏两栏各自调用同一个 `hostQueueBlocks(..., emitAgents, emitPanes)`，与竖屏一一对应。
 
-列表按机器分块（`hostQueueBlocks`），块内先 agent 后分屏；机器顺序为待处理数降序 → agent 数 → 分屏数 → 名称，保证刷新不跳格。agent 顺序由 `ui/InboxQueue.kt` 的 `inboxQueue(agents, filter, query)` 决定：WAITING → UNKNOWN → REVIEW → WORKING → IDLE；WAITING 内按等待开始时间升序（等得最久在前），其余按状态变化序号降序，同序再按名称。ATTENTION 过滤只保留前三类。搜索不区分大小写，匹配名称、仓库、主机、类型、pane ID、工作区、标签页和 cwd。收起搜索框只隐藏输入框，保留 query 与过滤结果，并在列表上方以一行显示当前生效的搜索。
+## 6. 读屏、解析与发送
 
-宽屏（≥600dp 或横屏）用两个 `LazyColumn`，各自调用同一个 `hostQueueBlocks(..., emitAgents, emitPanes)`，因此两栏的机器块与竖屏一一对应。页 generation 与读请求 generation 防止旧异步结果覆盖新页。操作记录和草稿按 agent 保存，切页不会解除操作锁。草稿留在 ViewModel 内，支持切页、后台和旋转；不承诺进程死亡后的恢复。
+读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`。`lines` 从 `PANE_READ_LINES = 1200` 起步，上滑到顶按 `historyLines` 翻倍，上限 `MAX_HISTORY_LINES = 12_000`，直到 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能请求更长的尾部，每次响应都是上一次的超集；48k 行会是 20 MB 文本挤过一条 exec 通道并超时，界面上表现为断线，所以停在 12k。读取失败保留旧原文并标注错误与过期状态。
 
-## 6. 审批和发送
+两条渲染路径：整机终端走 `term/VtScreen.kt`（真 VT 解析：备用屏幕、SGR、括号粘贴、OSC 标题、BEL），分屏走 `ui/TerminalDump.kt`（按列对齐的等宽网格，默认自动换行——快照没有横向滚动，不换行等于丢掉右半边）。`ui/ContrastColor.kt` 把远端假设为浅底终端的墨色提到深底可读。审批证据、复制与核对始终用原始文本；复制整屏只做去 ANSI，不做压缩。
 
-读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`，`lines` 由 `AppViewModel.PANE_READ_LINES = 1200` 起步，上滑到顶时按 `historyLines` 翻倍（上限 `MAX_HISTORY_LINES = 48_000`），直到服务端返回 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能靠请求更长的尾部，每次响应都是上一次的超集；界面不显示请求行数，只在截断时给一句轻提示。读取失败保留旧原文并标注错误与过期状态。
+终端输入只有一条链路：`ui/TerminalInputView.kt` 是 `onCheckIsTextEditor()` 为真的自定义 View，`InputConnection` 把 IME 的 commit / deleteSurroundingText（UTF-16 与码点两种）/ 方向键译成 PTY 字节，本地只留一份诊断镜像行；会话切换与重连按 generation 丢弃迟到提交。输入类型是 `TYPE_CLASS_TEXT | MULTI_LINE | NO_SUGGESTIONS | TYPE_TEXT_VARIATION_URI`：URI 变体让 MIUI/EMUI 给出拉丁键盘而不是拼音候选，同时避开 `VISIBLE_PASSWORD` 触发的安全键盘黑屏。`⇧Tab`、`⌫`、`PgUp`、`PgDn` 绕过输入框直接发字节（`ESC[Z` / DEL / `ESC[5~` / `ESC[6~`），桥的按键词表没有这些名字。
 
-终端使用独立权重视口；状态条只在错误、操作结果、主机断开、证据过期（带「重新读取」）、用户暂停或 TalkBack 暂停时出现，正常阅读不显示时钟与暂停开关。底部回复与审批入口固定，小高度时收起页头细节。页面骨架契约见 [design/interaction-spec.md](design/interaction-spec.md)。审批面板暂停轮询；发送启动后关闭，校验拒绝则保留并展示原因。恢复阅读时若正在发送，不触发竞争读请求。
-
-AskParser 去 ANSI / 控制字符后，仅解析末尾的连续编号菜单、y/n、Enter/Esc。编号必须从 1 连续开始；菜单后出现新的业务输出时不复用旧选项。英文意图按词匹配，避免把 token 等文本当作 ok。问题与所有选项完整展示。
+AskParser 去 ANSI / 控制字符后只解析末尾的连续编号菜单、y/n、Enter/Esc：编号必须从 1 连续开始，菜单后出现新业务输出时不复用旧选项，英文意图按词匹配（避免把 token 当作 ok）。问题与全部选项完整展示。
 
 辅助审批的条件：
 
 1. agent 仍存在且状态为 WAITING / UNKNOWN，主机在线且应用在前台；
 2. 已展示并重新读取的证据均完整、非截断；
-3. 问题、全部选项、按键和完整屏幕上下文一致；
-4. 可用 revision 没有变化；revision 为 0 时仍必须比较完整证据；
+3. 问题、全部选项、按键与完整屏幕上下文一致；
+4. 可用 revision 没有变化，revision 为 0 时仍必须比较完整证据；
 5. 发送所选原始按键，不依据按钮标题重新推导。
 
-发送结果区分 RPC 请求已接受、屏幕变化、未变化和后续读取失败。屏幕未变化不能证明没送到，变化也不能证明任务成功。已接受的同一份审批证据禁止重复辅助提交；结果不确定时阻止继续写入，需要刷新、阅读并显式核对远端后解除。长期授权独立二次确认，中断始终确认 Ctrl-C。
+发送结果区分 RPC 已接受、屏幕变化、未变化、后续读取失败。屏幕未变化不能证明没送到，变化也不能证明任务成功。同一份审批证据禁止重复辅助提交；结果不确定时阻止继续写入，需要刷新、阅读并显式核对后解除。长期授权二次确认，中断始终确认 Ctrl-C。回复草稿只在 RPC 接受后清除同一版本，失败或用户已编辑新草稿时保留。三个发送入口（prompt / keys / input）都过同一个 `canSend` 闸门。
 
-回复草稿只在 RPC 接受后清除同一版本；失败或用户已经编辑新草稿时保留。终端渲染有两条路径：整机终端走 `term/VtScreen.kt`（真 VT 解析，备用屏幕、括号粘贴），分屏用 `ui/TerminalDump.kt`（按列对齐的等宽网格，不自动换行，跟随尾部）。审批证据、复制与核对始终使用原始文本。
+### 对话拆分的诚实边界
 
-终端输入只有一条链路：`ui/TerminalInputView.kt` 是一个 `onCheckIsTextEditor()` 为真的自定义 View，`InputConnection` 把 IME 的 commit / deleteSurroundingText（UTF-16 与码点两种） / 方向键直接译成 PTY 字节，本地只维护一份用于诊断的镜像行。会话切换、断线重连通过 generation 丢弃迟到的提交。输入类型必须是普通文本（`VISIBLE_PASSWORD` 会让 MIUI/EMUI 切到安全键盘并把界面拍黑）。
+`domain/AgentTranscript.kt` 把一屏快照拆成 user / assistant / tool / system / approval 块，是**启发式**，宁可拒绝也不猜：
 
-### 对话视图的诚实边界
+- `>` 开头的行只有在整行没有制表符（│ ┃ ├ ┼ 等）、长度 ≤160、不是 `$ ` 命令、也不含 `405 ~ 105` 这类区间时才认作用户发言，引用的表格行因此不会被标成「你」。
+- ``` 围栏内是字面代码，不再做角色识别。
+- 只有 `coverage ≥ 0.6 && 块数 ≥ 2 && 至少一个 user 或 assistant 块` 才置 `reliable`；不可信时退化成一整块正文（去装饰行），不弹「无法识别」。
+- 我发的消息只来自本地发送记录，绝不从屏幕猜。
+- 审批、复制、核对永远用原始证据。
 
-`domain/AgentTranscript.kt` 把一屏快照拆成 user / assistant / tool / system / approval 块。它是**启发式**，因此宁可拒绝也不猜：
+**剩余限制**：读屏与发送是两次 RPC，无法消除中间的远端状态变化窗口；严格原子审批需要 Herdr 提供带 expected revision / evidence 的条件写入。解析器无法识别时提供原文、手动按键与回复。
 
-- `>` 开头的行只有在整行没有制表符（│ ┃ ├ ┼ 等）、长度 ≤160、不是 `$ ` 命令、也不含 `405 ~ 105` 这类区间时才认作用户发言；引用的表格行因此不会被标成「你」。
-- ``` 围栏内的内容是字面代码，不再做任何角色识别（否则命令行注释会被拆成新的一段对话）。
-- 只有 `coverage ≥ 0.6 && 块数 ≥ 2 && 至少一个 user 或 assistant 块` 才置 `reliable`；不可信时对话视图退化成一整块正文（去掉装饰行），不再弹「无法识别」的提示——切到终端模式随时能看到原文。
-- 审批、复制、看原文永远使用原始证据，绝不使用拆分结果。
-
-**剩余限制**：读屏与发送是两次 RPC，无法消除其中的远端状态变化窗口。严格原子审批需要 Herdr 提供带 expected revision / evidence 的条件写入 API。解析器仍是启发式，无法识别时提供原文、手动按键和回复。
-
-界面材质由 `ui/design` 的 `DsTokens` + `neoRaised` / `neoInset` / `neoState` 统一实现：单一光源的同心圆角矩形合成阴影，兼容 API 26，不使用系统 backdrop blur。`GlassBackdrop` 只画底盘色与左上角极淡提亮。终端表面共用 `LocalTerminalTokens`，保持不透明和高对比。
+界面材质由 `ui/design` 的 `DsTokens` + `neoRaised` / `neoInset` / `neoState` 实现：单一光源的同心圆角矩形合成阴影，兼容 API 26，不用系统 backdrop blur。终端表面共用 `LocalTerminalTokens`，保持不透明与高对比。
 
 ## 7. 结构与任务
 
-结构按 workspace / tab / pane 展示，机器页与会话页点同一行都走 `push(Screen.Detail)`。新建工作区 / 标签页会带上用户填写的起始目录（`createWorkspace(hostId, label, cwd)`），标签页先选工作区再创建，不静默落到“第一个工作区”。进入结构时记录来源页，返回回到该来源（收件箱或机器页等）；重复打开结构不会把来源改写成结构页本身。新建工作区、标签页、agent.start、分屏、聚焦、重命名、关闭均对应 Herdr API。关闭先确认。启动或恢复只提供已连接主机中可保守判定为空 shell 的 pane，并结合当前 agents 排除占用；模型不能证明时不给危险默认值。名称做基本冲突检查，额外参数每行一个，保留参数内空格。
+结构按 workspace / tab / pane 展示，机器页与会话页点同一行都走 `push(Screen.Detail)`，`openPane` 先解析目标再入栈（消失的 pane 不该多花一次返回）。新建工作区 / 标签页带用户填写的起始目录（`createWorkspace(hostId, label, cwd)`），标签页先选工作区，不静默落到"第一个工作区"。新建工作区、标签页、`agent.start`、分屏、聚焦、重命名、关闭都对应 Herdr API，关闭先确认。启动或恢复只提供已连接主机中可保守判定为空 shell 的 pane，并结合当前 agents 排除占用；模型不能证明时不给危险默认值。名称做基本冲突检查，额外参数每行一个并保留行内空格。
 
-resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 使用 `--continue`，codex 使用 `resume --last`，gemini 使用 `--resume latest`。
+resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 用 `--continue`，codex 用 `resume --last`，gemini 用 `--resume latest`。指令面板的候选由 `domain/AgentCommandCatalog.kt` 按 agent 类型给出，优先采用当前屏幕真实画出的 `/xxx`。
 
-## 8. 信任与存储
+## 8. 信任、认证与存储
 
-- 连接地址：`HostConfig.endpoints` 按顺序给出主地址与可选备用地址（备用端口为 0 时复用主端口）。桥与终端两条连接使用同一策略：只有异常链里出现 `ConnectException` / `NoRouteToHostException` / `UnknownHostException` / `SocketTimeoutException` / `PortUnreachableException`（`isUnreachableAddress()`）才换下一个地址；认证失败与指纹不符立即上报，不重试 —— 否则一次错密码会变成两次，并掩盖真正原因。连接成功后 `HerdrClient.activeAddress` / `ShellSession.activeAddress` 记录实际路由，仓库写入 `HostRuntime.activeAddress`，机器卡片据此显示「经主地址 / 经备用地址」。
-- 首次连接不再静默 TOFU，终端和 Herdr 桥两条连接一致：没有已保存指纹时 SSH 层在握手阶段中止并抛出 `UnknownHostKeyException`（携带 SHA-256 指纹与算法名），凭证不会发给未确认的主机。终端页弹出指纹确认框，确认后以 `allowUnknownKey=true` 重连；桥连接把待确认指纹放进 `HostRuntime.pendingKey`，机器卡片显示「确认主机密钥」，确认后 `trustNewFingerprint` 先落盘再重连。已有指纹在握手阶段校验，`StrictHostKeyChecking=yes`；JSch 认证与校验配置按 session 设置。
-- 主机密钥算法固定为 `ssh-ed25519, rsa-sha2-512/256, ecdsa-sha2-nistp256/384/521`（`HostKeyPolicy`），与 OpenSSH 默认顺序一致，用户核对的指纹能和 `ssh-keygen -lf` 对上；不提供 SHA-1 的 `ssh-rsa`/`ssh-dss`。
-- 首次指纹必须同步持久化成功，再发布连接就绪。保存失败会暴露错误，不能只在内存中信任。
-- 密钥变化展示保存值与本次观察值，显式确认后更新；认证错误不会伪装成密钥变化。
-- 主机列表、密码 / 私钥 / passphrase 加密保存。配置使用 `commit()`，主副恢复副本保存同一代信任状态，防止回退旧副本复活已删凭据或旧 pin。
-- 主副副本均无法解密时拒绝覆盖；删除主机与清理其缓存在同一 preferences 事务完成。
-- 缓存按主机单独加密。屏幕文本仅在内存中，复制由用户触发。Android 云备份和设备迁移均显式排除应用数据。
-- 无账号、遥测、中继。非 SSH 网络请求只有用户手动触发的更新：`data/UpdateChecker.kt` 读取 GitHub Release（12 秒超时），`data/UpdateInstaller.kt` 下载该 release 的 APK 并校验包名与 versionCode，随后经 `FileProvider` 交给系统安装器。两者都不上传任何数据。未做生物识别、截图保护、证书、跳板机。
-- 应用内更新需要 `REQUEST_INSTALL_PACKAGES`；用户未授权时下载不浪费，授权后同一份文件直接进安装器。
+- 连接地址：`HostConfig.endpoints` 给出主地址与可选备用地址（备用端口 0 时复用主端口）。桥与终端同一策略：只有异常链里出现 `ConnectException` / `NoRouteToHostException` / `UnknownHostException` / `SocketTimeoutException` / `PortUnreachableException`（`isUnreachableAddress()`）才换下一个地址；认证失败与指纹不符立即上报。成功后 `activeAddress` 记录实际路由，卡片显示「经主地址 / 经备用地址」。
+- 密码登录同时支持 `password` 与 `keyboard-interactive`：`keyboardInteractiveAnswers` 只用存储的密码回答**隐藏**字段；`keyboardInteractiveRefusal` 区分「要动态口令」与「要的不是密码」两种拒绝，文案不同。一次性口令提示按整词匹配（`pin` 不能命中 `pinning`）。错答一次会消耗尝试机会并看起来像密码错了，所以宁可拒绝。
+- 认证失败按传输报文分类（`isAuthRejection()` 走 cause 链找 `auth fail` / `auth cancel` / `userauth`），不比对给用户看的译文——改一句文案不该把错密码变成可重试失败。
+- 首次连接不静默 TOFU：没有已保存指纹时握手阶段中止并抛 `UnknownHostKeyException`（带 SHA-256 指纹与算法名），凭证不发给未确认的主机。终端页弹确认框，确认后以 `allowUnknownKey=true` 重连；桥连接把待确认指纹放进 `HostRuntime.pendingKey`，卡片显示「确认主机密钥」，`trustNewFingerprint` 先落盘再重连。已有指纹在握手阶段校验（`StrictHostKeyChecking=yes`），JSch 认证与校验配置按 session 设置。session 只在握手成功后发布，握手中途退出不留孤儿 socket。
+- 主机密钥算法固定 `ssh-ed25519, rsa-sha2-512/256, ecdsa-sha2-nistp256/384/521`（`HostKeyPolicy`），与 OpenSSH 默认顺序一致，用户核对的指纹能和 `ssh-keygen -lf` 对上；不提供 SHA-1 的 `ssh-rsa`/`ssh-dss`。
+- 首次指纹必须同步持久化成功再发布就绪；保存失败暴露错误，不能只在内存里信任。指纹落盘在 IO 线程，失败有自己的文案，不伪装成连接失败。
+- 密钥变化展示保存值与本次观察值，显式确认后更新；认证错误不伪装成密钥变化。
+- 主机列表、密码 / 私钥 / passphrase 加密保存，配置用 `commit()`；主副恢复副本保存同一代信任状态，防止回退旧副本复活已删凭据或旧 pin；两副本都无法解密时拒绝覆盖；删除主机与清理缓存同一事务完成。
+- 缓存按主机单独加密；屏幕文本只在内存，复制由用户触发；云备份与设备迁移显式排除应用数据。
+- 无账号、遥测、中继。非 SSH 网络请求只有用户手动触发的更新：`data/UpdateChecker.kt` 读 GitHub Release（12 秒超时），`data/UpdateInstaller.kt` 下载 APK 并校验包名与 versionCode，经 `FileProvider` 交系统安装器；需要 `REQUEST_INSTALL_PACKAGES`，未授权时下载不浪费。两者都不上传数据。未做生物识别、截图保护、证书、跳板机。
 
-同步配置保存 / 加解密的主线程耗时仍需测量。Repository 通过 `HostConnection` 接口与 internal 构造函数注入传输、协程 scope / dispatcher 和时间参数。刷新合并按生命周期 generation 进行，避免旧批次挡住返回前台的立即刷新。受控协程回归覆盖关键竞争，仍不等同真实网络压力测试。
+Repository 通过 `HostConnection` 接口与 internal 构造函数注入传输、协程 scope / dispatcher 与时间参数。同步配置保存 / 加解密的主线程耗时仍需测量。
 
 ## 9. 验证
 
-构建、安装与测试命令见 [development.md](development.md)。
+JVM 单元测试 246 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ConnectionSummary、KeyboardInteractive、ReadingPause、ReadingFold、SentMessage、PageStack、PaneInput、DesignTokens、NeoGlyph、ContrastColor、TextLinks、TerminalDump、TerminalInputView、TerminalRetryPolicy、DailyWorkflow、AgentTranscript、VtScreen、UpdateChecker。
 
-JVM 单元测试共 182 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ReadingPause、SentMessage、PageStack、DesignTokens、NeoGlyph、DailyWorkflow、AgentTranscript（对话/终端两种读法的启发式拆分与真实快照夹具）、VtScreen（VT 解析器，含备用屏幕与 2004 括号粘贴）、PaneInput（提交带 enter 键、非提交不带）与 UpdateChecker（Release 解析与版本比较）。DailyWorkflow 覆盖队列顺序与 pane ID 搜索、收起搜索保留查询与导航队列、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接尝试挂起期间重复重连合并。Repository 测试覆盖编辑后迟到连接、后台迟到快照、返回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败，使用虚拟时间与 `runTest` 的 `backgroundScope`。
+- DailyWorkflow：队列顺序与 pane ID 搜索、收起搜索保留查询、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接挂起期间重复重连合并。
+- Repository：编辑后迟到连接、后台迟到快照、回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败、密钥变化与逐台信任；用虚拟时间与 `runTest` 的 `backgroundScope`。
+- 终端：VT 解析（备用屏幕、SGR、2004 括号粘贴、OSC 标题、BEL）、重连退避 ladder 与不可重试分类、输入提交的 enter 语义、链接提取（含成对括号）。
 
-Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性、方法级延迟、聚合状态发布，以及无回复 / 不执行 shell 就关闭传输；其中包含真实 Paramiko socket-pair 传输。JVM 传输测试直接运行 JSch → 回环 Paramiko SSH，验证自身请求超时与外部取消的区别、取消关闭 socket 与新连接恢复、写入已提交但回包丢失且不自动重发、认证失败和 pin 不匹配。无 Python / Paramiko 时相关传输测试明确跳过；使用 `HERDR_TEST_PYTHON` 指定可用解释器，详见 [tools/README.md](../tools/README.md)。
+Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性、方法级延迟、聚合状态发布，以及无回复 / 不执行 shell 就关闭传输，含真实 Paramiko socket-pair 传输。JVM 传输测试直接跑 JSch → 回环 Paramiko SSH，验证自身请求超时与外部取消的区别、取消关闭 socket 与新连接恢复、写入已提交但回包丢失且不自动重发、认证失败与 pin 不匹配。无 Python / Paramiko 时相关测试明确跳过，用 `HERDR_TEST_PYTHON` 指定解释器。
 
-模拟主机只绑定 loopback，共享状态可重现命令变化、输出不变、接受后读失败、RPC 错误、延迟及多种审批表单；本地 shell 执行必须显式 opt-in，默认 canned 不执行命令。详见 [tools/README.md](../tools/README.md)。
+模拟主机只绑定 loopback，共享状态可重现命令变化、输出不变、接受后读失败、RPC 错误、延迟与多种审批表单；本地 shell 执行必须显式 opt-in，默认 canned 不执行命令。详见 [tools/README.md](../tools/README.md)。
 
-尚未覆盖：真实审批端到端、多主机复杂网络竞争、完整 TalkBack、平板 / 横屏、API 26 设备运行、弱网耗电。Lint 已检查 minSdk 兼容性，不能替代旧系统运行测试。
+尚未覆盖：真实审批端到端、多主机复杂网络竞争、完整 TalkBack、平板 / 横屏、API 26 设备运行、弱网耗电。Lint 检查 minSdk 兼容性，不能替代旧系统运行测试。
 
 ## 10. 国际化与偏好
 
-- 简体中文（`res/values/`）与英文（`res/values-en/`）；`res/xml/locales_config.xml` 声明支持语言。Android 13+ 用 `LocaleManager` 应用级语言，切换时通过 `configChanges=locale|layoutDirection` + `key(localeRevision)` 原地重组，不重建 Activity（避免黑屏闪烁）；Android 12 及以下明确提示跟随系统。
-- 非界面层（Repository、SSH、解析器、ViewModel）用 `dev.herdwatch.i18n.Str.get(R.string.x, args)`，provider 在 `HerdwatchApp.onCreate` 安装一次。资源与文案规则见 [development.md](development.md)。
-- 用户偏好集中在 `data/Preferences.kt` 的 `PreferencesStore`（独立 SharedPreferences 文件 `herdwatch.prefs`，`commit()` 写入，`StateFlow` 暴露）；`HostStore` 只存主机与凭据。`PreferencesStore.inMemory()` 供单元测试注入，避免依赖 Android Context。
+- 简体中文（`res/values/`）与英文（`res/values-en/`），`res/xml/locales_config.xml` 声明支持语言。Android 13+ 用 `LocaleManager` 应用级语言，切换靠 `configChanges=locale|layoutDirection` + `key(localeRevision)` 原地重组，不重建 Activity（避免黑屏闪烁）；Android 12 及以下提示跟随系统。
+- 非界面层（Repository、SSH、解析器、ViewModel）用 `dev.herdwatch.i18n.Str.get(R.string.x, args)`，provider 在 `HerdwatchApp.onCreate` 安装一次；单元测试用 `TestStrings.install()`。资源与文案规则见 [development.md](development.md)。
+- 偏好只有习惯项：语言、主题、终端字号（`data/Preferences.kt`，独立文件 `herdwatch.prefs`，`commit()` 写入，`StateFlow` 暴露，`PreferencesStore.inMemory()` 供测试注入）。动效跟随系统「减少动态效果」，排版节奏由 `DsSpacing` 固定，不做成开关。`HostStore` 只存主机与凭据。

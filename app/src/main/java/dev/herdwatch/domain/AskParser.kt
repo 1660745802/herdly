@@ -84,9 +84,16 @@ object AskParser {
 
         val question = above.lastOrNull { !it.startsWith("─") && !it.startsWith("╭") && !it.startsWith("│") }
             ?: Str.get(R.string.ask_default_question)
+        // "Always allow for this session" is not a standing grant. Calling both by the same name
+        // taught people to dismiss the warning, which is the opposite of its job.
+        val texts = block.map { it.second.lowercase() }
+        fun anyOf(vararg words: String) = texts.any { t -> words.any { t.contains(it) } }
         val risk = when {
-            block.any { it.second.contains("don't ask again", true) || it.second.contains("always", true) } ->
+            anyOf("don't ask again", "do not ask again", "never ask", "permanently", "永久", "不再询问") ->
                 Str.get(R.string.ask_risk_standing)
+            anyOf("this session", "for the session", "本次会话", "本会话") ->
+                Str.get(R.string.ask_risk_session)
+            anyOf("always", "总是允许") -> Str.get(R.string.ask_risk_standing)
             else -> null
         }
         return Ask(
@@ -171,4 +178,24 @@ fun requiresStandingConfirmation(option: AskOption): Boolean {
         "without asking", "allow all", "for all", "this session",
         "不再询问", "无需询问", "总是允许", "永久", "记住", "本次会话", "全部允许",
     ).any { t.contains(it) }
+}
+
+/**
+ * How long an approval lasts, read off the option's own wording.
+ *
+ * The screen is the only source of truth here: the same CLI ships "Yes", "Yes, and don't ask again
+ * for this command" and "…for this session" as three separate buttons, and they mean three
+ * different things. Naming that difference is the whole job — the app must never decide a scope on
+ * the user's behalf.
+ */
+enum class ApprovalScope { ONCE, SESSION, STANDING, DENY, OTHER }
+
+fun approvalScopeOf(option: AskOption): ApprovalScope {
+    if (option.kind == AskKind.DENY) return ApprovalScope.DENY
+    val t = option.label.lowercase()
+    val sessionWords = listOf("this session", "for this session", "本次会话", "本会话", "这次会话")
+    if (sessionWords.any { t.contains(it) }) return ApprovalScope.SESSION
+    if (requiresStandingConfirmation(option)) return ApprovalScope.STANDING
+    if (option.kind == AskKind.ALLOW) return ApprovalScope.ONCE
+    return ApprovalScope.OTHER
 }

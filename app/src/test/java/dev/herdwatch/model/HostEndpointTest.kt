@@ -56,6 +56,21 @@ class HostEndpointTest {
     }
 
     @Test
+    fun `the same address typed twice is dialed once`() {
+        // Two identical routes fail for the same reason; dialing both only doubles the wait before
+        // the user is told the machine is unreachable.
+        assertEquals(1, config(fallbackHost = "192.168.31.181").endpoints.size)
+        assertEquals(
+            1,
+            config(port = 2222, fallbackHost = " 192.168.31.181 ", fallbackPort = 2222).endpoints.size,
+        )
+        assertEquals(
+            2,
+            config(port = 2222, fallbackHost = "192.168.31.181", fallbackPort = 2200).endpoints.size,
+        )
+    }
+
+    @Test
     fun `address text drops the default port`() {
         assertEquals("host", HostEndpoint("host", 22).toString())
         assertEquals("host:2222", HostEndpoint("host", 2222).toString())

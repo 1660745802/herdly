@@ -1,6 +1,8 @@
 package dev.herdwatch
 
+import dev.herdwatch.domain.ApprovalScope
 import dev.herdwatch.domain.AskParser
+import dev.herdwatch.domain.approvalScopeOf
 import dev.herdwatch.domain.requiresStandingConfirmation
 import dev.herdwatch.i18n.TestStrings
 import dev.herdwatch.model.AskKind
@@ -116,5 +118,19 @@ class AskParserTest {
         assertTrue(requiresStandingConfirmation(AskOption("总是允许", emptyList(), AskKind.ALLOW)))
         assertTrue(requiresStandingConfirmation(AskOption("Always allow this tool", emptyList(), AskKind.ALLOW)))
         assertFalse(requiresStandingConfirmation(AskOption("Allow once", emptyList(), AskKind.ALLOW)))
+    }
+
+    @Test
+    fun approvalScopeComesFromTheOptionsOwnWording() {
+        fun option(label: String, kind: AskKind) = AskOption(label = label, keys = listOf("y"), kind = kind)
+
+        assertEquals(ApprovalScope.ONCE, approvalScopeOf(option("Yes", AskKind.ALLOW)))
+        assertEquals(ApprovalScope.STANDING, approvalScopeOf(option("Yes, and don't ask again for this command", AskKind.ALLOW)))
+        assertEquals(ApprovalScope.SESSION, approvalScopeOf(option("Yes, and allow it for this session", AskKind.ALLOW)))
+        assertEquals(ApprovalScope.DENY, approvalScopeOf(option("No, tell the agent what to change", AskKind.DENY)))
+        assertEquals(ApprovalScope.OTHER, approvalScopeOf(option("Edit the command", AskKind.OTHER)))
+        // Chinese screens say the same thing in fewer characters.
+        assertEquals(ApprovalScope.STANDING, approvalScopeOf(option("是，以后不再询问", AskKind.ALLOW)))
+        assertEquals(ApprovalScope.SESSION, approvalScopeOf(option("是，本次会话内允许", AskKind.ALLOW)))
     }
 }

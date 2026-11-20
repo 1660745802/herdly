@@ -13,4 +13,5 @@
     </plurals>
     <string name="service_summary_idle">Nothing waiting</string>
     <string name="service_summary_offline">All hosts offline, retrying</string>
+    <string name="service_start_failed">Background keep-alive could not start: the connection stays up only while the app is open.</string>
 </resources>

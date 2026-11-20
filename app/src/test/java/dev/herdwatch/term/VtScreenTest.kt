@@ -413,6 +413,39 @@ class VtScreenTest {
     }
 
     @Test
+    fun `osc 2 sets the window title and bel ends it`() {
+        val vt = screen(cols = 20, rows = 4)
+        assertNull(vt.snapshot().title)
+
+        vt.feedText("\u001B]2;vim model.py\u0007")
+
+        assertEquals("vim model.py", vt.snapshot().title)
+        // The sequence itself must never reach the grid.
+        assertEquals(0, vt.snapshot().scrollbackCount)
+    }
+
+    @Test
+    fun `osc 2 also ends with st and osc 1 does not set a title`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]0;tmux: work\u001B\\")
+        vt.feedText("\u001B]1;icon-only\u0007")
+
+        assertEquals("tmux: work", vt.snapshot().title)
+    }
+
+    @Test
+    fun `bel increments a counter instead of drawing anything`() {
+        val vt = screen(cols = 20, rows = 4)
+        assertEquals(0L, vt.snapshot().bellCount)
+
+        vt.feedText("\u0007")
+        vt.feedText("hi\u0007")
+
+        assertEquals(2L, vt.snapshot().bellCount)
+        assertEquals("hi", vt.snapshot().visible(0))
+    }
+
+    @Test
     fun `large feed stays consistent`() {
         val vt = screen(cols = 40, rows = 10, scrollback = 50)
         val line = "0123456789abcdefghij\r\n"

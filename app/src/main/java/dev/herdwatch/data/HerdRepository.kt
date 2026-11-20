@@ -61,6 +61,8 @@ class HerdRepository internal constructor(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
     private val connectTimeoutMillis: Long = 25_000,
+    private val batchTimeoutMillis: Long = 30_000,
+    private val refreshJoinPollMillis: Long = 100,
     private val pollIntervalMillis: Long = 5_000,
     // Background polling is still polling, just cheaper. Connections stay up; the cadence drops.
     private val backgroundPollIntervalMillis: Long = 20_000,
@@ -215,27 +217,60 @@ class HerdRepository internal constructor(
     }
 
     suspend fun refreshAll(silent: Boolean = false) {
-        // Coalesce within a lifecycle generation. An obsolete batch must not suppress
-        // the immediate refresh on resume, even if its transport completes late.
-        val epoch = synchronized(gate) {
-            if (!_state.value.foreground || refreshingGeneration == generation) return
-            refreshingGeneration = generation
+        // Coalesce within a lifecycle generation: the five-second poll and a manual pull must not
+        // open two batches against the same machines.
+        val started = synchronized(gate) {
+            if (!_state.value.foreground) return
             if (!silent) _state.update { it.copy(refreshing = true, error = null) }
-            generation
+            if (refreshingGeneration == generation) null else {
+                refreshingGeneration = generation
+                generation
+            }
+        }
+        if (started == null) {
+            // A pull that arrives while a poll is in flight used to return immediately and leave
+            // `refreshing = true` behind: the poll's own cleanup skipped the reset because it was
+            // silent, so the indicator stayed on screen until some later manual pull happened to
+            // land between polls. Join the running batch instead and end with it.
+            awaitRefresh()
+            return
         }
         try {
             val ids = synchronized(gate) { storedHosts.map { it.id } }
-            supervisorScope {
-                ids.map { id -> async { networkSlots.withPermit {
-                    if (synchronized(gate) { generation == epoch }) connectHost(id, silent = true)
-                } } }.awaitAll()
+            // The batch has its own deadline. Per-host timeouts bound one attempt only; a transport
+            // stuck behind the network semaphore could otherwise keep the indicator alive forever.
+            withTimeoutOrNull(batchTimeoutMillis) {
+                supervisorScope {
+                    ids.map { id -> async { networkSlots.withPermit {
+                        if (synchronized(gate) { generation == started }) connectHost(id, silent = true)
+                    } } }.awaitAll()
+                }
             }
         } finally {
-            synchronized(gate) {
-                if (refreshingGeneration == epoch) refreshingGeneration = null
-                if (generation == epoch) _state.update { it.copy(refreshing = false) }
-            }
+            synchronized(gate) { if (refreshingGeneration == started) refreshingGeneration = null }
+            finishRefresh()
         }
+    }
+
+    /** Wait for the batch that is already running, without starting a second one. */
+    private suspend fun awaitRefresh() {
+        val epoch = synchronized(gate) { generation }
+        while (currentCoroutineContext().isActive) {
+            val running = synchronized(gate) {
+                _state.value.foreground && generation == epoch && refreshingGeneration == epoch
+            }
+            if (!running) break
+            delay(refreshJoinPollMillis)
+        }
+        finishRefresh()
+    }
+
+    /**
+     * Clear the indicator. Whatever the lifecycle generation is now: leaving the flag set would
+     * keep a spinner on screen for work that has already finished.
+     */
+    private fun finishRefresh() {
+        _state.update { if (it.refreshing) it.copy(refreshing = false) else it }
     }
 
     suspend fun connectHost(hostId: String, silent: Boolean = false) = withContext(dispatcher) {
@@ -325,7 +360,12 @@ class HerdRepository internal constructor(
             _state.value.hosts.any { it.host.id == hostId && it.conn == ConnState.Connected }
     }
 
-    private suspend fun <T> useHost(hostId: String, acceptedMutation: Boolean = false, block: suspend (HostConnection) -> T): T {
+    private suspend fun <T> useHost(
+        hostId: String,
+        acceptedMutation: Boolean = false,
+        failFast: Boolean = true,
+        block: suspend (HostConnection) -> T,
+    ): T {
         val (epoch, version) = synchronized(gate) { generation to versions[hostId].orZero() }
         if (!isHostReady(hostId)) connectHost(hostId, silent = true)
         val lock = synchronized(gate) { hostLocks.getOrPut(hostId) { Mutex() } }
@@ -340,7 +380,19 @@ class HerdRepository internal constructor(
                 if (!acceptedMutation) synchronized(gate) { check(current(lease)) { Str.get(R.string.repo_connection_stale) } }
                 result
             }
-            catch (e: CancellationException) { fail(lease, null); throw e }
+            // A cancelled request is not a broken connection. Superseding a read (a newer poll,
+            // a history fetch, a page leave) used to close the shared client and mark the host
+            // failed, which is why scrolling for history looked like the machine had dropped.
+            catch (e: CancellationException) { throw e }
+            catch (e: TimeoutCancellationException) {
+                if (!failFast) {
+                    // Reading further back is a guess about how much the host can serve. When the
+                    // guess is too big, keep the session and let the next poll decide its health.
+                    currentCoroutineContext().ensureActive()
+                    throw e
+                }
+                fail(lease, e); throw e
+            }
             catch (e: Exception) { fail(lease, e); throw e }
         }
     }
@@ -419,8 +471,10 @@ class HerdRepository internal constructor(
     // "recent_unwrapped" asks the bridge to undo the TUI's hard wrapping before we get the text.
     // Reading prose on a phone means every wrapped line otherwise becomes its own line, which is
     // what made both the raw view and the chat segmentation look shredded.
-    suspend fun readPane(agent: Agent, lines: Int = 400): PaneText =
-        useHost(agent.hostId) { it.readPane(agent.paneId, lines, "recent_unwrapped") }
+    suspend fun readPane(agent: Agent, lines: Int = 400, history: Boolean = false): PaneText =
+        useHost(agent.hostId, failFast = !history) {
+            it.readPane(agent.paneId, lines, "recent_unwrapped")
+        }
     suspend fun sendKeys(agent: Agent, keys: List<String>): Result<Unit> = accepted {
         mutate(agent.hostId) { it.sendKeys(agent.paneId, keys) }
     }

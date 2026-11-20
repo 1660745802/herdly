@@ -27,7 +27,6 @@ import dev.herdwatch.ui.AppViewModel
 import dev.herdwatch.ui.HerdwatchRoot
 import dev.herdwatch.data.ThemeMode
 import dev.herdwatch.ui.theme.HerdwatchTheme
-import dev.herdwatch.ui.design.DsSpacing
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
@@ -53,8 +52,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !getPreferences(MODE_PRIVATE).getBoolean(KEY_NOTIFICATION_ASKED, false)
         ) {
+            // Once. A refusal is an answer: the keep-alive connection still works without the
+            // notification, and re-asking on every launch turns a settings choice into nagging.
+            // The channel can still be enabled later from the system settings.
+            getPreferences(MODE_PRIVATE).edit().putBoolean(KEY_NOTIFICATION_ASKED, true).apply()
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         // The status bar must follow the app's theme choice, not the system one: Settings can force
@@ -139,5 +143,9 @@ class MainActivity : ComponentActivity() {
             )
         }
         manager.applicationLocales = desired
+    }
+
+    private companion object {
+        const val KEY_NOTIFICATION_ASKED = "notification_asked"
     }
 }

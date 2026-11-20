@@ -44,6 +44,8 @@ import kotlinx.coroutines.launch
 class ConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watcher: Job? = null
+    private var lastSummary: String? = null
+    private var stopped = false
 
     private val repository: HerdRepository
         get() = (application as HerdwatchApp).repository
@@ -61,7 +63,7 @@ class ConnectionService : Service() {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            build(repository.state.value),
+            build(summaryOf(repository.state.value).also { lastSummary = it }),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             } else {
@@ -71,10 +73,15 @@ class ConnectionService : Service() {
         if (watcher == null) {
             watcher = scope.launch {
                 repository.state.collect { state ->
-                    val notification = build(state)
-                    // The notification is how the service stays legitimate, but the user can still
-                    // refuse it on 13+: the connection keeps running, only the update goes quiet.
-                    if (canPostNotifications()) notify(notification)
+                    // Re-posting the same text every five seconds made the shade flicker on some
+                    // OEMs and woke the notification pipeline for nothing. Post on change only.
+                    val summary = summaryOf(state)
+                    if (!stopped && summary != lastSummary) {
+                        lastSummary = summary
+                        // The notification is how the service stays legitimate, but the user can
+                        // still refuse it on 13+: the connection keeps running, only updates go quiet.
+                        if (canPostNotifications()) notify(build(summary))
+                    }
                     // Nothing to keep alive once the last host is gone.
                     if (state.hosts.isEmpty()) stopSelf()
                 }
@@ -99,6 +106,32 @@ class ConnectionService : Service() {
         NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Android 14+ budgets `dataSync` foreground services (~6 h cumulative) and calls this when the
+     * budget runs out. The default implementation throws, which would crash the app in exactly the
+     * long-session case this service exists for. Give up the foreground slot politely instead: the
+     * repository drops to its normal background behaviour and the user sees no failure.
+     */
+    override fun onTimeout(startId: Int) {
+        stopKeepAlive()
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopKeepAlive()
+    }
+
+    private fun stopKeepAlive() {
+        // Leave foreground first: stopSelf() alone can leave the notification behind when the
+        // system has already revoked the type, and the connection is no longer ours to promise.
+        // The watcher keeps collecting until onDestroy, so it must stop posting too: one more
+        // emission would re-add an ongoing notification that nothing removes any more.
+        stopped = true
+        watcher?.cancel()
+        watcher = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         watcher?.cancel()
         scope.cancel()
@@ -106,7 +139,6 @@ class ConnectionService : Service() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = getSystemService(NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         manager.createNotificationChannel(
@@ -123,32 +155,16 @@ class ConnectionService : Service() {
         )
     }
 
-    private fun build(state: RepoState): Notification {
-        val open = Intent(this, MainActivity::class.java).apply {
+    private fun build(summary: String): Notification {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val content = PendingIntent.getActivity(
             this,
             0,
-            open,
+            openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val connected = state.hosts.count { it.conn is ConnState.Connected }
-        val waiting = state.agents.count {
-            it.status == AgentStatus.WAITING || it.status == AgentStatus.REVIEW || it.status == AgentStatus.UNKNOWN
-        }
-        val summary = when {
-            state.hosts.isEmpty() -> Str.get(R.string.service_summary_offline)
-            connected == 0 -> Str.get(R.string.service_summary_offline)
-            waiting > 0 -> listOf(
-                Str.quantity(R.plurals.service_summary_hosts, connected, connected),
-                Str.quantity(R.plurals.service_summary_waiting, waiting, waiting),
-            ).joinToString(" · ")
-            else -> listOf(
-                Str.quantity(R.plurals.service_summary_hosts, connected, connected),
-                Str.get(R.string.service_summary_idle),
-            ).joinToString(" · ")
-        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_herd)
             .setContentTitle(Str.get(R.string.service_title))
@@ -161,6 +177,8 @@ class ConnectionService : Service() {
             .setSilent(true)
             .build()
     }
+
+    private fun summaryOf(state: RepoState): String = connectionSummary(state)
 
     companion object {
         private const val CHANNEL_ID = "connection"
@@ -176,5 +194,27 @@ class ConnectionService : Service() {
         fun stop(context: Context) {
             context.stopService(Intent(context, ConnectionService::class.java))
         }
+    }
+}
+
+/**
+ * What the keep-alive notification says. Pure so the three branches can be tested without a Service:
+ * a notification that claims a connection while every host is offline is worse than none.
+ */
+internal fun connectionSummary(state: RepoState): String {
+    val connected = state.hosts.count { it.conn is ConnState.Connected }
+    val waiting = state.agents.count {
+        it.status == AgentStatus.WAITING || it.status == AgentStatus.REVIEW || it.status == AgentStatus.UNKNOWN
+    }
+    return when {
+        connected == 0 -> Str.get(R.string.service_summary_offline)
+        waiting > 0 -> listOf(
+            Str.quantity(R.plurals.service_summary_hosts, connected, connected),
+            Str.quantity(R.plurals.service_summary_waiting, waiting, waiting),
+        ).joinToString(" · ")
+        else -> listOf(
+            Str.quantity(R.plurals.service_summary_hosts, connected, connected),
+            Str.get(R.string.service_summary_idle),
+        ).joinToString(" · ")
     }
 }

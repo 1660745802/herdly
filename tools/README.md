@@ -5,7 +5,7 @@ Two loopback-only fixtures live here:
 | Script | Purpose | Default port | Credentials |
 | --- | --- | --- | --- |
 | `dev_fake_ssh.py` | Herdr JSON-RPC bridge: agent states, approvals, fault scenarios | 2222 | `root` / `secret` |
-| `dev_shell_fixture.py` | Interactive shell PTY: VT rendering, key bar, input modes | 2223 | `1234` / `1234` |
+| `dev_shell_fixture.py` | Interactive shell PTY: VT rendering, key bar, alternate screen | 2223 | `1234` / `1234` |
 
 `dev_shell_fixture.py` serves a canned shell (banner with 16/256/truecolour samples,
 `help`/`ls`/`color`/`wrap`/`alt`/`clear`/`exit`, backspace, Ctrl-C, Ctrl-D, history

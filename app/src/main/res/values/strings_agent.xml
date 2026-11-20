@@ -7,6 +7,7 @@
 
     <!-- Agent 详情：更多菜单 -->
     <string name="agent_rename">重命名</string>
+    <string name="agent_menu_chat_view">对话视图</string>
     <string name="agent_menu_status_source">状态来源</string>
     <string name="agent_menu_copy_screen">复制完整屏幕</string>
     <string name="agent_toast_copied_screen">已复制完整屏幕</string>
@@ -76,6 +77,7 @@
     <string name="agent_rename_label">新名字</string>
     <string name="agent_confirm_stop_title">中断 %1$s？</string>
     <string name="agent_confirm_stop_body">将向 %1$s / %2$s 发送 Ctrl-C。当前步骤可能终止，pane 会保留。</string>
+    <string name="agent_stop_short">停</string>
     <string name="agent_stop">中断</string>
 
     <!-- Agent 详情：上下条遍历 -->
@@ -101,17 +103,44 @@
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">工具</string>
     <string name="agent_role_approval">待决定</string>
-    <string name="agent_approval_below">在下方选择</string>
     <string name="agent_role_system">提示</string>
     <string name="agent_block_cut">开头被截断</string>
     <string name="agent_input_placeholder">输入命令，回车执行</string>
     <string name="agent_run">执行</string>
+    <!-- Terminal layout on an agent pane: the text goes into the agent's own input box, so it is
+         not a shell command and not a prompt either. -->
+    <string name="agent_pane_placeholder">在终端里输入…</string>
+    <string name="agent_pane_send">发送</string>
     <string name="agent_decision_from_screen">以上选项来自屏幕原文</string>
     <string name="agent_decision_check_screen">识别不确定，建议核对屏幕原文</string>
     <string name="agent_menu_start_agent">在此分屏启动 agent</string>
-    <string name="agent_tool_lines">%1$s · %2$d 行</string>
+    <plurals name="agent_tool_lines">
+        <item quantity="one">%1$s · %2$d 行</item>
+        <item quantity="other">%1$s · %2$d 行</item>
+    </plurals>
     <string name="agent_role_thinking">思考</string>
-    <string name="agent_thinking_lines">%1$s · %2$d 行</string>
-    <string name="agent_expand_block">展开全文</string>
+    <plurals name="agent_thinking_lines">
+        <item quantity="one">%1$s · %2$d 行</item>
+        <item quantity="other">%1$s · %2$d 行</item>
+    </plurals>
     <string name="agent_collapse_block">收起</string>
+    <plurals name="agent_expand_block_lines">
+        <item quantity="one">展开全部 · 还有 %1$d 行</item>
+        <item quantity="other">展开全部 · 还有 %1$d 行</item>
+    </plurals>
+    <string name="agent_history_end">更早的屏幕内容服务端已经不留了</string>
+    <string name="agent_working_fresh">正在输出 · %1$s 秒前有更新</string>
+    <string name="agent_working_quiet">仍在执行 · 已 %1$s 秒没有新输出</string>
+    <string name="agent_working_stalled">已 %1$s 分钟没有任何变化</string>
+    <string name="agent_working_repainting">仍在执行 · 界面在重绘，但没有新内容</string>
+    <string name="agent_commands">指令</string>
+    <string name="agent_commands_title">这个 agent 的指令</string>
+    <string name="agent_commands_body">每种 agent 的指令不一样，这里是它当前版本自己给的。点一下写进输入框，发不发由你决定。</string>
+    <string name="agent_commands_on_screen">当前界面上出现的</string>
+    <string name="agent_commands_common">它通常还有这几个</string>
+    <string name="agent_commands_none">这个 agent没有给出指令列表，也没有可复用的常见指令。直接打字更可靠。</string>
+    <string name="agent_commands_footer">指令由远端的 agent 解释，Herdly 只负责替你敲进去。</string>
+    <string name="agent_scope_once">只此一次</string>
+    <string name="agent_scope_session">本会话</string>
+    <string name="agent_scope_standing">长期</string>
 </resources>

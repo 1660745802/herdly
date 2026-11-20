@@ -43,7 +43,6 @@
     <string name="vm_explain_fallback_reason">Fallback reason: %1$s</string>
     <string name="vm_explain_warning">Note: %1$s</string>
 
-    <string name="vm_read_cancelled">Read cancelled; showing the previous content.</string>
     <string name="vm_read_failed">Read failed; showing the previous content: %1$s</string>
 
     <string name="vm_approval_verify_first">Check the remote operation result or refresh the current evidence before assisted approval.</string>

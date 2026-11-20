@@ -64,14 +64,16 @@
     <string name="inbox_offline_snapshot">未连接，显示上次快照 · %1$s</string>
     <string name="inbox_panes_empty_title">这台机器的分屏还不在这里</string>
     <string name="inbox_panes_empty_body">连上机器并读取一次会话结构后，所有分屏都会出现在这里。</string>
-    <string name="inbox_env_offline">%1$s 未连接</string>
     <string name="inbox_env_retry">重试</string>
     <string name="inbox_pane_shell">shell</string>
     <plurals name="inbox_count_hosts">
         <item quantity="one">%1$d 台机器</item>
         <item quantity="other">%1$d 台机器</item>
     </plurals>
-    <string name="inbox_connected_hosts">%1$d 台已连接</string>
+    <plurals name="inbox_connected_hosts">
+        <item quantity="one">%1$d 台已连接</item>
+        <item quantity="other">%1$d 台已连接</item>
+    </plurals>
     <string name="inbox_host_up">已连接</string>
     <string name="inbox_host_down">未连接</string>
     <plurals name="inbox_group_agents">
@@ -89,4 +91,5 @@
     </plurals>
     <string name="inbox_block_agents">AGENT</string>
     <string name="inbox_block_panes">分屏</string>
-        </resources>
+            <string name="inbox_cd_open_host">打开 %1$s 的会话</string>
+</resources>

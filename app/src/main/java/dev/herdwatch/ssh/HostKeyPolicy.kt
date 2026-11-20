@@ -40,6 +40,21 @@ internal fun Throwable.isUnreachableAddress(): Boolean {
     return false
 }
 
+/**
+ * A rejected credential, found in the transport message rather than in the sentence shown to the
+ * user: the display copy can be reworded, the retry decision must not change with it.
+ */
+internal fun Throwable.isAuthRejection(): Boolean {
+    var current: Throwable? = this
+    val seen = HashSet<Throwable>()
+    while (current != null && seen.add(current)) {
+        val lower = current.message.orEmpty().lowercase()
+        if (lower.contains("auth fail") || lower.contains("auth cancel") || lower.contains("userauth")) return true
+        current = current.cause
+    }
+    return false
+}
+
 /** The blob's first length-prefixed field is the algorithm name ("ssh-ed25519", …). */
 internal fun keyAlgorithm(key: ByteArray): String? = runCatching {
     val len = ((key[0].toInt() and 0xff) shl 24) or ((key[1].toInt() and 0xff) shl 16) or

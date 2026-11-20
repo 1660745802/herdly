@@ -11,4 +11,5 @@
     </plurals>
     <string name="service_summary_idle">没有待处理的任务</string>
     <string name="service_summary_offline">所有机器离线，正在重试</string>
+    <string name="service_start_failed">后台保活未能启动：连接只在应用打开时保持。</string>
 </resources>

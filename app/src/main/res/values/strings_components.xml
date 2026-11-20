@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 公用组件：状态点、时间/时长格式化 -->
-    <string name="components_status_a11y">状态：%1$s</string>
     <string name="components_just_now">刚刚</string>
     <string name="components_not_synced">未同步</string>
     <plurals name="components_seconds_ago">

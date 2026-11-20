@@ -2,12 +2,9 @@ package dev.herdwatch.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -32,8 +29,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import dev.herdwatch.ConnectionService
 import dev.herdwatch.R
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -58,9 +53,17 @@ fun HerdwatchRoot(vm: AppViewModel) {
     // the background is restricted on Android 12+) and then survives `ON_STOP`, which is exactly
     // when the connection used to be dropped. No hosts, no reason to hold the process.
     val hasHosts = ui.repo.hosts.isNotEmpty()
+    val keepAliveFailed = stringResource(R.string.service_start_failed)
     LaunchedEffect(hasHosts) {
-        runCatching {
-            if (hasHosts) ConnectionService.start(context) else ConnectionService.stop(context)
+        if (!hasHosts) {
+            runCatching { ConnectionService.stop(context) }
+            return@LaunchedEffect
+        }
+        // Android can refuse the start (background restrictions, a revoked notification channel on
+        // some OEMs). Swallowing that left the user believing the connection would survive, so say
+        // what actually happens instead: it stays up only while the app is on screen.
+        runCatching { ConnectionService.start(context) }.onFailure {
+            vm.say(keepAliveFailed)
         }
     }
 
@@ -91,7 +94,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
 
     BackHandler(
         enabled = ui.screen is Screen.Detail || ui.screen is Screen.Structure ||
-            ui.screen is Screen.Manage || ui.screen is Screen.Terminal || ui.screen == Screen.Settings,
+            ui.screen is Screen.Terminal || ui.screen == Screen.Settings,
     ) { vm.back() }
 
     val tabInbox = stringResource(R.string.app_tab_inbox)
@@ -158,7 +161,6 @@ fun HerdwatchRoot(vm: AppViewModel) {
                     Screen.Hosts -> "hosts"
                     Screen.Settings -> "settings"
                     is Screen.Structure -> "structure:${screen.hostId}"
-                    is Screen.Manage -> "manage:${screen.hostId}"
                     is Screen.Terminal -> "terminal:${screen.hostId}"
                     is Screen.Detail -> "detail" // Drafts live in the ViewModel; avoid unbounded page state per agent.
                 }
@@ -178,7 +180,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                         Screen.Inbox -> InboxScreen(
                             ui = ui,
                             onRefresh = vm::refresh,
-                            onOpenAgent = { agent, hostId -> vm.openAgent(agent, hostId) },
+                            onOpenAgent = { agent, _ -> vm.openAgent(agent) },
                             onQuery = vm::setQuery,
                             onToggleSearch = vm::setSearching,
                             onAddHost = { vm.showAddHost(true) },
@@ -194,7 +196,9 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onEdit = vm::editHost,
                             onDelete = vm::deleteHost,
                             onTerminal = vm::openTerminal,
-                            onManage = { hostId -> vm.navigate(Screen.Manage(hostId)) },
+                            // One page for the tree: split, focus, rename and start agent all live
+                            // in the same place, so nobody has to learn two vocabularies.
+                            onManage = vm::openStructure,
                             onOpenHelp = { vm.navigate(Screen.Settings) },
                             onTrustNewKey = vm::trustNewFingerprint,
                         )
@@ -221,30 +225,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                     onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
                                     onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
                                     onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
-                                    onOpenAgent = { agent -> vm.openAgent(agent, runtime.host.id) },
-                                )
-                            }
-                        }
-                        is Screen.Manage -> {
-                            val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
-                            if (runtime == null) {
-                                LaunchedEffect(screen.hostId) { vm.back() }
-                            } else {
-                                ManageScreen(
-                                    runtime = runtime,
-                                    agents = ui.repo.agents,
-                                    onBack = vm::back,
-                                    onCreateWorkspace = { cwd -> vm.createWorkspace(runtime.host.id, cwd) },
-                                    onCreateTab = { ws, cwd -> vm.createTab(runtime.host.id, ws, cwd) },
-                                    onSplit = { pane, dir -> vm.splitPane(runtime.host.id, pane, dir) },
-                                    onRenameWorkspace = { id, name -> vm.renameWorkspace(runtime.host.id, id, name) },
-                                    onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
-                                    onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
-                                    onCloseWorkspace = { vm.closeWorkspace(runtime.host.id, it) },
-                                    onCloseTab = { vm.closeTab(runtime.host.id, it) },
-                                    onClosePane = { vm.closePane(runtime.host.id, it) },
-                                    onOpenPane = { pane -> vm.openPane(runtime.host.id, pane) },
-                                    onBrowse = { vm.navigate(Screen.Structure(runtime.host.id)) },
+                                    onOpenAgent = { agent -> vm.openAgent(agent) },
                                 )
                             }
                         }
@@ -258,6 +239,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             version = version,
                             update = update,
                             onCheckUpdate = vm::checkForUpdate,
+                            onDismissUpdate = vm::dismissUpdate,
                             onInstallUpdate = vm::installUpdate,
                             onOpenInstallPermission = vm::retryInstall,
                         )
@@ -276,6 +258,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onSendPrompt = { vm.sendPrompt(it) },
                             onSendKeys = vm::sendRawKeys,
                             onSendInput = vm::sendInput,
+                            onSendRawBytes = vm::sendRawBytes,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },
                             onExplain = vm::explainAgent,
                             onDismissExplain = vm::dismissExplain,

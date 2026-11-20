@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.content.pm.Signature
+import android.content.pm.SigningInfo
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -56,11 +59,9 @@ class InvalidApkException(message: String) : Exception(message)
  */
 class AndroidUpdateInstaller(private val context: Context) : UpdateInstaller {
 
-    override fun canInstall(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+    override fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
 
     override fun requestInstallPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val intent = Intent(
             Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
             Uri.parse("package:${context.packageName}"),
@@ -144,17 +145,65 @@ class AndroidUpdateInstaller(private val context: Context) : UpdateInstaller {
         if (!file.isFile || file.length() == 0L) {
             throw InvalidApkException(context.getString(R.string.update_bad_apk))
         }
-        val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        val flags = signingFlags()
+        val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags)
         if (info == null || info.packageName != context.packageName) {
             throw InvalidApkException(context.getString(R.string.update_bad_apk))
         }
-        val installed = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionCodeLong()
-        }.getOrDefault(0L)
+        val mine = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, flags)
+        }.getOrNull()
+        val installed = mine?.versionCodeLong() ?: 0L
         if (info.versionCodeLong() <= installed) {
             throw InvalidApkException(context.getString(R.string.update_older_apk))
         }
+        // Package name and version code are claims any file can make. The signature is the only
+        // thing that proves the bytes came from whoever built what is installed, so a replaced
+        // release asset never reaches the installer UI. The platform would refuse the update
+        // anyway; refusing here means the user sees a reason instead of a cryptic install failure.
+        if (mine != null && !sameSigner(mine, info)) {
+            throw InvalidApkException(context.getString(R.string.update_bad_signature))
+        }
     }
+
+    /** Signing certificates are only returned when the caller asks for them (API 28+). */
+    private fun signingFlags(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+
+    /**
+     * Same signer, allowing for a key rotation: a package that declares signing lineage is signed
+     * by its newest certificate, which is what the installed build reports.
+     */
+    private fun sameSigner(installed: PackageInfo, candidate: PackageInfo): Boolean {
+        val ours = certificates(installed)
+        val theirs = certificates(candidate)
+        if (ours.isEmpty() || theirs.isEmpty()) return false
+        return theirs.any { it in ours }
+    }
+
+    private fun certificates(info: PackageInfo): Set<String> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val signing: SigningInfo = info.signingInfo ?: return emptySet()
+            val history = if (signing.hasMultipleSigners()) {
+                signing.apkContentsSigners
+            } else {
+                signing.signingCertificateHistory ?: signing.apkContentsSigners
+            }
+            return history.orEmpty().map { it.fingerprint() }.toSet()
+        }
+        @Suppress("DEPRECATION")
+        return info.signatures.orEmpty().map { it.fingerprint() }.toSet()
+    }
+
+    private fun Signature.fingerprint(): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * `PackageInfo.longVersionCode` only exists from API 28 while the app supports API 26.

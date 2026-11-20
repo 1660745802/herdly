@@ -199,14 +199,40 @@ class HerdRepositoryTest {
         val repo = repository(prefs) { client }
         val first = launch { repo.refreshAll() }
         runCurrent()
-        repo.refreshAll()
+        // A pull that lands mid-batch joins it: one batch against the machine, and the indicator
+        // stays up until that batch is actually done.
+        val second = launch { repo.refreshAll() }
+        runCurrent()
         assertTrue(repo.state.value.refreshing)
         assertEquals(1, client.snapshotCalls)
         assertFalse(first.isCompleted)
+        assertFalse(second.isCompleted)
         reply.complete(snapshot(host, "coalesced"))
         first.join()
+        second.join()
         assertFalse(repo.state.value.refreshing)
         assertEquals("coalesced", repo.state.value.agents.single().name)
+    }
+
+    @Test fun `manual pull during a silent poll ends its own indicator`() = runTest {
+        val prefs = preferences(host)
+        val reply = CompletableDeferred<Snapshot>()
+        val client = connection(host).apply { onSnapshot = { reply.await() } }
+        val repo = repository(prefs) { client }
+        val poll = launch { repo.refreshAll(silent = true) }
+        runCurrent()
+        assertFalse(repo.state.value.refreshing)
+
+        val pull = launch { repo.refreshAll() }
+        runCurrent()
+        assertTrue(repo.state.value.refreshing)
+        // Joining, not starting a second batch.
+        assertEquals(1, client.snapshotCalls)
+
+        reply.complete(snapshot(host, "polled"))
+        poll.join()
+        pull.join()
+        assertFalse(repo.state.value.refreshing)
     }
 
     @Test fun `offline refresh retains last successful snapshot and restart cache`() = runTest {

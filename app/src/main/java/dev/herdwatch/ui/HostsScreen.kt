@@ -55,7 +55,6 @@ import dev.herdwatch.ui.design.NeoEmptyState
 import dev.herdwatch.ui.design.NeoDialog
 import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoGlyph
-import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
 import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoLamp
@@ -90,7 +89,7 @@ fun HostsScreen(
         NeoPageHeader(
             title = stringResource(R.string.hosts_title),
             subtitle = if (compact) {
-                stringResource(R.string.hosts_subtitle_short, connected, hosts.size)
+                pluralStringResource(R.plurals.hosts_subtitle_short, connected, connected, hosts.size)
             } else {
                 pluralStringResource(R.plurals.hosts_subtitle_count, hosts.size, hosts.size, connected)
             },

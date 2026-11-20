@@ -2,6 +2,7 @@
 <resources>
     <!-- Interactive SSH terminal page -->
     <string name="terminal_connecting">Connecting…</string>
+    <string name="terminal_retrying">Reconnecting (%1$d)…</string>
     <string name="terminal_connection_lost">Connection lost</string>
     <string name="terminal_back_desc">Back to host list</string>
     <!-- %1$s: user@host target; the subtitle gains a suffix inside full-screen programs -->
@@ -48,4 +49,17 @@
     <string name="terminal_key_page_down">Page down</string>
     <string name="terminal_key_backspace">Backspace</string>
     <string name="terminal_show_keyboard">Type a command</string>
+    <string name="terminal_select_text">Select text</string>
+    <string name="terminal_select_title">Terminal buffer</string>
+    <string name="terminal_copy_all">Copy all</string>
+    <string name="terminal_copied">Copied</string>
+    <string name="terminal_find">Find</string>
+    <string name="terminal_find_hint">Find on screen…</string>
+    <string name="terminal_find_none">none</string>
+    <string name="terminal_find_prev">Previous</string>
+    <string name="terminal_find_next">Next</string>
+    <string name="terminal_find_close">Close find</string>
+    <string name="terminal_share">Share the screen</string>
+    <string name="terminal_key_alt">Alt, prefixes the next key</string>
+    <string name="term_pin_save_failed">Could not save the host key; not connecting</string>
 </resources>

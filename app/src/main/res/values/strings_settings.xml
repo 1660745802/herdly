@@ -58,4 +58,6 @@
     <string name="update_bad_apk">下载到的文件不是 Herdly 安装包</string>
     <string name="update_older_apk">这个包不比当前版本新</string>
     <string name="update_no_apk">这个版本没有附带 APK 文件</string>
+    <string name="update_bad_signature">这个安装包不是本机 Herdly 的签名，已拒绝安装。</string>
+    <string name="settings_update_dismiss">收起</string>
 </resources>

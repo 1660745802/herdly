@@ -5,7 +5,10 @@
         <item quantity="one">%1$d machine · %2$d connected</item>
         <item quantity="other">%1$d machines · %2$d connected</item>
     </plurals>
-    <string name="hosts_subtitle_short">%1$d/%2$d online</string>
+    <plurals name="hosts_subtitle_short">
+        <item quantity="one">%1$d/%2$d online</item>
+        <item quantity="other">%1$d/%2$d online</item>
+    </plurals>
     <string name="hosts_usage_security">Usage and security</string>
     <string name="hosts_empty_title">Add your first machine</string>
     <string name="hosts_empty_body">All it needs is SSH. The terminal always works; live sessions are an extra that needs herdr remote-api-bridge on the host.</string>

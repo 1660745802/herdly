@@ -90,12 +90,12 @@ adb reverse tcp:2222 tcp:2222
 在测试版里添加主机 `127.0.0.1:2222`（`root` / `secret`），确认指纹，然后：
 
 ```sh
-adb exec-out screencap -p > /tmp/inbox.png
+adb shell screencap -p /sdcard/inbox.png && adb pull /sdcard/inbox.png assets/screens/inbox.png
 ```
 
-拍完停掉夹具并 `adb reverse --remove tcp:2222`。`uxTest` 包名独立，不会覆盖正在用的 debug 配置。
+用设备落盘再 pull，不用 `adb exec-out screencap`：部分机型经 exec-out 的字节流会被改写，拉下来的 PNG 打不开。拍完停掉夹具并 `adb reverse --remove tcp:2222`。`uxTest` 包名独立，不会覆盖正在用的 debug 配置。
 
-注意：密码框会唤起 MIUI/EMUI 的安全键盘，它的窗口是 `SECURE` 的，期间 `screencap` 是全黑。先关键盘再截图；`uiautomator dump` 不受影响。
+两个真机注意事项：密码框会唤起 MIUI/EMUI 的安全键盘，它的窗口是 `SECURE` 的，期间 `screencap` 全黑（先关键盘，`uiautomator dump` 不受影响）；`am start` 可能把已在运行的 `uxTest` 任务带到前台，截图前先 `am force-stop dev.herdwatch.uxtest` 并确认 `topResumedActivity` 是哪个包。
 
 ## 本地模拟主机
 
@@ -103,7 +103,7 @@ adb exec-out screencap -p > /tmp/inbox.png
 
 ```sh
 .venv/bin/python tools/dev_fake_ssh.py --canned      # Herdr 桥：状态、审批、故障场景
-.venv/bin/python tools/dev_shell_fixture.py          # 交互式 shell：VT、按键、输入模式
+.venv/bin/python tools/dev_shell_fixture.py          # 交互式 shell：VT、按键、备用屏幕
 adb reverse tcp:2222 tcp:2222
 ```
 
@@ -138,7 +138,7 @@ tools/        本地 SSH fixture 与 Python 测试
 
 - Compose：`stringResource(R.string.x)`、`pluralStringResource(R.plurals.x, count, count)`。
 - 非 Compose（Repository、SSH 层、解析器、ViewModel）：`dev.herdwatch.i18n.Str.get(R.string.x, args)` / `Str.quantity(...)`，provider 由 `HerdwatchApp.onCreate` 安装。
-- 资源按模块拆文件：`res/values/strings_<module>.xml` 与 `res/values-en/strings_<module>.xml`，键名带模块前缀，中英键集合必须一致。当前模块：core、ssh、repo、store、vm、ask、policy、agent、inbox、terminal、structure、newtask、hosts、settings、addhost、components、app。
+- 资源按模块拆文件：`res/values/strings_<module>.xml` 与 `res/values-en/strings_<module>.xml`，键名带模块前缀，中英键集合必须一致。当前模块：core、ssh、repo、store、vm、ask、policy、agent、inbox、terminal、term、structure、newtask、hosts、settings、addhost、components、service、app。
 - 数字 + 单位一律用 `plurals`；含变量的句子整句进资源，不做字符串拼接。
 - 新增语言只需加 `res/values-<lang>/` 并在 `res/xml/locales_config.xml` 登记，系统「应用语言」与设置页分段控件会一起生效。
 - 单元测试断言用 `dev.herdwatch.i18n.TestStrings.text("键名")`（它解析 `res/values/*.xml` 并反射映射 `R` id），不要硬编码译文。`Str` 未安装 provider 时返回 `#<id>`，所以带文案断言的测试类要在 `@Before` 调 `TestStrings.install()`。

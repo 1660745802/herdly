@@ -7,6 +7,7 @@
 
     <!-- Agent detail: overflow menu -->
     <string name="agent_rename">Rename</string>
+    <string name="agent_menu_chat_view">Chat view</string>
     <string name="agent_menu_status_source">Status source</string>
     <string name="agent_menu_copy_screen">Copy full screen</string>
     <string name="agent_toast_copied_screen">Full screen copied</string>
@@ -76,6 +77,7 @@
     <string name="agent_rename_label">New name</string>
     <string name="agent_confirm_stop_title">Stop %1$s?</string>
     <string name="agent_confirm_stop_body">Sends Ctrl-C to %1$s / %2$s. The current step may be terminated; the pane is kept.</string>
+    <string name="agent_stop_short">Stop</string>
     <string name="agent_stop">Stop</string>
 
     <!-- Agent detail: previous / next -->
@@ -101,17 +103,43 @@
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">Tool</string>
     <string name="agent_role_approval">Decision</string>
-    <string name="agent_approval_below">Choose below</string>
     <string name="agent_role_system">Notice</string>
     <string name="agent_block_cut">start cut off</string>
     <string name="agent_input_placeholder">Type a command, Enter to run</string>
     <string name="agent_run">Run</string>
+    <string name="agent_pane_placeholder">Type into the terminal…</string>
+    <string name="agent_pane_send">Send</string>
     <string name="agent_decision_from_screen">Options read from the screen</string>
     <string name="agent_decision_check_screen">Recognition unsure — check the screen</string>
     <string name="agent_menu_start_agent">Start an agent here</string>
-    <string name="agent_tool_lines">%1$s · %2$d lines</string>
+    <plurals name="agent_tool_lines">
+        <item quantity="one">%1$s · %2$d line</item>
+        <item quantity="other">%1$s · %2$d lines</item>
+    </plurals>
     <string name="agent_role_thinking">Thinking</string>
-    <string name="agent_thinking_lines">%1$s · %2$d lines</string>
-    <string name="agent_expand_block">Show full text</string>
+    <plurals name="agent_thinking_lines">
+        <item quantity="one">%1$s · %2$d line</item>
+        <item quantity="other">%1$s · %2$d lines</item>
+    </plurals>
+    
     <string name="agent_collapse_block">Collapse</string>
+    <plurals name="agent_expand_block_lines">
+        <item quantity="one">Show all · %1$d more line</item>
+        <item quantity="other">Show all · %1$d more lines</item>
+    </plurals>
+    <string name="agent_history_end">The host no longer keeps older screen content</string>
+    <string name="agent_working_fresh">Working · updated %1$s s ago</string>
+    <string name="agent_working_quiet">Still running · no output for %1$s s</string>
+    <string name="agent_working_stalled">Nothing has changed for %1$s min</string>
+    <string name="agent_working_repainting">Still running · the screen redraws, no new lines</string>
+    <string name="agent_commands">Commands</string>
+    <string name="agent_commands_title">Commands this agent offers</string>
+    <string name="agent_commands_body">Each agent has its own set. These come from the version running in this pane. Tap to put one in the composer — sending is still your call.</string>
+    <string name="agent_commands_on_screen">Shown on screen now</string>
+    <string name="agent_commands_common">Usually available</string>
+    <string name="agent_commands_none">This agent shows no command list, and there is no fallback that would be honest here. Typing it yourself is safer.</string>
+    <string name="agent_commands_footer">The agent interprets these; Herdly only types them for you.</string>
+    <string name="agent_scope_once">Once</string>
+    <string name="agent_scope_session">This session</string>
+    <string name="agent_scope_standing">Standing</string>
 </resources>

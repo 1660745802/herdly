@@ -162,17 +162,48 @@ internal object ReleaseParser {
         return null
     }
 
-    /** First `.apk` download URL among the release assets. */
+    /**
+     * First `.apk` download URL among the release assets.
+     *
+     * Scans raw string tokens rather than searching the document for each decoded value: GitHub
+     * escapes `/` as `\/` in some responses, so the decoded URL is not a substring of the body and
+     * the old lookup reported "no APK asset" for a perfectly good release. One pass, no substring
+     * copies of the whole document per asset.
+     */
     private fun firstApkAssetUrl(json: String): String? {
-        var index = 0
-        while (true) {
-            val url = stringValue(json.substring(index.coerceAtMost(json.length)), "browser_download_url")
-                ?: return null
-            if (url.endsWith(".apk", ignoreCase = true)) return url
-            val at = json.indexOf(url, index)
-            if (at < 0) return null
-            index = at + url.length
+        val key = "\"browser_download_url\""
+        var i = json.indexOf(key)
+        while (i >= 0) {
+            var cursor = i + key.length
+            while (cursor < json.length && json[cursor].isWhitespace()) cursor++
+            if (cursor < json.length && json[cursor] == ':') {
+                cursor++
+                while (cursor < json.length && json[cursor].isWhitespace()) cursor++
+                if (cursor < json.length && json[cursor] == '"') {
+                    val url = readString(json, cursor)
+                    if (url != null && url.endsWith(".apk", ignoreCase = true)) return url
+                    // Continue after this value, not after the key: the next asset's key follows.
+                    val end = stringEnd(json, cursor)
+                    i = json.indexOf(key, if (end < 0) cursor + 1 else end + 1)
+                    continue
+                }
+            }
+            i = json.indexOf(key, i + key.length)
         }
+        return null
+    }
+
+    /** Index of the closing quote of the JSON string that starts at [start], or -1. */
+    private fun stringEnd(json: String, start: Int): Int {
+        var i = start + 1
+        while (i < json.length) {
+            when (json[i]) {
+                '\\' -> i++
+                '"' -> return i
+            }
+            i++
+        }
+        return -1
     }
 
     /**
@@ -187,10 +218,59 @@ internal object ReleaseParser {
             val b = l.getOrElse(i) { 0 }
             if (a != b) return a > b
         }
-        // Equal numbers: the pre-release suffix decides, and a plain release wins.
-        val remotePre = remote.contains('-')
-        val localPre = local.contains('-')
-        return !remotePre && localPre
+        // Equal numbers: a plain release beats any pre-release, and pre-releases are ordered
+        // among themselves (`rc2` after `rc1`, `rc10` after `rc9`). Without the second rule a
+        // tester on rc1 was never offered rc2 and had to install by hand.
+        val remotePre = preRelease(remote)
+        val localPre = preRelease(local)
+        return when {
+            remotePre == null && localPre != null -> true
+            remotePre != null && localPre == null -> false
+            remotePre == null && localPre == null -> false
+            else -> comparePreRelease(remotePre!!, localPre!!) > 0
+        }
+    }
+
+    private fun preRelease(value: String): String? {
+        val body = value.removePrefix("v").substringBefore('+')
+        val at = body.indexOf('-')
+        return if (at < 0) null else body.substring(at + 1).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * SemVer pre-release ordering: dot-separated identifiers, numeric ones compare numerically and
+     * sort below alphanumeric ones, and a longer identifier list wins when the prefix is equal.
+     */
+    private fun comparePreRelease(a: String, b: String): Int {
+        val left = a.split('.')
+        val right = b.split('.')
+        for (i in 0 until minOf(left.size, right.size)) {
+            val x = left[i]
+            val y = right[i]
+            // `rc10` is one identifier: letters then digits. Splitting only on dots would compare
+            // "rc10" with "rc9" as text and put rc9 first.
+            val xn = identifierNumber(x)
+            val yn = identifierNumber(y)
+            val sameStem = x.takeWhile(Char::isLetter) == y.takeWhile(Char::isLetter)
+            val cmp = when {
+                xn != null && yn != null && sameStem -> xn.compareTo(yn)
+                xn != null && yn == null -> -1
+                xn == null && yn != null -> 1
+                else -> x.compareTo(y)
+            }
+            if (cmp != 0) return cmp
+        }
+        return left.size.compareTo(right.size)
+    }
+
+    /** The numeric tail of an identifier such as `rc10`, or null when it is not purely numeric. */
+    private fun identifierNumber(value: String): Long? {
+        val digits = value.takeLastWhile(Char::isDigit)
+        if (digits.isEmpty()) return null
+        val prefix = value.dropLast(digits.length)
+        // Only a bare number or a single alphabetic stem counts; anything else compares as text.
+        if (prefix.isNotEmpty() && !prefix.all(Char::isLetter)) return null
+        return digits.toLongOrNull()
     }
 
     private fun parseVersion(value: String): List<Int>? {

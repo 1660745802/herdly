@@ -1,6 +1,10 @@
 package dev.herdwatch.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -10,8 +14,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,13 +35,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.ui.draw.rotate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -61,7 +63,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
@@ -73,7 +74,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.HerdPane
@@ -93,7 +93,6 @@ import dev.herdwatch.ui.design.NeoDivider
 import dev.herdwatch.ui.design.NeoGlyph
 import dev.herdwatch.ui.design.NeoIcon
 import dev.herdwatch.ui.design.NeoIconButton
-import dev.herdwatch.ui.design.NeoSegmented
 import dev.herdwatch.ui.design.NeoLamp
 import dev.herdwatch.ui.design.NeoPageHeader
 import dev.herdwatch.ui.design.NeoSkeleton
@@ -105,7 +104,6 @@ import dev.herdwatch.ui.theme.agentStatusColor
 import dev.herdwatch.ui.theme.connStatusColor
 import dev.herdwatch.ui.design.spacing
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InboxScreen(
     ui: UiState,
@@ -122,7 +120,7 @@ fun InboxScreen(
     val agents = ui.repo.agents
     val configuration = LocalConfiguration.current
     val compact = configuration.screenWidthDp < 360 || configuration.fontScale >= 1.3f
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
             now = System.currentTimeMillis()
@@ -140,14 +138,20 @@ fun InboxScreen(
         ui.repo.hosts.size > 1 && ui.repo.hosts.any { it.host.id == id }
     }
     val scopedHosts = hostScope?.let { id -> ui.repo.hosts.filter { it.host.id == id } } ?: ui.repo.hosts
-    val scopedAgents = scopedHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
+    // A machine we cannot reach has nothing to report right now. Its cached agents and panes were
+    // still listed, so the home page showed rows that could not be opened and statuses that were
+    // minutes old. Offline machines keep a one-line block with a retry; their content comes back
+    // when the connection does.
+    val liveHosts = scopedHosts.filter { it.conn is ConnState.Connected }
+    val offlineHosts = scopedHosts.filter { it.conn !is ConnState.Connected }
+    val scopedAgents = liveHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
     // Agents get their own section whenever the host reports any: "who is working" is a different
     // question from "what is running where", and a section that vanishes when everyone is idle makes
     // the page look like it lost half its content.
     // Same queue definition as the detail traversal: urgency first, then the search query. Sorting
     // here separately meant searching filtered the panes but left every agent on screen.
     val agentGroup = inboxQueue(scopedAgents, ui.query)
-    val panes = scopedHosts.flatMap { runtime ->
+    val panes = liveHosts.flatMap { runtime ->
         runtime.structure.panes.map { pane -> runtime to pane }
     }.filter { (runtime, pane) ->
         ui.query.isBlank() || listOf(
@@ -157,11 +161,7 @@ fun InboxScreen(
             runtime.structure.tabs.firstOrNull { it.id == pane.tabId }?.label.orEmpty(),
         ).any { it.contains(ui.query, ignoreCase = true) }
     }
-    // Only environment facts live above the list; nothing here describes urgency for the user.
-    val failedHosts = scopedHosts.filter { it.conn is ConnState.Failed }
     val keyboard = LocalSoftwareKeyboardController.current
-    val syncingLabel = stringResource(R.string.inbox_state_syncing)
-    val refreshLabel = stringResource(R.string.inbox_cd_refresh)
     val colors = ds()
 
     Column(Modifier.fillMaxSize()) {
@@ -178,8 +178,9 @@ fun InboxScreen(
                 scopedHosts.size == 1 -> stringResource(R.string.inbox_subtitle_single)
                 else -> listOf(
                     pluralStringResource(R.plurals.inbox_count_hosts, scopedHosts.size, scopedHosts.size),
-                    stringResource(
-                        R.string.inbox_connected_hosts,
+                    pluralStringResource(
+                        R.plurals.inbox_connected_hosts,
+                        scopedHosts.count { it.conn is ConnState.Connected },
                         scopedHosts.count { it.conn is ConnState.Connected },
                     ),
                 ).joinToString(stringResource(R.string.inbox_list_separator))
@@ -194,25 +195,10 @@ fun InboxScreen(
                         if (ui.searching) R.string.inbox_cd_search_collapse else R.string.inbox_cd_search,
                     ),
                 )
-                if (ui.repo.refreshing) {
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .semantics {
-                                contentDescription = refreshLabel
-                                stateDescription = syncingLabel
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        NeoSkeleton(Modifier.width(20.dp), height = 20.dp, corner = 10.dp)
-                    }
-                } else {
-                    NeoIconButton(
-                        glyph = NeoGlyph.Refresh,
-                        onClick = onRefresh,
-                        contentDescription = stringResource(R.string.inbox_cd_refresh),
-                    )
-                }
+                // The control keeps its shape while it works: replacing the icon with a grey
+                // skeleton pill made the header look broken, and a second spinner appeared under
+                // it from the pull gesture. One affordance, one piece of feedback.
+                RefreshAction(refreshing = ui.repo.refreshing, onRefresh = onRefresh)
             },
         )
 
@@ -284,7 +270,7 @@ fun InboxScreen(
             (scopedAgents.isNotEmpty() || ui.query.isNotBlank())
         // Mutually exclusive: a search with no hit used to show "nothing matched" and "no machines"
         // at the same time, and a quiet fleet showed both the agent-empty and the pane-empty card.
-        val panesEmptyVisible = !noMatchVisible && panes.isEmpty() && scopedHosts.isNotEmpty()
+        val panesEmptyVisible = !noMatchVisible && panes.isEmpty() && liveHosts.isNotEmpty()
         val agentsEmptyVisible = !noMatchVisible && ui.repo.hosts.isNotEmpty() &&
             scopedAgents.isEmpty() &&
             (hostScope != null || ui.repo.hosts.any { it.conn is ConnState.Connected })
@@ -292,11 +278,10 @@ fun InboxScreen(
         // all to show; otherwise the queue column states it in one line and the panes stay visible.
         val wideAgentsEmptyCard = agentsEmptyVisible && panes.isEmpty()
 
-        PullToRefreshBox(
-            isRefreshing = ui.repo.refreshing,
-            onRefresh = onRefresh,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        ) {
+        // No pull-to-refresh: the header action is the refresh, and it reports progress in place.
+        // Two controls for one action meant two spinners, and the Material indicator sat on top of
+        // the first machine block instead of inside the page's own material language.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
             if (wide) {
                 Column(Modifier.fillMaxSize()) {
                     if (ui.repo.hosts.isEmpty()) {
@@ -309,7 +294,6 @@ fun InboxScreen(
                         // not one side of the queue.
                         Column(Modifier.fillMaxWidth().padding(horizontal = spacing().gutter)) {
                             if (showConnecting) ConnectingNotice(connectingHosts)
-                            if (failedHosts.isNotEmpty()) EnvironmentRow(failedHosts, onReconnect)
                             if (wideAgentsEmptyCard) {
                                 AgentsEmptyCard(
                                     hostScope = hostScope,
@@ -322,7 +306,7 @@ fun InboxScreen(
                             }
                             if (noMatchVisible) NoMatchCard(ui.query, hostScope) { onQuery("") }
                             if (panesEmptyVisible) {
-                                PanesEmptyCard(scopedHosts, ui.query, onOpenHost, onRefresh)
+                                PanesEmptyCard(liveHosts, ui.query, onOpenHost, onRefresh)
                             }
                         }
                         Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -330,11 +314,12 @@ fun InboxScreen(
                                 Modifier.weight(1f).fillMaxHeight(),
                                 contentPadding = listPadding,
                             ) {
-                                if (agentGroup.isEmpty()) {
+                                if (agentGroup.isEmpty() && offlineHosts.isEmpty()) {
                                     item(key = "agents-empty-line") { QueueEmptyLine() }
                                 } else {
+                                    offlineBlocks(offlineHosts, onReconnect, onOpenHost)
                                     hostQueueBlocks(
-                                        hosts = scopedHosts,
+                                        hosts = liveHosts,
                                         agentGroup = agentGroup,
                                         panes = panes,
                                         now = now,
@@ -351,7 +336,7 @@ fun InboxScreen(
                             ) {
                                 if (panes.isNotEmpty()) {
                                     hostQueueBlocks(
-                                        hosts = scopedHosts,
+                                        hosts = liveHosts,
                                         agentGroup = agentGroup,
                                         panes = panes,
                                         now = now,
@@ -369,9 +354,6 @@ fun InboxScreen(
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = listPadding) {
                     if (showConnecting) {
                         item(key = "connecting") { ConnectingNotice(connectingHosts) }
-                    }
-                    if (failedHosts.isNotEmpty()) {
-                        item(key = "environment") { EnvironmentRow(failedHosts, onReconnect) }
                     }
                     if (agentsEmptyVisible) {
                         item(key = "agents-empty") {
@@ -394,7 +376,7 @@ fun InboxScreen(
                     // made a six-device fleet read as one long list where the same machine appeared
                     // in two unrelated places.
                     hostQueueBlocks(
-                        hosts = scopedHosts,
+                        hosts = liveHosts,
                         agentGroup = agentGroup,
                         panes = panes,
                         now = now,
@@ -402,12 +384,15 @@ fun InboxScreen(
                         onOpenAgent = onOpenAgent,
                         onOpenPane = onOpenPane,
                     )
+                    // Offline machines come last: they are a fact about the environment, not work
+                    // to triage, and each one carries its own retry instead of a fleet-wide row.
+                    offlineBlocks(offlineHosts, onReconnect, onOpenHost)
                     if (noMatchVisible) {
                         item(key = "no-match") { NoMatchCard(ui.query, hostScope) { onQuery("") } }
                     }
                     if (panesEmptyVisible) {
                         item(key = "panes-empty") {
-                            PanesEmptyCard(scopedHosts, ui.query, onOpenHost, onRefresh)
+                            PanesEmptyCard(liveHosts, ui.query, onOpenHost, onRefresh)
                         }
                     }
                 }
@@ -504,6 +489,108 @@ private fun LazyListScope.hostQueueBlocks(
                 onOpenAgent = onOpenAgent,
             )
         }
+    }
+}
+
+/**
+ * The refresh control. While a refresh runs the same glyph turns, so the header keeps its shape
+ * and its hit target; the state is announced for screen readers rather than drawn as a new object.
+ */
+@Composable
+private fun RefreshAction(refreshing: Boolean, onRefresh: () -> Unit) {
+    val colors = ds()
+    val syncingLabel = stringResource(R.string.inbox_state_syncing)
+    val rotation = if (refreshing) {
+        val spin = rememberInfiniteTransition(label = "refresh")
+        val angle by spin.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+            label = "refresh-angle",
+        )
+        angle
+    } else {
+        0f
+    }
+    NeoIconButton(
+        glyph = NeoGlyph.Refresh,
+        onClick = onRefresh,
+        enabled = !refreshing,
+        tint = if (refreshing) colors.accent else colors.textSoft,
+        contentDescription = stringResource(R.string.inbox_cd_refresh),
+        modifier = Modifier
+            .rotate(rotation)
+            .semantics { if (refreshing) stateDescription = syncingLabel },
+    )
+}
+
+/**
+ * Machines that are not reachable: one line each, with the reason and a retry.
+ *
+ * Their cached agents and panes are deliberately not listed. A row you cannot open, with a status
+ * from the last successful poll, is worse than an honest "offline" — and on a fleet with one dead
+ * machine it pushed the live work below the fold.
+ */
+private fun LazyListScope.offlineBlocks(
+    hosts: List<HostRuntime>,
+    onReconnect: (String) -> Unit,
+    onOpenHost: ((String) -> Unit)?,
+) {
+    hosts.forEach { runtime ->
+        item(key = "offline:" + runtime.host.id) {
+            OfflineHostRow(runtime, onReconnect, onOpenHost)
+        }
+    }
+}
+
+@Composable
+private fun OfflineHostRow(
+    runtime: HostRuntime,
+    onReconnect: (String) -> Unit,
+    onOpenHost: ((String) -> Unit)?,
+) {
+    val colors = ds()
+    val state = runtime.conn
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = DsSpace.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NeoLamp(color = connStatusColor(state), size = 8.dp)
+        Spacer(Modifier.width(DsSpace.m))
+        Column(Modifier.weight(1f)) {
+            Text(
+                runtime.host.label,
+                style = DsTypography.bodyStrong,
+                color = colors.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                when (state) {
+                    is ConnState.Failed -> state.message
+                    ConnState.Connecting -> stringResource(R.string.inbox_host_connecting)
+                    else -> stringResource(R.string.inbox_host_offline)
+                },
+                style = DsTypography.caption,
+                color = if (state is ConnState.Failed) colors.warn else colors.textSoft,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(DsSpace.s))
+        if (onOpenHost != null) {
+            NeoIconButton(
+                glyph = NeoGlyph.Server,
+                onClick = { onOpenHost(runtime.host.id) },
+                contentDescription = stringResource(R.string.inbox_cd_open_host, runtime.host.label),
+            )
+        }
+        NeoButton(
+            label = stringResource(R.string.inbox_env_retry),
+            onClick = { onReconnect(runtime.host.id) },
+            tone = NeoButtonTone.Ghost,
+            compact = true,
+        )
     }
 }
 
@@ -1150,35 +1237,6 @@ private fun HostFilterChip(
     )
 }
 
-@Composable
-private fun EnvironmentRow(failedHosts: List<HostRuntime>, onReconnect: (String) -> Unit) {
-    val colors = ds()
-    Row(
-        Modifier.fillMaxWidth().padding(top = DsSpace.m, bottom = DsSpace.xs),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        NeoLamp(color = colors.warn, size = 7.dp)
-        Spacer(Modifier.width(DsSpace.m))
-        Text(
-            stringResource(
-                R.string.inbox_env_offline,
-                failedHosts.joinToString(stringResource(R.string.inbox_list_separator)) { it.host.label },
-            ),
-            style = DsTypography.caption,
-            color = colors.textSoft,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        NeoButton(
-            label = stringResource(R.string.inbox_env_retry),
-            onClick = { failedHosts.forEach { onReconnect(it.host.id) } },
-            tone = NeoButtonTone.Ghost,
-            icon = NeoGlyph.Refresh,
-            compact = true,
-        )
-    }
-}
 
 /** One row per pane: the whole fleet, agent or not, in the same shape as an agent row. */
 @Composable

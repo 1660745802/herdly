@@ -38,7 +38,9 @@ data class HostConfig(
             HostEndpoint(host, port),
             fallbackHost.trim().takeIf { it.isNotBlank() }
                 ?.let { HostEndpoint(it, if (fallbackPort in 1..65535) fallbackPort else port) },
-        )
+        // Typing the same address twice must not dial it twice on failure: the second attempt
+        // fails for the same reason and only doubles the wait before the user sees an error.
+        ).distinct()
 
     val hasFallback: Boolean get() = fallbackHost.isNotBlank()
 }
@@ -255,6 +257,5 @@ sealed interface Screen {
     data object Settings : Screen
     data class Detail(val agentKey: String) : Screen
     data class Structure(val hostId: String) : Screen
-    data class Manage(val hostId: String) : Screen
     data class Terminal(val hostId: String) : Screen
 }

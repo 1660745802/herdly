@@ -2,6 +2,7 @@
 <resources>
     <!-- 交互式 SSH 终端页 -->
     <string name="terminal_connecting">正在连接…</string>
+    <string name="terminal_retrying">正在重连（第 %1$d 次）…</string>
     <string name="terminal_connection_lost">连接中断</string>
     <string name="terminal_back_desc">返回机器列表</string>
     <!-- %1$s：user@host 形式的目标；副标题在进入全屏程序时追加后缀 -->
@@ -48,4 +49,17 @@
     <string name="terminal_key_page_down">下翻一页</string>
     <string name="terminal_key_backspace">退格</string>
     <string name="terminal_show_keyboard">输入命令</string>
+    <string name="terminal_select_text">选择文本</string>
+    <string name="terminal_select_title">终端内容</string>
+    <string name="terminal_copy_all">复制全部</string>
+    <string name="terminal_copied">已复制</string>
+    <string name="terminal_find">查找</string>
+    <string name="terminal_find_hint">在屏幕内容里查找…</string>
+    <string name="terminal_find_none">无匹配</string>
+    <string name="terminal_find_prev">上一个</string>
+    <string name="terminal_find_next">下一个</string>
+    <string name="terminal_find_close">关闭查找</string>
+    <string name="terminal_share">分享屏幕内容</string>
+    <string name="terminal_key_alt">Alt 键，为下一个按键加前缀</string>
+    <string name="term_pin_save_failed">保存主机密钥失败，没有继续连接</string>
 </resources>

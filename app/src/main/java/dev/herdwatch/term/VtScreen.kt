@@ -40,6 +40,21 @@ class VtScreen(
     private var appCursorKeys = false
     /** DECSET 2004: the remote wants clipboard pastes wrapped in ESC[200~ .. ESC[201~. */
     private var bracketedPaste = false
+
+    /**
+     * Name the running program asked the terminal to display (OSC 0/2).
+     *
+     * vim, tmux and ssh set this so the window can say what is running; without it a phone screen
+     * shows the host name for a pane that is actually inside `vim .env`.
+     */
+    private var title: String? = null
+    private val oscBuffer = StringBuilder(64)
+
+    /**
+     * How many BEL bytes have arrived. The screen does not beep; the page reads this counter and
+     * gives the user the one signal a phone can give for "the program wants attention".
+     */
+    private var bellCount = 0L
     private var scrollTop = 0
     private var scrollBottom = height - 1
     private val pen = Pen()
@@ -168,6 +183,8 @@ class VtScreen(
             alternateScreen = alternate,
             applicationCursorKeys = appCursorKeys,
             bracketedPaste = bracketedPaste,
+            title = title,
+            bellCount = bellCount,
         )
     }
 
@@ -184,7 +201,10 @@ class VtScreen(
             S_STRING -> string(cp)
             S_OSC_ESC -> when (cp) {
                 ESC -> Unit // stay; a second ESC is just another sequence start
-                BACKSLASH -> state = S_GROUND
+                BACKSLASH -> {
+                    commitOsc()
+                    state = S_GROUND
+                }
                 else -> {
                     state = S_GROUND
                     handleCodePoint(cp)
@@ -213,6 +233,7 @@ class VtScreen(
                 return
             }
             0x9D -> {
+                oscBuffer.setLength(0)
                 state = S_OSC
                 return
             }
@@ -245,7 +266,7 @@ class VtScreen(
                 wrapPending = false
                 markDirty()
             }
-            BEL -> Unit
+            BEL -> bellCount++
             CAN, SUB -> state = S_GROUND
         }
     }
@@ -253,7 +274,10 @@ class VtScreen(
     private fun escape(cp: Int) {
         when (cp.toChar()) {
             '[' -> beginCsi()
-            ']' -> state = S_OSC
+            ']' -> {
+                oscBuffer.setLength(0)
+                state = S_OSC
+            }
             'P', '_', '^', 'X' -> state = S_STRING
             '7' -> {
                 saveCursor()
@@ -340,8 +364,27 @@ class VtScreen(
     }
 
     private fun osc(cp: Int) {
-        if (cp == BEL) state = S_GROUND
-        else if (cp == ESC) state = S_OSC_ESC
+        when (cp) {
+            BEL -> {
+                commitOsc()
+                state = S_GROUND
+            }
+            ESC -> state = S_OSC_ESC
+            // A runaway OSC (a program that never terminates it) must not grow without bound.
+            else -> if (oscBuffer.length < 512) oscBuffer.append(cp.toChar())
+        }
+    }
+
+    /** OSC 0 and OSC 2 set the window title; OSC 1 sets the icon name, which nothing shows. */
+    private fun commitOsc() {
+        val text = oscBuffer.toString()
+        oscBuffer.setLength(0)
+        val separator = text.indexOf(';')
+        if (separator <= 0) return
+        val command = text.substring(0, separator)
+        if (command != "0" && command != "2") return
+        val value = text.substring(separator + 1).trim().take(96)
+        title = value.ifBlank { null }
     }
 
     private fun string(cp: Int) {
@@ -1100,6 +1143,10 @@ data class VtSnapshot(
     val applicationCursorKeys: Boolean,
     /** DECSET 2004 is on: clipboard pastes should be wrapped in bracketed-paste markers. */
     val bracketedPaste: Boolean = false,
+    /** Window title the running program set with OSC 0/2, if any. */
+    val title: String? = null,
+    /** Monotonic count of BEL bytes; a change means the program asked for attention. */
+    val bellCount: Long = 0L,
 )
 
 data class VtLine(val runs: List<VtRun>)

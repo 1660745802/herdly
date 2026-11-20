@@ -754,7 +754,14 @@ private fun PaneRow(
     onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val paneLabel = pane.title.ifBlank { pane.id }
+    // A shell's terminal title is the whole "user@host" string, which truncated to the same
+    // useless prefix on every row; the directory is the name a person recognises.
+    val shellDirectory = pane.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+    val paneLabel = if (agent == null && pane.agentKind.isNullOrBlank()) {
+        shellDirectory ?: pane.title.ifBlank { pane.id }
+    } else {
+        pane.title.ifBlank { pane.id }
+    }
     val displayName = agent?.name ?: paneLabel
     val kindLabel = agent?.kind ?: pane.agentKind ?: if (availableShell) {
         stringResource(R.string.structure_pane_idle_shell)
@@ -808,7 +815,9 @@ private fun PaneRow(
                 listOfNotNull(
                     pane.id,
                     paneStatusLabel,
-                    cwdBase,
+                    // The directory is already the row's name when it is a shell, so repeating it
+                    // here only added noise to every second line.
+                    cwdBase.takeIf { it != paneLabel },
                     pane.restoreError?.let { restoreFailedLabel },
                 ).joinToString(" · "),
                 style = captionMono,

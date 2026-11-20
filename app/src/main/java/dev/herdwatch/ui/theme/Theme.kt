@@ -20,7 +20,6 @@ import dev.herdwatch.ui.design.DsSpacing
 import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.LocalDs
 import dev.herdwatch.ui.design.LocalSpacing
-import dev.herdwatch.ui.design.Spacing
 
 data class StatusPalette(
     val waiting: Color,
@@ -111,7 +110,7 @@ val LightStatusPalette = StatusPalette(
     idle = Color(0xFF626773),
     unknown = Color(0xFF626773),
     waitingWash = Color(0xFFFBEFE7),
-    danger = Color(0xFFB23A37),
+    danger = Color(0xFFA9322F),
 )
 
 val LocalStatusPalette = staticCompositionLocalOf { LightStatusPalette }
@@ -150,10 +149,10 @@ private val Light = lightColorScheme(
     surface = Color(0xFFFDFEFF),
     onSurface = Color(0xFF16181D),
     surfaceVariant = Color(0xFFE1E5EC),
-    onSurfaceVariant = Color(0xFF5C6572),
+    onSurfaceVariant = Color(0xFF565E6A),
     outline = Color(0xFFB9C0CC),
     outlineVariant = Color(0xFFC9D0DA),
-    error = Color(0xFFB23A37),
+    error = Color(0xFFA9322F),
     onError = Color.White,
     errorContainer = Color(0xFFFBE7E6),
     onErrorContainer = Color(0xFF6E1F1D),

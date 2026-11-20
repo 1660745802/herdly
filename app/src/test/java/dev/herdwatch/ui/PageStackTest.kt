@@ -82,4 +82,31 @@ class PageStackTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test fun `a pane that vanished does not cost an extra back press`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val client = FakeHostConnection(host, Snapshot("test", 1, emptyList(), HerdStructure()))
+            val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("vm", vm)
+            runCurrent()
+
+            vm.navigate(Screen.Hosts)
+            vm.openStructure(host.id)
+            runCurrent()
+            vm.openPane(host.id, "w:gone")
+            runCurrent()
+            assertEquals("the page did not move", Screen.Structure(host.id), vm.ui.value.screen)
+            vm.back()
+            assertEquals("one back leaves the tree", Screen.Hosts, vm.ui.value.screen)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
 }

@@ -4,7 +4,10 @@
     <plurals name="hosts_subtitle_count">
         <item quantity="other">%1$d 台机器 · %2$d 台已连接</item>
     </plurals>
-    <string name="hosts_subtitle_short">%1$d/%2$d 台在线</string>
+    <plurals name="hosts_subtitle_short">
+        <item quantity="one">%1$d/%2$d 台在线</item>
+        <item quantity="other">%1$d/%2$d 台在线</item>
+    </plurals>
     <string name="hosts_usage_security">使用与安全</string>
     <string name="hosts_empty_title">添加第一台机器</string>
     <string name="hosts_empty_body">只需要 SSH 可达。终端随时可用；连接会话只是额外能力，需要主机上能运行 herdr remote-api-bridge。</string>

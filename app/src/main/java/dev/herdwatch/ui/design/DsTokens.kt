@@ -1,6 +1,5 @@
 package dev.herdwatch.ui.design
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -52,18 +51,18 @@ val DsLight = DsColors(
     shadowDark = Color(0xFFAAB3C0),
     shadowLight = Color(0xFFFFFFFF),
     text = Color(0xFF333A46),
-    textSoft = Color(0xFF5C6572),
-    textFaint = Color(0xFF616A78),
+    textSoft = Color(0xFF565E6A),
+    textFaint = Color(0xFF575F6D),
     // Sapphire rather than blurple: the accent has to survive next to a dark terminal and read
     // as instrumentation, not as a consumer-AI gradient.
     accent = Color(0xFF2E5AAC),
     accentPressed = Color(0xFF26497F),
     onAccent = Color(0xFFFFFFFF),
     accentWash = Color(0x292E5AAC),
-    danger = Color(0xFFB23A37),
+    danger = Color(0xFFA9322F),
     onDanger = Color(0xFFFFF6F5),
-    ok = Color(0xFF24705A),
-    warn = Color(0xFF8E5F14),
+    ok = Color(0xFF1F6650),
+    warn = Color(0xFF7C5210),
     rim = Color(0xB3FFFFFF),
     isDark = false,
 )
@@ -172,6 +171,20 @@ data class Spacing(
     val row: Dp,
 )
 
+/**
+ * The bar at the top of every pushed page: back, identity, what it is, and the actions.
+ *
+ * Agent detail and the SSH terminal used to compute their own paddings and title styles, which is
+ * how one page ended up with a 20sp title over a 12sp breadcrumb and the other with 16sp next to a
+ * tag. Two screens, one set of numbers.
+ */
+object PageBarSpec {
+    val start = DsSpace.xxs
+    val end = DsSpace.xs
+    val top = DsSpace.xs
+    val gap = DsSpace.s
+}
+
 object DsSpacing {
     /**
      * One rhythm for the whole app. There is deliberately no compact variant: rhythm is a design
@@ -190,7 +203,21 @@ val LocalSpacing = staticCompositionLocalOf { DsSpacing.base }
 fun spacing(): Spacing = LocalSpacing.current
 
 private val Sans = FontFamily.SansSerif
-private val Mono = FontFamily.Monospace
+
+/**
+ * The terminal face, bundled rather than borrowed from the system.
+ *
+ * `FontFamily.Monospace` has no CJK coverage, so the platform silently substituted system fonts
+ * whose ideographs advance about 1em against our 0.5em ASCII cells: every column after the first
+ * Chinese character drifted, and box-drawing frames broke. This face is exactly 0.5em / 1.0em
+ * (LXGW WenKai Mono, subset to GB2312 + symbols, 3.4 MB), so two cells are always one ideograph.
+ * Glyphs it does not carry (rare characters, dingbats) still fall back to the system font, which is
+ * the right trade: a missed glyph is a cosmetic gap, a drifted column is a corrupted screen.
+ */
+val DsMono: FontFamily = FontFamily(
+    androidx.compose.ui.text.font.Font(dev.herdwatch.R.font.terminal_mono, weight = FontWeight.Normal),
+)
+private val Mono = DsMono
 
 /**
  * Type scale. Hierarchy comes from weight and colour; sizes stay tight so a phone screen holds
@@ -239,9 +266,3 @@ val DsTypography = DsType()
 /** Read the current material set. Call from composables only. */
 @Composable
 fun ds(): DsColors = LocalDs.current
-
-@Composable
-fun dsDarkPreferred(): Boolean = LocalDs.current.isDark
-
-@Composable
-fun rememberDsColors(dark: Boolean = isSystemInDarkTheme()): DsColors = if (dark) DsDark else DsLight
