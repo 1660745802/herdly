@@ -12,4 +12,9 @@
     <string name="service_summary_idle">没有待处理的任务</string>
     <string name="service_summary_offline">所有机器离线，正在重试</string>
     <string name="service_start_failed">后台保活未能启动：连接只在应用打开时保持。</string>
+    <string name="service_alert_channel_name">值守提醒</string>
+    <string name="service_alert_channel_desc">agent 卡住等你处理时提醒；只是完成时，只在你没看着这一屏时提醒。</string>
+    <string name="service_alert_needs_you">%1$s 在等你</string>
+    <string name="service_alert_finished">%1$s 已完成</string>
+    <string name="service_alert_body">%1$s · %2$s</string>
 </resources>

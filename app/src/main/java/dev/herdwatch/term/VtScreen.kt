@@ -1,5 +1,7 @@
 package dev.herdwatch.term
 
+import java.util.Base64
+
 /**
  * A VT100/xterm-compatible-enough screen buffer for an interactive SSH shell.
  *
@@ -49,6 +51,16 @@ class VtScreen(
      */
     private var title: String? = null
     private val oscBuffer = StringBuilder(64)
+
+    /**
+     * Status the running program reported about itself (OSC 7501, the Herdr Program Status
+     * Protocol). This is the only honest source for "what is the program doing": the client never
+     * guesses from screen contents, which is why an unparsed state stays `null`.
+     */
+    private var programStatus: VtProgramStatus? = null
+    /** Last reported state word, kept after `state=clear` so the turn counter can see the change. */
+    private var programState: String? = null
+    private var turn = 0L
 
     /**
      * How many BEL bytes have arrived. The screen does not beep; the page reads this counter and
@@ -185,6 +197,8 @@ class VtScreen(
             bracketedPaste = bracketedPaste,
             title = title,
             bellCount = bellCount,
+            status = programStatus,
+            turn = turn,
         )
     }
 
@@ -371,20 +385,106 @@ class VtScreen(
             }
             ESC -> state = S_OSC_ESC
             // A runaway OSC (a program that never terminates it) must not grow without bound.
-            else -> if (oscBuffer.length < 512) oscBuffer.append(cp.toChar())
+            else -> if (oscBuffer.length < oscLimit()) oscBuffer.append(cp.toChar())
         }
     }
 
-    /** OSC 0 and OSC 2 set the window title; OSC 1 sets the icon name, which nothing shows. */
+    /**
+     * Status reports carry base64 payloads, so once the command is recognisable they get more room
+     * than the 512 chars a window title needs; the runaway protection is the same, just later.
+     */
+    private fun oscLimit(): Int =
+        if (oscBuffer.startsWith(OSC_PROGRAM_STATUS + ";")) MAX_STATUS_OSC_CHARS else MAX_OSC_CHARS
+
+    /**
+     * OSC 0 and OSC 2 set the window title; OSC 1 sets the icon name, which nothing shows.
+     * OSC 7501 is the program status report, which is parsed into [VtProgramStatus].
+     */
     private fun commitOsc() {
         val text = oscBuffer.toString()
         oscBuffer.setLength(0)
         val separator = text.indexOf(';')
         if (separator <= 0) return
-        val command = text.substring(0, separator)
-        if (command != "0" && command != "2") return
-        val value = text.substring(separator + 1).trim().take(96)
-        title = value.ifBlank { null }
+        when (text.substring(0, separator)) {
+            OSC_PROGRAM_STATUS -> applyProgramStatus(text.substring(separator + 1))
+            "0", "2" -> {
+                val value = text.substring(separator + 1).trim().take(96)
+                title = value.ifBlank { null }
+            }
+        }
+    }
+
+    /**
+     * Fields are colon-separated `key=value` pairs and the first one is always the state word.
+     *
+     * The state is stored verbatim, never mapped to an enum: these words are the program's own
+     * vocabulary, and a new one must reach the header instead of being swallowed as "unknown".
+     * Unknown keys are ignored so a newer sender cannot break an older parser.
+     */
+    private fun applyProgramStatus(fields: String) {
+        var stateWord: String? = null
+        var kind: String? = null
+        var progress: Int? = null
+        var app: String? = null
+        var statusTitle: String? = null
+        var message: String? = null
+        var id: String? = null
+        for ((position, field) in fields.split(':').withIndex()) {
+            val equals = field.indexOf('=')
+            if (equals <= 0) continue
+            val key = field.substring(0, equals)
+            val value = field.substring(equals + 1)
+            if (position == 0) {
+                // A report whose first field is not the state is malformed; keep the old record.
+                if (key != "state") return
+                stateWord = value.ifBlank { null }
+                continue
+            }
+            when (key) {
+                "kind" -> kind = value.ifBlank { null }
+                "progress" -> progress = value.toIntOrNull()?.coerceIn(0, 100)
+                "app" -> app = value.ifBlank { null }
+                "title" -> statusTitle = decodeBase64Field(value)
+                "msg" -> message = decodeBase64Field(value)
+                "id" -> id = value.ifBlank { null }
+            }
+        }
+        val word = stateWord ?: return
+        // `state=?` asks the client what it thinks the state is; rendering the question as a status
+        // would put a `?` chip on screen and answering is not this layer's job.
+        if (word == "?") return
+        // A turn ends the moment the program stops working, whether it went idle, blocked or cleared.
+        if (programState == "working" && word != "working") turn++
+        programState = word
+        programStatus = if (word == "clear") {
+            null
+        } else {
+            VtProgramStatus(
+                state = word,
+                kind = kind,
+                progress = progress,
+                app = app,
+                title = statusTitle,
+                message = message,
+                id = id,
+            )
+        }
+        markDirty()
+    }
+
+    /** Base64 UTF-8 field; undecodable text is dropped rather than shown as mojibake. */
+    private fun decodeBase64Field(value: String): String? {
+        if (value.isEmpty()) return null
+        val bytes = try {
+            Base64.getDecoder().decode(value)
+        } catch (_: IllegalArgumentException) {
+            try {
+                Base64.getUrlDecoder().decode(value)
+            } catch (_: IllegalArgumentException) {
+                return null
+            }
+        }
+        return String(bytes, Charsets.UTF_8).trim().take(MAX_STATUS_TEXT).ifBlank { null }
     }
 
     private fun string(cp: Int) {
@@ -1090,6 +1190,11 @@ class VtScreen(
         const val MAX_CSI_PARAMS = 32
         const val MAX_CSI_LENGTH = 256
 
+        const val OSC_PROGRAM_STATUS = "7501"
+        const val MAX_OSC_CHARS = 512
+        const val MAX_STATUS_OSC_CHARS = 4096
+        const val MAX_STATUS_TEXT = 200
+
         /**
          * Terminal cell width of a code point: 0 for combining/format characters, 2 for
          * East-Asian wide and emoji presentation, otherwise 1.
@@ -1128,6 +1233,22 @@ class VtScreen(
     }
 }
 
+/**
+ * Status a program reported about itself over OSC 7501 (the Herdr Program Status Protocol).
+ *
+ * [state] is the program's own word (`idle`, `working`, `blocked`, ...) and is deliberately a
+ * String: new states appear without a client update, and an enum would drop them.
+ */
+data class VtProgramStatus(
+    val state: String,
+    val kind: String? = null,
+    val progress: Int? = null,
+    val app: String? = null,
+    val title: String? = null,
+    val message: String? = null,
+    val id: String? = null,
+)
+
 data class VtSnapshot(
     val cols: Int,
     val rows: Int,
@@ -1147,6 +1268,10 @@ data class VtSnapshot(
     val title: String? = null,
     /** Monotonic count of BEL bytes; a change means the program asked for attention. */
     val bellCount: Long = 0L,
+    /** Latest OSC 7501 report from the running program, or null when it reports nothing. */
+    val status: VtProgramStatus? = null,
+    /** Number of times the program went from `working` to any other state. */
+    val turn: Long = 0L,
 )
 
 data class VtLine(val runs: List<VtRun>)

@@ -8,8 +8,10 @@ import dev.herdwatch.R
 import dev.herdwatch.data.HerdRepository
 import dev.herdwatch.data.LanguageMode
 import dev.herdwatch.data.AppPreferences
+import dev.herdwatch.data.AppPresence
 import dev.herdwatch.data.PreferencesStore
 import dev.herdwatch.data.RepoState
+import dev.herdwatch.data.SeenMarks
 import dev.herdwatch.data.ThemeMode
 import dev.herdwatch.data.InvalidApkException
 import dev.herdwatch.data.UpdateChecker
@@ -170,6 +172,12 @@ class AppViewModel(
 
     val preferences: StateFlow<AppPreferences> = preferencesStore.state
 
+    /**
+     * Finished turns this process has already displayed, so the inbox can tell
+     * "finished while you were elsewhere" from "finished and read".
+     */
+    val seenMarks: StateFlow<Map<String, Long>> = SeenMarks.marks
+
     private val terminal = TerminalController(
         scope = viewModelScope,
         onFingerprintTrusted = { hostId, fingerprint -> repository.updateFingerprint(hostId, fingerprint) },
@@ -225,6 +233,9 @@ class AppViewModel(
 
     private var foreground = true
 
+    /** A page a notification asked for before the host list existed. */
+    private var pendingPane: Pair<String, String>? = null
+
     private fun decorate(detail: DetailState, repo: RepoState = _ui.value.repo): DetailState {
         val agent = detail.agent ?: return detail
         val record = operations.record(agent.key)
@@ -258,6 +269,9 @@ class AppViewModel(
         explainGeneration++
         loadJob?.cancel()
         explainJob?.cancel()
+        // The alert rule asks "is this agent's page on screen"; nothing is being looked at once the
+        // page is gone. [showAgent] re-arms it for the page it opens.
+        AppPresence.detailKey = null
     }
 
     init {
@@ -295,6 +309,12 @@ class AppViewModel(
                     )
                 }
                 reload?.let { loadPane(it) }
+                pendingPane?.let { (hostId, paneId) ->
+                    if (repo.hosts.any { it.host.id == hostId }) {
+                        pendingPane = null
+                        openPane(hostId, paneId)
+                    }
+                }
             }
         }
         viewModelScope.launch { repository.bootstrap() }
@@ -302,6 +322,7 @@ class AppViewModel(
 
     fun onForeground() {
         foreground = true
+        AppPresence.foreground = true
         // The system installer is another app's screen: when we come back and the version is
         // unchanged, the user cancelled or it failed. Without this the row said "Installing…"
         // forever and the button stayed disabled until the process restarted.
@@ -323,6 +344,9 @@ class AppViewModel(
 
     fun onBackground() {
         foreground = false
+        // Nothing is being watched while the app is behind another app, so a finish from now on is
+        // news worth a notification.
+        AppPresence.clear()
         leavePage()
         // The terminal and the bridge clients stay open: the keep-alive service holds the process
         // and the connection. Closing them here was what made every return a reconnect.
@@ -792,6 +816,25 @@ class AppViewModel(
      * Opens the detail page for any pane of a host, agent or not. A shell pane reads and types
      * through the same page: the page entity is the pane, the agent is only its chat side.
      */
+    /**
+     * Opens the page a notification was about.
+     *
+     * A tap can arrive before the first snapshot does (the process may have been restarted by the
+     * service), so an unknown host is remembered and opened as soon as the host list exists instead
+     * of failing at the user.
+     */
+    fun openAlertedPane(agentKey: String) {
+        val separator = agentKey.indexOf(':')
+        if (separator <= 0 || separator == agentKey.lastIndex) return
+        val hostId = agentKey.substring(0, separator)
+        val paneId = agentKey.substring(separator + 1)
+        if (_ui.value.repo.hosts.any { it.host.id == hostId }) {
+            openPane(hostId, paneId)
+        } else {
+            pendingPane = hostId to paneId
+        }
+    }
+
     fun openPane(hostId: String, paneId: String, pushPage: Boolean = true) {
         val runtime = _ui.value.repo.hosts.firstOrNull { it.host.id == hostId }
         if (runtime == null) {
@@ -818,6 +861,7 @@ class AppViewModel(
                 readingPosition = readingPositions[agent.key] ?: ReadingPosition(),
                 readingPaused = readingPositions[agent.key]?.paused == true)))
         }
+        AppPresence.detailKey = agent.key
         loadPane(agent)
     }
 
@@ -915,7 +959,12 @@ class AppViewModel(
             try {
                 val pane = repository.readPane(agent, lines, history = history)
                 currentCoroutineContext().ensureActive()
-                if (request == readGeneration) applyPane(page, pane, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
+                if (request == readGeneration) {
+                    applyPane(page, pane, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
+                    // The page is on screen and the content has been rendered: this finished turn is
+                    // no longer news. Only agents have a turn to acknowledge.
+                    if (agent.hasAgent) SeenMarks.mark(agent.key, agent.completionSeq)
+                }
             } catch (cancelled: CancellationException) {
                 // Superseded, not broken: whoever replaced this read owns the page state now.
                 currentCoroutineContext().ensureActive()

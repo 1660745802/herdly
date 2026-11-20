@@ -46,7 +46,8 @@ BANNER = (
     + PROMPT
 )
 HELP = (
-    "canned commands: help ls color wrap alt clear exit\r\n"
+    "canned commands: help ls color wrap alt clear exit status\r\n"
+    "  status [working|blocked|idle|clear] reports OSC 7501 program status\r\n"
     "line editing: backspace, Ctrl-C (cancel), Ctrl-D (logout), up/down (history)\r\n"
 )
 
@@ -94,6 +95,18 @@ def _run_command(state: ShellState, command: str, cols: int) -> str:
         return inner
     if word == "clear":
         return "\x1b[2J\x1b[H"
+    if word == "status" or word.startswith("status "):
+        # The Herdr "Program Status Protocol": a program says what it is doing and the terminal
+        # never has to guess from pixels. ``clear`` is the documented way to say "nothing
+        # outstanding"; anything else is a live report.
+        arg = word[len("status"):].strip() or "blocked"
+        if arg == "clear":
+            return "\x1b]7501;state=clear\x07"
+        if arg == "working":
+            return "\x1b]7501;state=working:progress=40:app=fixture\x07"
+        if arg == "idle":
+            return "\x1b]7501;state=idle:app=fixture\x07"
+        return "\x1b]7501;state=blocked:kind=permission:app=fixture\x07"
     if word == "exit":
         return None  # sentinel: close the channel
     return f"bash: {word}: canned fixture has no such command\r\n"

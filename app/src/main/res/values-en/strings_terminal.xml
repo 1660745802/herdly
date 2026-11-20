@@ -62,4 +62,8 @@
     <string name="terminal_share">Share the screen</string>
     <string name="terminal_key_alt">Alt, prefixes the next key</string>
     <string name="term_pin_save_failed">Could not save the host key; not connecting</string>
+    <!-- %1$s: the program's own state word (never translated); %2$s: its kind/title/msg detail -->
+    <string name="terminal_program_status_detail">%1$s · %2$s</string>
+    <!-- %1$d: progress 0..100 as reported by the program -->
+    <string name="terminal_program_status_progress">%1$d%%</string>
 </resources>

@@ -84,6 +84,10 @@ class MainActivity : ComponentActivity() {
             },
         )
         setContent {
+            // A notification about an agent opens that agent, not just the app. Handled here rather
+            // than in a deep link because the payload is an in-process key, not a URL somebody could
+            // forge from outside.
+            LaunchedEffect(Unit) { openAlertedPane(intent) }
             val preferences by viewModel.preferences.collectAsState()
             // A revision counter, not the language itself: the activity handles locale changes
             // in place (see configChanges), so Compose needs an explicit signal to re-read every
@@ -112,6 +116,20 @@ class MainActivity : ComponentActivity() {
                 key(localeRevision) { HerdwatchRoot(viewModel) }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        // SINGLE_TOP: a second alert tapped while the app is open must reuse this activity.
+        setIntent(intent)
+        openAlertedPane(intent)
+    }
+
+    private fun openAlertedPane(intent: android.content.Intent?) {
+        val key = intent?.getStringExtra(ConnectionService.EXTRA_PANE) ?: return
+        // Consumed once: a redelivered intent must not pull the user back to a page they left.
+        intent.removeExtra(ConnectionService.EXTRA_PANE)
+        viewModel.openAlertedPane(key)
     }
 
     /**

@@ -41,6 +41,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.herdwatch.R
+import dev.herdwatch.model.Agent
+import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.model.HostRuntime
@@ -71,8 +73,7 @@ import dev.herdwatch.ui.design.spacing
 @Composable
 fun HostsScreen(
     hosts: List<HostRuntime>,
-    onAdd: () -> Unit,
-    onReconnect: (String) -> Unit,
+    onAdd: () -> Unit,    onReconnect: (String) -> Unit,
     onEdit: (HostConfig) -> Unit,
     onDelete: (String) -> Unit,
     onTerminal: (String) -> Unit,
@@ -80,6 +81,9 @@ fun HostsScreen(
     onOpenHelp: () -> Unit,
     // hostId to displayed fingerprint: the dialog's decision is only valid for the key it showed.
     onTrustNewKey: (String, String) -> Unit,
+    // Every agent the fleet knows, already passed through the seen rule, so a machine's header can
+    // show the most urgent thing on it instead of a bare online dot.
+    agents: List<Agent> = emptyList(),
 ) {
     var pendingDelete by remember { mutableStateOf<HostConfig?>(null) }
     var pendingTrust by remember { mutableStateOf<HostRuntime?>(null) }
@@ -125,6 +129,10 @@ fun HostsScreen(
             items(hosts, key = { it.host.id }) { runtime ->
                 HostCard(
                     runtime,
+                    mostUrgent = agents
+                        .filter { it.hostId == runtime.host.id }
+                        .minByOrNull { urgencyOf(it.status) }
+                        ?.status,
                     modifier = animateItemMotion(),
                     onTerminal = { onTerminal(runtime.host.id) },
                     onManage = { onManage(runtime.host.id) },
@@ -289,6 +297,7 @@ private fun KeyFingerprint(caption: String, value: String) {
 @Composable
 private fun HostCard(
     runtime: HostRuntime,
+    mostUrgent: AgentStatus? = null,
     modifier: Modifier = Modifier,
     onTerminal: () -> Unit,
     onManage: () -> Unit,
@@ -328,6 +337,21 @@ private fun HostCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // One word for the whole machine, the most urgent agent's own status: this is the
+                // rollup rule the official client uses for a space, and it answers "which machine
+                // do I look at first" without opening anything.
+                if (mostUrgent != null && mostUrgent != AgentStatus.IDLE) {
+                    // No lamp here: the card already opens with the connection lamp, and two dots
+                    // of different colours on one line read as a contradiction. The word carries
+                    // the urgency; the colour only accents it.
+                    Text(
+                        stringResource(mostUrgent.labelRes),
+                        style = DsTypography.caption,
+                        color = if (mostUrgent in attentionStatuses) colors.accent else colors.textSoft,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.width(DsSpace.s))
+                }
                 Box {
                     NeoIconButton(
                         glyph = NeoGlyph.More,
@@ -504,6 +528,16 @@ private fun HostCard(
                                 color = colors.danger,
                             )
                         }
+                    }
+                    // A failure that reads like "command not found" is an environment problem the
+                    // person fixes on the host, so say the check here instead of letting them
+                    // guess. Same shape the official client uses when it offers to install hc.
+                    if (conn is ConnState.Failed) {
+                        Text(
+                            stringResource(R.string.hosts_bridge_check_hint),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                        )
                     }
                     SelectionContainer {
                         Column(verticalArrangement = Arrangement.spacedBy(DsSpace.xs)) {

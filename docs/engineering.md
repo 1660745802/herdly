@@ -121,7 +121,7 @@ Repository 通过 `HostConnection` 接口与 internal 构造函数注入传输�
 
 ## 9. 验证
 
-JVM 单元测试 246 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ConnectionSummary、KeyboardInteractive、ReadingPause、ReadingFold、SentMessage、PageStack、PaneInput、DesignTokens、NeoGlyph、ContrastColor、TextLinks、TerminalDump、TerminalInputView、TerminalRetryPolicy、DailyWorkflow、AgentTranscript、VtScreen、UpdateChecker。
+JVM 单元测试 265 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、OperationState、OperationRpc、HostStore、HerdRepository、HerdrClientTransport、ConnectionSummary、KeyboardInteractive、ReadingPause、ReadingFold、SentMessage、PageStack、PaneInput、DesignTokens、NeoGlyph、ContrastColor、TextLinks、TerminalDump、TerminalInputView、TerminalRetryPolicy、DailyWorkflow、AgentTranscript、VtScreen、UpdateChecker、AttentionAlerts、SeenMarks。
 
 - DailyWorkflow：队列顺序与 pane ID 搜索、收起搜索保留查询、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接挂起期间重复重连合并。
 - Repository：编辑后迟到连接、后台迟到快照、回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败、密钥变化与逐台信任；用虚拟时间与 `runTest` 的 `backgroundScope`。
@@ -130,6 +130,10 @@ JVM 单元测试 246 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、Ope
 Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性、方法级延迟、聚合状态发布，以及无回复 / 不执行 shell 就关闭传输，含真实 Paramiko socket-pair 传输。JVM 传输测试直接跑 JSch → 回环 Paramiko SSH，验证自身请求超时与外部取消的区别、取消关闭 socket 与新连接恢复、写入已提交但回包丢失且不自动重发、认证失败与 pin 不匹配。无 Python / Paramiko 时相关测试明确跳过，用 `HERDR_TEST_PYTHON` 指定解释器。
 
 模拟主机只绑定 loopback，共享状态可重现命令变化、输出不变、接受后读失败、RPC 错误、延迟与多种审批表单；本地 shell 执行必须显式 opt-in，默认 canned 不执行命令。详见 [tools/README.md](../tools/README.md)。
+
+`tools/sandbox.sh` 是验证的唯一入口：`up` 先停正式包、只起测试包（`dev.herdwatch.uxtest`）与回环主机并建 `adb reverse`，`shot` 同时存视图树和截图，`do` 把单个 adb 命令关在同一个守卫里，`down` 只停它自己起的进程与反向端口。理由是两条已经踩过的坑：`am start` 会把之前的前台包（uxtest）拉回前台，让人误以为看到的是正式包；`pkill` 式的清理会误杀不是自己起的 fixture。
+
+状态提醒分三层：`data/SeenMarks.kt` 记录「哪个分屏的第几轮已经看过」（只升不降，进页面时写一次），`data/AttentionAlerts.kt` 决定一次状态变化要不要提醒（被阻塞 / 报错 / 未知一定提醒；只是完成时，只有当前不在看着这一屏才提醒；重连后第一次快照静默种下历史），`data/AppPresence.kt` 是唯一的前台与当前页真相，服务与界面都读它。终端页另解析 OSC 7501（`VtScreen` 的 `VtProgramStatus` / `turn`），有上报才显示状态条，没有就什么都不显示。
 
 尚未覆盖：真实审批端到端、多主机复杂网络竞争、完整 TalkBack、平板 / 横屏、API 26 设备运行、弱网耗电。Lint 检查 minSdk 兼容性，不能替代旧系统运行测试。
 

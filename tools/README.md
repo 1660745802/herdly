@@ -9,13 +9,26 @@ Two loopback-only fixtures live here:
 
 `dev_shell_fixture.py` serves a canned shell (banner with 16/256/truecolour samples,
 `help`/`ls`/`color`/`wrap`/`alt`/`clear`/`exit`, backspace, Ctrl-C, Ctrl-D, history
-via arrow keys, window-change reporting). It never executes local commands. Use
+via arrow keys, window-change reporting). Its `status` command reports OSC 7501 program
+status (`status working`, `status blocked`, `status idle`, `status clear`) so the
+terminal's status chip can be exercised without installing anything on a real host. It never executes local commands. Use
 `--key PATH` to reuse an existing host key so a stored fingerprint still matches,
 and `--ready-file PATH` to have it write `{"port":…,"fingerprint":…}` once listening.
 
 ```sh
 .venv/bin/python tools/dev_shell_fixture.py --port 2223 --key /tmp/herdly.key
 adb reverse tcp:2223 tcp:2223
+```
+
+Verify on a device through `tools/sandbox.sh` rather than by hand: it stops the
+production package first, starts only the `.uxtest` build plus a loopback fixture, and
+tears down only what it started.
+
+```sh
+tools/sandbox.sh up          # production app stopped, fixture + uxtest running
+tools/sandbox.sh shot agent  # view tree + screenshot into $OUT
+tools/sandbox.sh do shell input keyevent 66
+tools/sandbox.sh down
 ```
 
 The rest of this document describes `dev_fake_ssh.py`.

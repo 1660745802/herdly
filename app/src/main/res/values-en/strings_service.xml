@@ -14,4 +14,9 @@
     <string name="service_summary_idle">Nothing waiting</string>
     <string name="service_summary_offline">All hosts offline, retrying</string>
     <string name="service_start_failed">Background keep-alive could not start: the connection stays up only while the app is open.</string>
+    <string name="service_alert_channel_name">Watch alerts</string>
+    <string name="service_alert_channel_desc">Alerts when an agent is stuck waiting for you; a finish only alerts while you are not looking at that pane.</string>
+    <string name="service_alert_needs_you">%1$s needs you</string>
+    <string name="service_alert_finished">%1$s finished</string>
+    <string name="service_alert_body">%1$s · %2$s</string>
 </resources>

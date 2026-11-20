@@ -99,6 +99,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.sp
 import dev.herdwatch.R
 import dev.herdwatch.term.VtRun
+import dev.herdwatch.term.VtProgramStatus
 import dev.herdwatch.ui.design.PageBarSpec
 import dev.herdwatch.ui.design.DsMono
 import dev.herdwatch.ui.design.NeoSheet
@@ -507,6 +508,13 @@ private fun TerminalBar(
                 // that the ssh target needed, and the agent page dropped its badge for the same
                 // reason. What is left is state plus one identifying line.
                 ConnectionPip(state, Modifier.weight(1f, fill = false))
+                // The program's own status report (OSC 7501), beside the connection pip because both
+                // answer "what is happening now". Shown only while a record exists: no chip means
+                // the program said nothing, which is not the same as it saying "idle".
+                state.snapshot?.status?.let { status ->
+                    Spacer(Modifier.width(DsSpace.xs))
+                    ProgramStatusChip(status, Modifier.fillMaxWidth(0.4f))
+                }
                 // One slot for two facts, because there is only room for one: what the program calls
                 // itself (OSC 0/2 — vim, tmux, less all set it) when it has a name, otherwise the
                 // ssh target. Printing both halved each and left "dev@…" and "vim model…".
@@ -597,6 +605,42 @@ private fun TerminalBar(
             }
         }
     }
+}
+
+/**
+ * The program's own words about itself, toned by consequence: `blocked`/`error` are the states
+ * where the user is the blocker, `working` is the only one worth an accent.
+ *
+ * The state word is never translated — it comes from the program, and inventing a different word
+ * on the client side is exactly the guessing this protocol exists to remove.
+ */
+@Composable
+private fun ProgramStatusChip(status: VtProgramStatus, modifier: Modifier = Modifier) {
+    val colors = ds()
+    val ink = when (status.state) {
+        "blocked", "error" -> colors.danger
+        "working" -> colors.accent
+        else -> colors.textSoft
+    }
+    val detail = status.progress?.let { stringResource(R.string.terminal_program_status_progress, it) }
+        ?: status.kind
+        ?: status.title?.takeIf { it.isNotBlank() }
+        ?: status.message?.takeIf { it.isNotBlank() }
+    val label = if (detail == null) {
+        status.state
+    } else {
+        stringResource(R.string.terminal_program_status_detail, status.state, detail)
+    }
+    Text(
+        label,
+        style = DsTypography.micro,
+        color = ink,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .background(ink.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+            .padding(horizontal = DsSpace.s, vertical = DsSpace.xxs),
+    )
 }
 
 @Composable

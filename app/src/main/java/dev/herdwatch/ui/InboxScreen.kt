@@ -107,6 +107,7 @@ import dev.herdwatch.ui.design.spacing
 @Composable
 fun InboxScreen(
     ui: UiState,
+    seen: Map<String, Long> = emptyMap(),
     onRefresh: () -> Unit,
     onOpenAgent: (Agent, String?) -> Unit,
     onQuery: (String) -> Unit,
@@ -145,6 +146,9 @@ fun InboxScreen(
     val liveHosts = scopedHosts.filter { it.conn is ConnState.Connected }
     val offlineHosts = scopedHosts.filter { it.conn !is ConnState.Connected }
     val scopedAgents = liveHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
+        // A finished agent the person has already read is idle, not news. Applied once here so the
+        // queue, the counts, the lamps and the search all describe the same status.
+        .markSeen(seen)
     // Agents get their own section whenever the host reports any: "who is working" is a different
     // question from "what is running where", and a section that vanishes when everyone is idle makes
     // the page look like it lost half its content.

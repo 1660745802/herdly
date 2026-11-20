@@ -62,4 +62,8 @@
     <string name="terminal_share">分享屏幕内容</string>
     <string name="terminal_key_alt">Alt 键，为下一个按键加前缀</string>
     <string name="term_pin_save_failed">保存主机密钥失败，没有继续连接</string>
+    <!-- %1$s：程序自报的状态词（不翻译）；%2$s：kind/title/msg 等程序自报的细节 -->
+    <string name="terminal_program_status_detail">%1$s · %2$s</string>
+    <!-- %1$d：程序自报的进度 0..100 -->
+    <string name="terminal_program_status_progress">%1$d%%</string>
 </resources>

@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Base64
 
 class VtScreenTest {
 
@@ -455,5 +456,127 @@ class VtScreenTest {
         assertEquals(50, snapshot.scrollbackCount)
         assertEquals(50 + 10, snapshot.lines.size)
         assertTrue(snapshot.visible(0).startsWith("0123456789"))
+    }
+
+    // ------------------------------------------------------------------ OSC 7501 program status
+
+    private fun b64(text: String): String =
+        Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
+
+    @Test
+    fun `program status working reports its progress and never reaches the grid`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]7501;state=working:app=claude-code:progress=40\u0007")
+
+        val snapshot = vt.snapshot()
+        assertEquals("working", snapshot.status?.state)
+        assertEquals(40, snapshot.status?.progress)
+        assertEquals("claude-code", snapshot.status?.app)
+        assertEquals("", snapshot.visible(0))
+        assertEquals(0, snapshot.cursorCol)
+    }
+
+    @Test
+    fun `program status blocked keeps kind and decodes base64 message and title`() {
+        val vt = screen(cols = 30, rows = 4)
+        vt.feedText(
+            "\u001B]7501;state=blocked:kind=permission:id=a/b:msg=${b64("Allow the edit?\n")}" +
+                ":title=${b64("改配置文件")}\u001B\\",
+        )
+
+        val status = vt.snapshot().status
+        assertEquals("blocked", status?.state)
+        assertEquals("permission", status?.kind)
+        assertEquals("a/b", status?.id)
+        assertEquals("Allow the edit?", status?.message)
+        assertEquals("改配置文件", status?.title)
+        // ST terminates the sequence just like BEL, and nothing of it is drawn.
+        assertEquals("", vt.snapshot().visible(0))
+    }
+
+    @Test
+    fun `program status clear removes the record`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]7501;state=working\u0007")
+        assertEquals("working", vt.snapshot().status?.state)
+
+        vt.feedText("\u001B]7501;state=clear\u0007")
+
+        val snapshot = vt.snapshot()
+        assertNull(snapshot.status)
+        // Clear leaves `working`, so it ends the turn like any other non-working state.
+        assertEquals(1L, snapshot.turn)
+    }
+
+    @Test
+    fun `turn increments only when leaving working`() {
+        val vt = screen(cols = 20, rows = 4)
+        assertEquals(0L, vt.snapshot().turn)
+
+        vt.feedText("\u001B]7501;state=working\u0007")
+        assertEquals(0L, vt.snapshot().turn)
+
+        // Still working: progress updates are not new turns.
+        vt.feedText("\u001B]7501;state=working:progress=70\u0007")
+        assertEquals(0L, vt.snapshot().turn)
+
+        vt.feedText("\u001B]7501;state=blocked:kind=question\u0007")
+        assertEquals(1L, vt.snapshot().turn)
+
+        // idle to done is not a turn boundary.
+        vt.feedText("\u001B]7501;state=done\u0007")
+        assertEquals(1L, vt.snapshot().turn)
+
+        vt.feedText("\u001B]7501;state=working\u0007")
+        vt.feedText("\u001B]7501;state=idle\u0007")
+        assertEquals(2L, vt.snapshot().turn)
+    }
+
+    @Test
+    fun `unknown state words are kept verbatim`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]7501;state=reviewing:app=herdr\u0007")
+
+        val snapshot = vt.snapshot()
+        assertEquals("reviewing", snapshot.status?.state)
+        assertEquals("herdr", snapshot.status?.app)
+    }
+
+    @Test
+    fun `program status split across feed calls is parsed once`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]75")
+        vt.feedText("01;state=wo")
+        vt.feedText("rking:progress=15\u0007")
+
+        val snapshot = vt.snapshot()
+        assertEquals("working", snapshot.status?.state)
+        assertEquals(15, snapshot.status?.progress)
+        assertEquals("", snapshot.visible(0))
+    }
+
+    @Test
+    fun `state query is ignored without touching the record`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]7501;state=blocked:kind=auth\u0007")
+        vt.feedText("\u001B]7501;state=?\u0007")
+
+        val snapshot = vt.snapshot()
+        assertEquals("blocked", snapshot.status?.state)
+        assertEquals("auth", snapshot.status?.kind)
+        assertEquals(0L, snapshot.turn)
+        assertEquals("", snapshot.visible(0))
+    }
+
+    @Test
+    fun `malformed program status keeps the previous record`() {
+        val vt = screen(cols = 20, rows = 4)
+        vt.feedText("\u001B]7501;state=idle\u0007")
+        vt.feedText("\u001B]7501;kind=permission\u0007")
+        vt.feedText("\u001B]7501;state=working:title=not-base64!!\u0007")
+
+        val snapshot = vt.snapshot()
+        assertEquals("working", snapshot.status?.state)
+        assertNull(snapshot.status?.title)
     }
 }

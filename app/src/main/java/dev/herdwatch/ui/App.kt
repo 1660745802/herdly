@@ -42,6 +42,7 @@ private data class Tab(val label: String, val icon: dev.herdwatch.ui.design.NeoG
 fun HerdwatchRoot(vm: AppViewModel) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val prefs by vm.preferences.collectAsStateWithLifecycle()
+    val seen by vm.seenMarks.collectAsStateWithLifecycle()
     val terminal by vm.terminalState.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
     val version = vm.version
@@ -179,6 +180,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                     when (screen) {
                         Screen.Inbox -> InboxScreen(
                             ui = ui,
+                            seen = seen,
                             onRefresh = vm::refresh,
                             onOpenAgent = { agent, _ -> vm.openAgent(agent) },
                             onQuery = vm::setQuery,
@@ -201,6 +203,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onManage = vm::openStructure,
                             onOpenHelp = { vm.navigate(Screen.Settings) },
                             onTrustNewKey = vm::trustNewFingerprint,
+                            agents = ui.repo.agents.markSeen(seen),
                         )
                         is Screen.Structure -> {
                             val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
@@ -244,7 +247,9 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onOpenInstallPermission = vm::retryInstall,
                         )
                         is Screen.Detail -> AgentScreen(
-                            detail = ui.detail,
+                            // The strip describes this page's agent; a finished turn already on screen
+                            // is idle here too, so the row and the page never disagree.
+                            detail = ui.detail.copy(agent = ui.detail.agent?.markSeen(seen)),
                             onBack = vm::back,
                             onRefresh = vm::reloadPane,
                             onReconnect = { ui.detail.agent?.hostId?.let(vm::reconnect) },

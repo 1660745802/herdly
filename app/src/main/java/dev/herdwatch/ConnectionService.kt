@@ -17,11 +17,15 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import dev.herdwatch.data.AppPresence
+import dev.herdwatch.data.AttentionAlerts
 import dev.herdwatch.data.HerdRepository
 import dev.herdwatch.data.RepoState
+import dev.herdwatch.data.SeenMarks
 import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
+import dev.herdwatch.ui.markSeen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +50,7 @@ class ConnectionService : Service() {
     private var watcher: Job? = null
     private var lastSummary: String? = null
     private var stopped = false
+    private val alerts = AttentionAlerts()
 
     private val repository: HerdRepository
         get() = (application as HerdwatchApp).repository
@@ -82,8 +87,21 @@ class ConnectionService : Service() {
                         // still refuse it on 13+: the connection keeps running, only updates go quiet.
                         if (canPostNotifications()) notify(build(summary))
                     }
+                    // Alerts are a different question from the presence notification: only a
+                    // transition we watched happen counts, and a finish the person did not see.
+                    val news = alerts.transitions(
+                        state.agents,
+                        watching = AppPresence::watching,
+                        foreground = AppPresence.foreground,
+                    )
+                    if (news.isNotEmpty() && !stopped && canPostNotifications()) {
+                        news.forEach(::postAlert)
+                    }
                     // Nothing to keep alive once the last host is gone.
-                    if (state.hosts.isEmpty()) stopSelf()
+                    if (state.hosts.isEmpty()) {
+                        alerts.reset()
+                        stopSelf()
+                    }
                 }
             }
         }
@@ -140,19 +158,61 @@ class ConnectionService : Service() {
 
     private fun createChannel() {
         val manager = getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                Str.get(R.string.service_channel_name),
-                // Low: this is a presence indicator, not an alert. The task queue itself is what
-                // asks for attention, and it already does so inside the app.
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = Str.get(R.string.service_channel_desc)
-                setShowBadge(false)
-            },
+        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    Str.get(R.string.service_channel_name),
+                    // Low: this is a presence indicator, not an alert. The task queue itself is what
+                    // asks for attention, and it already does so inside the app.
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = Str.get(R.string.service_channel_desc)
+                    setShowBadge(false)
+                },
+            )
+        }
+        if (manager.getNotificationChannel(ALERT_CHANNEL_ID) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    ALERT_CHANNEL_ID,
+                    Str.get(R.string.service_alert_channel_name),
+                    // Default, not high: an agent that needs a decision should interrupt, but a
+                    // finished turn is only a nudge — the channel-level choice keeps both honest.
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = Str.get(R.string.service_alert_channel_desc)
+                    setShowBadge(true)
+                },
+            )
+        }
+    }
+
+    /** One alert per agent, so two agents needing a decision do not overwrite each other. */
+    @SuppressLint("MissingPermission")
+    private fun postAlert(alert: AttentionAlerts.Alert) {
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_PANE, alert.agentKey)
+        }
+        val content = PendingIntent.getActivity(
+            this,
+            alert.agentKey.hashCode(),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val titleId = if (alert.needsYou) R.string.service_alert_needs_you else R.string.service_alert_finished
+        val notification = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_herd)
+            .setContentTitle(Str.get(titleId, alert.name))
+            .setContentText(Str.get(R.string.service_alert_body, alert.hostLabel, alert.paneId))
+            .setContentIntent(content)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        NotificationManagerCompat.from(this).notify(ALERT_BASE_ID + (alert.agentKey.hashCode() and 0xFF), notification)
     }
 
     private fun build(summary: String): Notification {
@@ -178,11 +238,18 @@ class ConnectionService : Service() {
             .build()
     }
 
-    private fun summaryOf(state: RepoState): String = connectionSummary(state)
+    private fun summaryOf(state: RepoState): String = connectionSummary(state, SeenMarks.marks.value)
 
     companion object {
         private const val CHANNEL_ID = "connection"
+        private const val ALERT_CHANNEL_ID = "attention"
         private const val NOTIFICATION_ID = 42
+
+        // Alert ids live above the presence notification so one never replaces the other.
+        private const val ALERT_BASE_ID = 1000
+
+        /** `hostId:paneId` of the agent an alert was about; MainActivity opens that page. */
+        const val EXTRA_PANE = "dev.herdwatch.extra.PANE"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
@@ -201,9 +268,11 @@ class ConnectionService : Service() {
  * What the keep-alive notification says. Pure so the three branches can be tested without a Service:
  * a notification that claims a connection while every host is offline is worse than none.
  */
-internal fun connectionSummary(state: RepoState): String {
+internal fun connectionSummary(state: RepoState, seen: Map<String, Long> = emptyMap()): String {
     val connected = state.hosts.count { it.conn is ConnState.Connected }
-    val waiting = state.agents.count {
+    // A finished agent whose result has been read is idle, so the notification stops claiming work
+    // that is already done and seen.
+    val waiting = state.agents.markSeen(seen).count {
         it.status == AgentStatus.WAITING || it.status == AgentStatus.REVIEW || it.status == AgentStatus.UNKNOWN
     }
     return when {

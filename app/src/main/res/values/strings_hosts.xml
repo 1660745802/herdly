@@ -56,4 +56,5 @@
     <string name="hosts_key_first_trust">核对无误，信任并连接</string>
     <string name="hosts_route_primary">经主地址 %1$s</string>
     <string name="hosts_route_fallback">经备用地址 %1$s</string>
+    <string name="hosts_bridge_check_hint">在主机上确认：herdr remote-api-bridge --check</string>
 </resources>
