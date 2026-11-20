@@ -69,4 +69,5 @@
     <string name="vm_pane_not_found">That pane is gone.</string>
     <string name="vm_label_input">terminal input</string>
     <string name="vm_trust_failed">Could not accept the new key. Try again.</string>
+    <string name="vm_label_menu">Choice</string>
 </resources>

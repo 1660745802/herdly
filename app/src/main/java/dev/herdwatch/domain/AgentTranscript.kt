@@ -58,23 +58,88 @@ object AgentTranscript {
     private val versionRe = Regex("""^v?\d+\.\d+""")
     private val rangeRe = Regex("""\d+\s*[~×x]\s*\d+""")
     private val listItemRe = Regex("""^(?:\d{1,2}[.)、]|[①②③④⑤⑥⑦⑧⑨]|[-*·•])\s*""")
+    /**
+     * How many rows the startup banner may occupy. The turn-marker break below is what actually
+     * ends the region; this is only a guard for a banner that never ends.
+     */
+    private const val BANNER_LINES = 80
 
-    fun parse(text: String): Transcript {
-        // Split once, keeping byte offsets into the original so `raw` is a verbatim slice.
-        val lines = ArrayList<Line>()
-        var start = 0
-        for (piece in text.split("\n")) {
-            val end = start + piece.length
-            val rawEnd = if (piece.endsWith("\r")) end - 1 else end
-            lines.add(Line(start, rawEnd, normalize(piece)))
-            start = end + 1
+    /** Banner section headings a CLI prints before its first turn: `[Skills]`, `[Pi 1.2]`. */
+    private val sectionHead = Regex("""^\[[A-Za-z][A-Za-z0-9 ._/-]{0,28}\]$""")
+
+    /**
+     * The screen with the furniture removed, still as plain lines.
+     *
+     * A snapshot the parser cannot cut into turns is shown as one block (a shell has no turns),
+     * and that block used to be the raw screen — so a CLI's startup banner arrived as the first
+     * message of every conversation. Dropping the same lines here keeps the fallback honest.
+     */
+    fun readable(text: String): String {
+        val lines = splitLines(text)
+        markFurniture(lines)
+        val out = StringBuilder(text.length)
+        var pendingBlank = false
+        for (ln in lines) {
+            if (ln.dropped || ln.chrome) continue
+            if (ln.blank) {
+                pendingBlank = out.isNotEmpty()
+                continue
+            }
+            if (out.isNotEmpty()) out.append('\n')
+            if (pendingBlank) out.append('\n')
+            out.append(ln.trimmed)
+            pendingBlank = false
         }
+        return out.toString()
+    }
 
+    /** Split once, keeping byte offsets into the original so `raw` is a verbatim slice. */
+    private fun splitLines(text: String): ArrayList<Line> {
+        val lines = ArrayList<Line>()
+        var first = 0
+        for (piece in text.split("\n")) {
+            val end = first + piece.length
+            val rawEnd = if (piece.endsWith("\r")) end - 1 else end
+            lines.add(Line(first, rawEnd, normalize(piece)))
+            first = end + 1
+        }
+        return lines
+    }
+
+    /** Mark everything that is furniture: prompts, banners, footers. */
+    private fun markFurniture(lines: ArrayList<Line>) {
         for (ln in lines) {
             if (!ln.blank && !ln.chrome && isolatedChrome(ln.trimmed)) {
                 ln.isolated = true
                 ln.dropped = true
             }
+        }
+
+        // Startup banner: a CLI prints `[Skills]`, `[Extensions]`, `[Context]` and an indented
+        // list under each before the first prompt. That is the agent describing itself, not a
+        // turn, and on a phone it fills the first screen. Only the region before the first real
+        // line is touched, so a bracketed heading inside a conversation survives.
+        var b = 0
+        while (b < lines.size && b < BANNER_LINES) {
+            val ln = lines[b]
+            // A turn marker ends the banner region: from here a bracketed line is content.
+            if (ln.trimmed.startsWith(">") || ln.trimmed.startsWith("❯") || ln.trimmed.startsWith("›")) break
+            if (!ln.blank && sectionHead.matches(ln.trimmed)) {
+                ln.dropped = true
+                b++
+                while (b < lines.size && (lines[b].blank || lines[b].norm.startsWith("  "))) {
+                    lines[b].dropped = true
+                    b++
+                }
+                continue
+            }
+            b++
+        }
+
+        // Hotkey legend: `escape interrupt · ctrl+c/ctrl+d clear/exit · ctrl+o more`. Two control
+        // hints in one line is a legend, not a sentence, so it never survives as a message.
+        for (ln in lines.take(BANNER_LINES)) {
+            if (!ln.blank && !ln.dropped && headerLegend(ln.trimmed)) ln.dropped = true
         }
 
         // Trailing footer scan: skip blank/chrome, drop footer-ish lines, stop at real prose.
@@ -85,7 +150,11 @@ object AgentTranscript {
             if (footerish(ln.trimmed)) { ln.dropped = true; tail--; continue }
             break
         }
+    }
 
+    fun parse(text: String): Transcript {
+        val lines = splitLines(text)
+        markFurniture(lines)
         val blocks = ArrayList<TranscriptBlock>()
         val cur = ArrayList<Line>()
         var curRole = SYSTEM
@@ -266,6 +335,18 @@ object AgentTranscript {
         val words = t.filter { it.isLetterOrDigit() || it.isWhitespace() }.trim()
         // Long rules with at most a short status word are chrome; a sentence with a dash is not.
         return words.length <= 24 && rules >= t.length / 3
+    }
+
+    private val controlHint = Regex("""\b(?:ctrl|alt|shift|cmd|meta)\+|\besc(?:ape)?\b""", RegexOption.IGNORE_CASE)
+
+    /** A line listing keyboard shortcuts: a header legend, never prose. */
+    private fun headerLegend(t: String): Boolean {
+        if (t.length > 140) return false
+        val hits = controlHint.findAll(t).count()
+        // A legend usually advertises two keys, but pi leads with its own logo and one hint
+        // (`▀▀█ v1.5.2 / Press ctrl+o to show full startup help`). A line that does not start
+        // with a letter and names a key is furniture; prose that mentions a shortcut is not.
+        return hits >= 2 || (hits == 1 && t.isNotEmpty() && !t.first().isLetter())
     }
 
     /** Whole-line chrome that is safe to drop anywhere (never part of a sentence). */

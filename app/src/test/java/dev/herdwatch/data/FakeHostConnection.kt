@@ -34,14 +34,21 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     val closedWorkspaces = mutableListOf<String>()
 
     override fun updateConfig(updated: HostConfig) { config = updated }
+    var connectCalls = 0
+        private set
+
     override suspend fun connect() {
         check(!closed)
+        connectCalls++
         onConnect()
         if (!closed) isConnected = true
     }
     override suspend fun ping(): Pair<String?, Int?> { pingCalls++; return "test" to 1 }
     override suspend fun snapshot(): Snapshot { snapshotCalls++; return onSnapshot() }
     override fun close() { closed = true; isConnected = false }
+
+    /** The socket died without this client being closed: the case that must force a reconnect. */
+    fun kill() { isConnected = false }
     override suspend fun startAgent(paneId: String, kind: String, name: String, args: List<String>) {
         mutationCalls++
         onStartAgent()

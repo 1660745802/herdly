@@ -5,7 +5,7 @@ import java.lang.reflect.Proxy
 
 /** Durable transaction fake shared by repository lifecycle fixtures. */
 internal class RepositoryPreferences {
-    private val values = mutableMapOf<String, String>()
+    val values = mutableMapOf<String, String>()
     var commitSucceeds = true
     private val proxy = Proxy.newProxyInstance(
         SharedPreferences::class.java.classLoader, arrayOf(SharedPreferences::class.java),

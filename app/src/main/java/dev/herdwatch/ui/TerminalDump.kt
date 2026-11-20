@@ -5,6 +5,7 @@ import dev.herdwatch.ui.design.DsMono
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,6 +87,9 @@ internal fun TerminalDump(
         // a narrow one should not leave a hairline of chassis ink at the right edge.
         val cols = maxOf(widest, (maxWidth / charWidth).toInt() + 1)
         val gridWidth = with(density) { (charWidthPx * cols).toDp() }
+        // Prose rows are measured against the visible column, not the widest row: inside the
+        // horizontal scroller `fillMaxWidth` would resolve against an infinite constraint.
+        val viewportWidth = maxWidth
 
         val stickToBottom = remember { androidx.compose.runtime.derivedStateOf { !listState.canScrollForward } }
 
@@ -123,15 +127,22 @@ internal fun TerminalDump(
         SelectionContainer {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().then(if (wrap) Modifier else Modifier.horizontalScroll(gridScroll)),
+                modifier = Modifier.fillMaxSize().horizontalScroll(gridScroll),
             ) {
                 itemsIndexed(lines, key = { index, _ -> lineIndex.keys[index] }) { _, line ->
+                    // Two kinds of row live in one snapshot. Prose may re-flow: a phone column is
+                    // narrower than the pane, and refusing to wrap left every long sentence cut at
+                    // the edge. Framed rows — rules, tables, box borders — must not: wrapped, one
+                    // `──────` became several short lines and every table row gained phantom
+                    // leading `│` per wrap. Those keep the pane's own width and pan sideways, so
+                    // alignment survives and the frame still reads as a frame.
+                    val framed = hasBoxDrawing(line)
                     Text(
                         text = ansiAnnotated(line, term.text, term.background),
                         style = textStyle,
-                        softWrap = wrap,
-                        maxLines = if (wrap) Int.MAX_VALUE else 1,
-                        modifier = if (wrap) Modifier else Modifier.width(gridWidth),
+                        softWrap = wrap && !framed,
+                        maxLines = if (wrap && !framed) Int.MAX_VALUE else 1,
+                        modifier = Modifier.width(if (framed) gridWidth else viewportWidth),
                     )
                 }
             }
@@ -146,6 +157,44 @@ internal fun TerminalDump(
  * otherwise make the grid too narrow and clip the last columns it occupies.
  */
 internal fun ansiCells(line: String): Int = terminalCells(stripAnsi(line))
+
+/**
+ * Whether a row is a drawn line rather than text: `─────`, `━━━━`, `════`, a box edge or a
+ * separator someone printed. Such a row must be painted once and clipped, never wrapped.
+ *
+ * The test is proportion, not position: at least 8 box-drawing glyphs and at least half of the
+ * visible cells being one. A sentence that happens to contain a dash is still a sentence.
+ */
+internal fun hasBoxDrawing(line: String): Boolean =
+    stripAnsi(line).any { it in '\u2500'..'\u257F' || it in '\u2580'..'\u259F' }
+
+internal fun isBoxRule(line: String): Boolean {
+    val plain = stripAnsi(line)
+    var box = 0
+    var cells = 0
+    var index = 0
+    while (index < plain.length) {
+        val cp = plain.codePointAt(index)
+        val width = terminalCellWidth(cp)
+        if (width > 0) {
+            cells += width
+            if (isBoxGlyph(cp)) box += width
+        }
+        index += Character.charCount(cp)
+    }
+    return box >= BOX_RULE_MIN_CELLS && box * 2 >= cells
+}
+
+private const val BOX_RULE_MIN_CELLS = 8
+
+/** Box-drawing and heavy/horizontal bar glyphs a UI or a shell draws rules with. */
+private fun isBoxGlyph(cp: Int): Boolean = when (cp) {
+    in 0x2500..0x257F -> true          // box drawing
+    in 0x2580..0x259F -> true          // block elements (▀▄█) used as bars
+    0x2E3A, 0x2E3B -> true             // two/three-em dash
+    0x2014, 0x2015 -> true             // em dash / horizontal bar
+    else -> false
+}
 
 /**
  * Terminal cells in plain text, counting code points (not UTF-16 units) with East-Asian width:

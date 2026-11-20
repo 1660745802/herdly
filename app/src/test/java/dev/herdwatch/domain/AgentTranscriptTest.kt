@@ -390,4 +390,67 @@ class AgentTranscriptTest {
         assertTrue(t.blocks.none { it.role == TranscriptRole.APPROVAL })
     }
 
+
+    @Test fun `startup banner sections are not conversation`() {
+        val text = """
+            [Skills]
+              android-cli, baoyu-comic, find-skills
+            [Extensions]
+              billion-context:dist/agent/billion-context.js, magpie.ts
+            reply just ok
+            ok
+        """.trimIndent()
+        val t = AgentTranscript.parse(text)
+        val all = t.blocks.joinToString("\n") { it.text }
+        assertTrue("banner leaked: $all", !all.contains("[Skills]"))
+        assertTrue("banner leaked: $all", !all.contains("baoyu-comic"))
+        assertTrue("banner leaked: $all", !all.contains("billion-context"))
+        assertTrue("turn missing: $all", all.contains("ok"))
+    }
+
+    @Test fun `a readable screen drops the startup banner`() {
+        val text = """
+            Pi can explain its own features and look up its docs.
+            [Skills]
+              android-cli, baoyu-comic, find-skills, herdly, mmx-cli
+            [Extensions]
+              billion-context:dist/agent/billion-context.js, magpie.ts, rtk.ts
+            reply just ok
+            ok
+        """.trimIndent()
+        val screen = AgentTranscript.readable(text)
+        assertFalse("banner survived: $screen", screen.contains("[Skills]"))
+        assertFalse("banner survived: $screen", screen.contains("[Extensions]"))
+        assertFalse("banner survived: $screen", screen.contains("baoyu-comic"))
+        assertTrue("lost the prompt: $screen", screen.contains("reply just ok"))
+        assertTrue("lost the answer: $screen", screen.contains("ok"))
+    }
+
+    @Test fun `a bracketed heading inside a turn survives`() {
+        val text = """
+            > list the markers
+            Use these:
+            [Skills]
+            as documented above.
+        """.trimIndent()
+        val all = AgentTranscript.parse(text).blocks.joinToString("\n") { it.text }
+        assertTrue("dropped mid-turn heading: $all", all.contains("[Skills]"))
+    }
+
+    @Test fun `startup banner sections are not part of the conversation`() {
+        val text = """
+            Pi can explain its own features and look up its docs.
+            [Skills]
+              android-cli, baoyu-comic, herdr, mmx-cli
+            [Extensions]
+              billion-context:dist/agent/billion-context.js, magpie.ts, rtk.ts
+            reply just ok
+            ok
+        """.trimIndent()
+        val all = AgentTranscript.parse(text).blocks.joinToString("\n") { it.text }
+        assertFalse("banner leaked: $all", all.contains("[Skills]") || all.contains("[Extensions]"))
+        assertFalse("banner list leaked: $all", all.contains("baoyu-comic"))
+        assertTrue(all.contains("reply just ok"))
+        assertTrue(all.contains("ok"))
+    }
 }

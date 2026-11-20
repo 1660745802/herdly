@@ -432,7 +432,7 @@ class ShellSession(
     }
 
     private companion object {
-        const val CONNECT_TIMEOUT_MS = 12_000
+        const val CONNECT_TIMEOUT_MS = 8_000
         const val SOCKET_TIMEOUT_MS = 15_000
         const val READ_BUFFER_BYTES = 12 * 1024
 

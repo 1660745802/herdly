@@ -124,4 +124,16 @@ class TerminalDumpTest {
         assertFalse(trigger.update(atTop = true, scrollable = false))
         assertTrue(trigger.update(atTop = true, scrollable = true))
     }
+
+    @Test
+    fun `a box rule is a drawing, not text`() {
+        assertTrue(isBoxRule("─".repeat(120)))
+        assertTrue(isBoxRule("┌" + "─".repeat(40) + "┐"))
+        assertTrue(isBoxRule("│ ─────────────── │"))
+        assertTrue(isBoxRule("\u001b[90m" + "━".repeat(60) + "\u001b[0m"))
+        assertTrue(isBoxRule("████████████"))
+        assertFalse(isBoxRule("1. kill 手工进程 1576920 —— 交回 systemd 托管"))
+        assertFalse(isBoxRule("--- note to self ---"))
+        assertFalse(isBoxRule(""))
+    }
 }

@@ -55,8 +55,36 @@ class HostStoreTest {
         val prefs = MemoryPreferences()
         prefs.values["hosts.v1"] = "broken primary"
         prefs.values["hosts.v1.bak"] = "broken backup"
-        assertTrue(runCatching { store(prefs).save(emptyList()) }.isFailure)
+        val result = runCatching { store(prefs).save(emptyList()) }
+        assertTrue(result.exceptionOrNull() is HostStoreUnavailableException)
         assertEquals("broken backup", prefs.values["hosts.v1.bak"])
+    }
+
+    @Test fun unreadablePayloadIsReportedNotTreatedAsNoHosts() {
+        val prefs = MemoryPreferences()
+        prefs.values["hosts.v1"] = "broken primary"
+        prefs.values["hosts.v1.bak"] = "broken backup"
+
+        val result = runCatching { store(prefs).load() }
+
+        assertTrue(result.exceptionOrNull() is HostStoreUnavailableException)
+        // A failed read must leave the payload alone: it may still be recoverable.
+        assertEquals("broken primary", prefs.values["hosts.v1"])
+        assertEquals("broken backup", prefs.values["hosts.v1.bak"])
+    }
+
+    @Test fun unavailableKeystoreIsReportedWhenSaving() {
+        val prefs = MemoryPreferences()
+        val store = HostStore(
+            prefs.proxy,
+            encrypt = { throw IllegalStateException("keystore entry lost") },
+            decrypt = { error("must not be called") },
+        )
+
+        val result = runCatching { store.save(listOf(host)) }
+
+        assertTrue(result.exceptionOrNull() is HostStoreUnavailableException)
+        assertFalse(prefs.values.containsKey("hosts.v1"))
     }
 
     private fun store(prefs: MemoryPreferences) = HostStore(

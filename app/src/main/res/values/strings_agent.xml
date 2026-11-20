@@ -7,7 +7,6 @@
 
     <!-- Agent 详情：更多菜单 -->
     <string name="agent_rename">重命名</string>
-    <string name="agent_menu_chat_view">对话视图</string>
     <string name="agent_menu_status_source">状态来源</string>
     <string name="agent_menu_copy_screen">复制完整屏幕</string>
     <string name="agent_toast_copied_screen">已复制完整屏幕</string>
@@ -39,7 +38,6 @@
     <!-- Agent 详情：不确定态 -->
 
     <!-- Agent 详情：终端面板 -->
-    <string name="agent_cd_fold_decorations">折叠装饰线与多余空行</string>
     <string name="agent_state_on">已开启</string>
     <string name="agent_state_off">已关闭</string>
     <string name="agent_reading_screen">正在读取屏幕…</string>
@@ -47,11 +45,8 @@
     <!-- Agent 详情：审批区 -->
     <string name="agent_need_decision">需要你决定</string>
     <string name="agent_recognition_unverified">识别待核对</string>
-    <string name="agent_state_expanded">已展开</string>
-    <string name="agent_state_collapsed">已收起</string>
     <string name="agent_submitting">正在提交…</string>
-    <string name="agent_ctrl_latched">已按下，下个字母将发送组合键</string>
-    <string name="agent_ctrl_idle">未按下</string>
+    <string name="agent_ctrl_title">组合键</string>
     <string name="agent_cd_arrow_up">方向键上</string>
     <string name="agent_cd_arrow_down">方向键下</string>
     <string name="agent_cd_arrow_left">方向键左</string>
@@ -97,8 +92,6 @@
     <!-- Agent 详情：回到底部 -->
     <string name="agent_back_to_bottom_new">有新内容 · 回到底部</string>
     <string name="agent_back_to_bottom">回到底部</string>
-    <string name="agent_layout_chat">对话</string>
-    <string name="agent_layout_terminal">终端</string>
     <string name="agent_role_user">你</string>
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">工具</string>
@@ -128,6 +121,8 @@
         <item quantity="one">展开全部 · 还有 %1$d 行</item>
         <item quantity="other">展开全部 · 还有 %1$d 行</item>
     </plurals>
+    <string name="agent_history_more">读取更早内容</string>
+    <string name="agent_history_retry">读取失败，点一下重试</string>
     <string name="agent_history_end">更早的屏幕内容服务端已经不留了</string>
     <string name="agent_working_fresh">正在输出 · %1$s 秒前有更新</string>
     <string name="agent_working_quiet">仍在执行 · 已 %1$s 秒没有新输出</string>
@@ -143,4 +138,10 @@
     <string name="agent_scope_once">只此一次</string>
     <string name="agent_scope_session">本会话</string>
     <string name="agent_scope_standing">长期</string>
+    <string name="agent_cd_switch_terminal">切换到终端</string>
+    <string name="agent_cd_switch_chat">切换到对话</string>
+    <string name="agent_menu_options">交互选项</string>
+    <string name="agent_options_title">这个提示在等一个选择</string>
+    <string name="agent_options_body">列表来自终端当前画面。先点一项选中，再按发送；发送的是方向键和回车，不会输入文字。</string>
+    <string name="agent_options_confirm">发送这一项</string>
 </resources>

@@ -7,7 +7,6 @@
 
     <!-- Agent detail: overflow menu -->
     <string name="agent_rename">Rename</string>
-    <string name="agent_menu_chat_view">Chat view</string>
     <string name="agent_menu_status_source">Status source</string>
     <string name="agent_menu_copy_screen">Copy full screen</string>
     <string name="agent_toast_copied_screen">Full screen copied</string>
@@ -39,7 +38,6 @@
     <!-- Agent detail: uncertain state -->
 
     <!-- Agent detail: terminal pane -->
-    <string name="agent_cd_fold_decorations">Fold decoration lines and extra blank lines</string>
     <string name="agent_state_on">On</string>
     <string name="agent_state_off">Off</string>
     <string name="agent_reading_screen">Reading screen…</string>
@@ -47,11 +45,8 @@
     <!-- Agent detail: approval area -->
     <string name="agent_need_decision">Your decision is needed</string>
     <string name="agent_recognition_unverified">Recognition needs review</string>
-    <string name="agent_state_expanded">Expanded</string>
-    <string name="agent_state_collapsed">Collapsed</string>
     <string name="agent_submitting">Submitting…</string>
-    <string name="agent_ctrl_latched">Pressed; the next letter will be sent as a combo</string>
-    <string name="agent_ctrl_idle">Not pressed</string>
+    <string name="agent_ctrl_title">Key combination</string>
     <string name="agent_cd_arrow_up">Arrow up</string>
     <string name="agent_cd_arrow_down">Arrow down</string>
     <string name="agent_cd_arrow_left">Arrow left</string>
@@ -97,8 +92,6 @@
     <!-- Agent detail: back to bottom -->
     <string name="agent_back_to_bottom_new">New output · Back to bottom</string>
     <string name="agent_back_to_bottom">Back to bottom</string>
-    <string name="agent_layout_chat">Chat</string>
-    <string name="agent_layout_terminal">Terminal</string>
     <string name="agent_role_user">You</string>
     <string name="agent_role_assistant">Agent</string>
     <string name="agent_role_tool">Tool</string>
@@ -127,6 +120,8 @@
         <item quantity="one">Show all · %1$d more line</item>
         <item quantity="other">Show all · %1$d more lines</item>
     </plurals>
+    <string name="agent_history_more">Load older content</string>
+    <string name="agent_history_retry">Could not load more — tap to retry</string>
     <string name="agent_history_end">The host no longer keeps older screen content</string>
     <string name="agent_working_fresh">Working · updated %1$s s ago</string>
     <string name="agent_working_quiet">Still running · no output for %1$s s</string>
@@ -142,4 +137,10 @@
     <string name="agent_scope_once">Once</string>
     <string name="agent_scope_session">This session</string>
     <string name="agent_scope_standing">Standing</string>
+    <string name="agent_cd_switch_terminal">Switch to terminal</string>
+    <string name="agent_cd_switch_chat">Switch to chat</string>
+    <string name="agent_menu_options">Interactive options</string>
+    <string name="agent_options_title">This prompt is waiting for a choice</string>
+    <string name="agent_options_body">The list is read from the terminal as it is now. Pick a row, then send — it presses arrow keys and Enter, never text.</string>
+    <string name="agent_options_confirm">Send this choice</string>
 </resources>

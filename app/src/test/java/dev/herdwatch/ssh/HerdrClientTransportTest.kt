@@ -5,6 +5,8 @@ import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.HostConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -51,51 +53,72 @@ class HerdrClientTransportTest {
     }
 
     @Test(timeout = 20_000)
-    fun `outer read cancellation closes socket under one second and fresh client recovers`() =
-        withFixture("--latency-ms", "3000", "--delay-method", "pane.read") { fixture ->
+    fun `cancelled read aborts its channel but keeps the shared session usable`() =
+        withFixture("--latency-ms", "900", "--delay-method", "pane.read") { fixture ->
             HerdrClient(fixture.config()).use { client ->
                 client.connect()
                 assertEquals("0.9.5" to 22, client.ping()) // Delay must not affect handshake/ping.
                 val started = System.nanoTime()
                 try {
-                    withTimeout(700) { client.readPane("w1:p1") }
+                    withTimeout(300) { client.readPane("w1:p1") }
                     fail("delayed pane.read should be cancelled")
                 } catch (_: TimeoutCancellationException) {
                     val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
                     assertTrue("cancellation took ${elapsedMs}ms", elapsedMs < 1_000)
                 }
                 assertEquals("request reached the server before cancellation", 1, fixture.count("pane_reads"))
-                assertFalse(client.isConnected)
-                fixture.awaitCount("active_transports", 0) // Verify remote socket closure too.
-                val failure = requestFailure { client.connect() }
-                assertTrue("cancelled client must stay closed", failure is IllegalStateException)
-            }
-            HerdrClient(fixture.config()).use { fresh ->
-                fresh.connect()
-                assertEquals("0.9.5" to 22, fresh.ping())
-                assertEquals(12L, fresh.snapshot().structure.panes.single { it.id == "w1:p1" }.revision)
-                assertEquals(12L, fresh.readPane("w1:p1").revision)
+                // The shared session must survive: the aborted request only lost its channel.
+                assertTrue("session must stay connected after a cancelled request", client.isConnected)
+                assertEquals("no new transport may be dialled", 1, fixture.count("active_transports"))
+                // A later request on the same client opens a fresh exec channel and succeeds.
+                assertEquals(12L, client.readPane("w1:p1").revision)
+                assertEquals("0.9.5" to 22, client.ping())
                 assertEquals(2, fixture.count("pane_reads"))
+                assertEquals("the later request reused the same transport", 1, fixture.count("active_transports"))
+                assertTrue(client.isConnected)
             }
             fixture.awaitCount("active_transports", 0)
         }
 
     @Test(timeout = 20_000)
-    fun `own request deadline reports timeout failure and closes connection without retry`() =
+    fun `own request deadline reports timeout failure without discarding the session`() =
         withFixture("--latency-ms", "3000", "--delay-method", "pane.read") { fixture ->
             HerdrClient(fixture.config(), requestTimeoutMillis = 700).use { client ->
                 client.connect()
                 val failure = requestFailure { client.readPane("w1:p1") }
                 assertTrue("own deadline must report a request error", failure is HerdrRequestTimeoutException)
                 assertFalse(failure is CancellationException)
-                assertFalse(client.isConnected)
-                fixture.awaitCount("active_transports", 0)
+                assertTrue("deadline must not kill the shared session", client.isConnected)
+                assertEquals(1, fixture.count("active_transports"))
+                // Requests that are not delayed still work on the very same session.
+                assertEquals("0.9.5" to 22, client.ping())
+                client.sendKeys("w1:p1", listOf("1", "enter"))
+                assertEquals(1, fixture.count("mutations"))
+                assertEquals("the retry reused the same transport", 1, fixture.count("active_transports"))
                 assertEquals(1, fixture.count("pane_reads"))
             }
-            HerdrClient(fixture.config()).use { fresh ->
-                fresh.connect()
-                assertEquals(4, fresh.snapshot().agents.size)
+            fixture.awaitCount("active_transports", 0)
+        }
+
+    @Test(timeout = 20_000)
+    fun `queueing behind a slow request is not charged to the remote deadline`() =
+        withFixture("--latency-ms", "800", "--delay-method", "pane.read") { fixture ->
+            // Each read takes 800ms on the fixture. With the deadline starting after the mutex
+            // is held, the queued read gets its full 1200ms once it starts; charging the 800ms
+            // it spent waiting would report a timeout that never happened.
+            HerdrClient(fixture.config(), requestTimeoutMillis = 1_200).use { client ->
+                client.connect()
+                coroutineScope {
+                    val first = async { client.readPane("w1:p1") }
+                    delay(200) // Let the first request take the mutex and reach the server.
+                    val second = async { client.readPane("w1:p1") }
+                    assertEquals(12L, first.await().revision)
+                    assertEquals(12L, second.await().revision)
+                }
+                assertEquals(2, fixture.count("pane_reads"))
+                assertTrue(client.isConnected)
             }
+            fixture.awaitCount("active_transports", 0)
         }
 
     @Test(timeout = 20_000)

@@ -49,6 +49,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -126,6 +130,10 @@ fun AgentScreen(
     onAutoRefresh: () -> Unit,
     onReadingPaused: (Boolean) -> Unit,
     onLoadMoreHistory: () -> Unit = {},
+    /** Same request, but the reader asked for it: retries a failed read instead of staying quiet. */
+    onLoadOlder: () -> Unit = onLoadMoreHistory,
+    /** Answers whatever selector the pane is drawing (permissions, diffs, pickers). */
+    onChooseScreenRow: (ScreenMenu, ScreenMenuRow) -> Unit = { _, _ -> },
     onReadingPosition: (String, ReadingPosition) -> Unit,
     onChoose: (AskOption) -> Unit,
     onVerifyOperation: () -> Unit,
@@ -140,8 +148,6 @@ fun AgentScreen(
      */
     onSendRawBytes: (String) -> Unit = {},
     onStop: () -> Unit,
-    onExplain: () -> Unit,
-    onDismissExplain: () -> Unit,
     onRename: (String) -> Unit,
     onStartAgent: (() -> Unit)? = null,
 ) {
@@ -152,19 +158,19 @@ fun AgentScreen(
     var menu by remember(agent.key) { mutableStateOf(false) }
     var confirmVerification by remember(agent.key) { mutableStateOf(false) }
     var selecting by remember(agent.key) { mutableStateOf(false) }
-    // A plain shell opens with its key rows: there is no agent banner or reply flow to explain them.
-    var keyboardExpanded by rememberSaveable(agent.key) { mutableStateOf(!agent.hasAgent) }
-    var ctrlLatched by remember(agent.key) { mutableStateOf(false) }
-    // Wrapped by default: a phone has no room for a 120-column line and the snapshot view has no
-    // horizontal scroller, so not wrapping means losing the right-hand side of every long line.
-    // The overflow menu still turns it off for column-aligned output.
+    // Ctrl opens a grid of letters instead of latching a modifier: a latch is a mode the reader
+    // has to remember, and the next stray tap then sends a control key to a live agent.
+    var ctrlSheetOpen by remember(agent.key) { mutableStateOf(false) }
+    // Wrapping is on because a phone is narrower than the pane: refusing to wrap cut every long
+    // line at the right edge and left the reader with half a screen of text and a gesture they had
+    // to discover. What wrapping must not do is re-flow a *box rule* — a 120-column `──────` used
+    // to break into several short lines and push everything below it down. Rules are drawn as one
+    // clipped line instead (see `isBoxRule`), so text reflows while the frame stays a frame.
     var wrapOutput by rememberSaveable { mutableStateOf(true) }
-    // Folded by default: a TUI snapshot arrives full of rules and blank runs, and the first
-    // screen a person sees should be the agent's words, not its box drawing. The toggle still
-    // reveals the raw bytes, and approvals always read the raw snapshot.
-    // Default is the machine's own screen, colours and all. Folding decoration lines is a reading
-    // aid the user can ask for, not the state the page opens in.
-    var focusedOutput by rememberSaveable { mutableStateOf(false) }
+    // A prompt waiting for an answer is the one thing on a terminal screen that the reader cannot
+    // act on by reading, so it gets a visible control instead of a hidden gesture.
+    val screenMenu = remember(detail.text) { parseScreenMenu(detail.text) }
+    var optionsOpen by remember(agent.key) { mutableStateOf(false) }
     // Chat is the default reading layout for an agent pane; the terminal layout stays one tap away
     // and is forced whenever the snapshot cannot be segmented honestly.
     // A pane without an agent opens straight into the terminal: there is no turn to read yet.
@@ -173,7 +179,6 @@ fun AgentScreen(
     val paneOnly = !agent.hasAgent
     val initialPosition = remember(agent.key) { detail.readingPosition }
     val paneScroll = androidx.compose.runtime.key(agent.key) { rememberScrollState(initialPosition.paneOffset) }
-    val pageScroll = androidx.compose.runtime.key(agent.key) { rememberScrollState(initialPosition.pageOffset) }
     var restoredPosition by rememberSaveable(agent.key) { mutableStateOf(false) }
     var stickToBottom by rememberSaveable(agent.key) { mutableStateOf(initialPosition.following) }
     var unseenOutput by remember(agent.key) { mutableStateOf(false) }
@@ -203,13 +208,7 @@ fun AgentScreen(
             else -> R.string.agent_state_autoupdate_on
         },
     )
-    val foldStateLabel = stringResource(if (focusedOutput) R.string.agent_state_on else R.string.agent_state_off)
     val wrapStateLabel = stringResource(if (wrapOutput) R.string.agent_state_on else R.string.agent_state_off)
-    val foldDescription = stringResource(R.string.agent_cd_fold_decorations)
-    val keyboardStateLabel = stringResource(
-        if (keyboardExpanded) R.string.agent_state_expanded else R.string.agent_state_collapsed,
-    )
-    val ctrlStateLabel = stringResource(if (ctrlLatched) R.string.agent_ctrl_latched else R.string.agent_ctrl_idle)
     val replyDescription = stringResource(R.string.agent_cd_reply_to, agent.name)
     val sendDescription = stringResource(R.string.agent_cd_send_to, agent.name)
     val copiedToast = stringResource(R.string.common_copied)
@@ -222,13 +221,12 @@ fun AgentScreen(
     LaunchedEffect(agent.key, detail.loadedAt) {
         if (!restoredPosition && detail.loadedAt != null) {
             withFrameNanos { }
-            pageScroll.scrollTo(initialPosition.pageOffset)
             paneScroll.scrollTo(if (initialPosition.following) paneScroll.maxValue else initialPosition.paneOffset)
             restoredPosition = true
         }
     }
     LaunchedEffect(agent.key) {
-        snapshotFlow { restoredPosition to ReadingPosition(pageScroll.value, paneScroll.value, stickToBottom, userPaused) }
+        snapshotFlow { restoredPosition to ReadingPosition(paneOffset = paneScroll.value, following = stickToBottom, paused = userPaused) }
             .collect { (restored, position) -> if (restored) latestPositionCallback(agent.key, position) }
     }
     LaunchedEffect(agent.key, pauseUpdates, selecting) { onReadingPaused(pauseUpdates || selecting) }
@@ -247,22 +245,19 @@ fun AgentScreen(
             listOf(
                 TranscriptBlock(
                     role = TranscriptRole.ASSISTANT,
-                    text = focusTerminalText(stripAnsi(detail.text)),
+                    // Same furniture filter the turn parser uses: a banner is not a message.
+                    text = AgentTranscript.readable(detail.text),
                     raw = detail.text,
                     truncatedHead = false,
                 ),
             )
         }
     }
-    // Chat needs an agent, a trustworthy parse and the chat layout. Terminal is the evidence view
-    // and the only mode for a plain shell pane; the dock below follows the same decision.
-    val showChat = !paneOnly && chatLayout
-    // Folding runs on stripped text (an escape code inside a rule would defeat the box-char test);
-    // the verbatim view keeps the colour the remote program wrote.
-    val visibleText = remember(detail.text, focusedOutput) {
-        val trimmed = condenseScreen(trimTrailingSpaces(detail.text))
-        if (focusedOutput) focusTerminalText(stripAnsi(trimmed)) else trimmed
-    }
+    // Any pane can be read either way. A shell has no turns to cut into, so its chat view is the
+    // whole screen as one block — still useful for reading a long build log with wrapping, and far
+    // better than a layout the reader cannot leave without hunting through a menu.
+    val showChat = chatLayout
+    val visibleText = remember(detail.text) { condenseScreen(trimTrailingSpaces(detail.text)) }
     LaunchedEffect(agent.key, paneScroll) {
         snapshotFlow {
             Triple(paneScroll.isScrollInProgress, paneScroll.canScrollForward, paneScroll.maxValue)
@@ -308,9 +303,9 @@ fun AgentScreen(
         // left the anchor set for the rest of the visit and scrolling to the top did nothing.
         anchorFromTop = null
     }
-    LaunchedEffect(agent.key, detail.text, detail.loadedAt, focusedOutput) {
-        // The first snapshot on re-entry establishes a baseline; display-only changes
-        // such as folding decoration must not pretend the remote pane produced output.
+    LaunchedEffect(agent.key, detail.text, detail.loadedAt) {
+        // The first snapshot on re-entry establishes a baseline; display-only changes must not
+        // pretend the remote pane produced output.
         if (detail.loadedAt != null) {
             val changed = previousOutput?.let { it != detail.text } == true
             previousOutput = detail.text
@@ -350,6 +345,19 @@ fun AgentScreen(
     ) {
     val compact = maxHeight < 640.dp || LocalDensity.current.fontScale >= 1.3f
     val minimal = maxHeight < 360.dp
+    // The layout switch is a header control, not a menu item. Hiding the way back from the
+    // terminal inside an overflow menu meant a reader who went to the grid had no visible exit;
+    // and the old segmented row only existed while the chat layout was on, so it could switch one
+    // way and never the other.
+    val layoutToggle: @Composable () -> Unit = {
+        NeoIconButton(
+            glyph = if (showChat) NeoGlyph.Terminal else NeoGlyph.Tray,
+            onClick = { chatLayout = !chatLayout },
+            contentDescription = stringResource(
+                if (showChat) R.string.agent_cd_switch_terminal else R.string.agent_cd_switch_chat,
+            ),
+        )
+    }
     // The overflow stays reachable even in the minimal landscape header; only the status
     // chrome is allowed to collapse.
     val overflowMenu: @Composable () -> Unit = {
@@ -375,22 +383,16 @@ fun AgentScreen(
                         onClick = { menu = false; wrapOutput = !wrapOutput },
                         modifier = Modifier.semantics { stateDescription = wrapStateLabel },
                     )
-                }
-                // Terminal mode hides the layout switch to give the grid its full band, so the way
-                // back to the conversation has to exist somewhere the user will look for it.
-                if (!showChat && !paneOnly) {
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_chat_view),
-                        icon = NeoGlyph.Tray,
-                        onClick = { menu = false; chatLayout = true },
-                    )
-                }
-                // "Explain the status" is an agent question. A bare shell has no status to explain.
-                if (!paneOnly) {
-                    NeoMenuItem(
-                        label = stringResource(R.string.agent_menu_status_source),
-                        onClick = { menu = false; onExplain() },
-                    )
+                    // The grid scrolls, but the bridge has no cursor: "further back" is always one
+                    // more, wider read. Reachable without scrolling first, because a short buffer
+                    // never fires the top-of-list request that used to be the only way in.
+                    if (!detail.historyEnded) {
+                        NeoMenuItem(
+                            label = stringResource(R.string.agent_history_more),
+                            onClick = { menu = false; onLoadOlder() },
+                            enabled = !detail.loading,
+                        )
+                    }
                 }
                 NeoMenuDivider()
                 // A shell pane is where an agent gets started. Keeping the entry on the pane itself
@@ -471,6 +473,7 @@ fun AgentScreen(
             Text(agent.name, style = DsTypography.headline, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).semantics { heading() })
             NeoModeTag(stringResource(if (paneOnly) R.string.mode_shell_tag else R.string.mode_agent_tag))
+            layoutToggle()
             overflowMenu()
         } else Row(
             Modifier.fillMaxWidth()
@@ -507,7 +510,7 @@ fun AgentScreen(
                         )
                     }
                     if (!compact && !paneOnly && agent.status != AgentStatus.IDLE) {
-                        Text(formatElapsed(agent.sinceMillis), style = DsTypography.mono, color = colors.textFaint, maxLines = 1)
+                        ElapsedLabel(agent.sinceMillis)
                     }
                     // Where this pane lives, on the same line as the status. Two panes with the same
                     // agent name used to be the same page to the reader, but a dedicated row for it
@@ -529,6 +532,7 @@ fun AgentScreen(
                     )
                 }
             }
+            layoutToggle()
             NeoIconButton(
                 glyph = NeoGlyph.Refresh,
                 onClick = onRefresh,
@@ -562,23 +566,6 @@ fun AgentScreen(
         // Terminal mode has no switch row. A terminal is judged on how much of the screen the shell
         // gets, and this row cost a full 48dp band above the grid for a control the reader uses once
         // per visit. The way back to the chat layout lives in the overflow menu.
-        if (!minimal && showChat) Row(
-            Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.m, top = DsSpace.xs, bottom = DsSpace.xs),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
-        ) {
-            NeoSegmented(
-                options = listOf(
-                    stringResource(R.string.agent_layout_chat),
-                    stringResource(R.string.agent_layout_terminal),
-                ),
-                selectedIndex = 0,
-                onSelect = { index: Int ->
-                    chatLayout = index == 0
-                },
-                modifier = Modifier.weight(1f),
-            )
-        }
         // While the reader is scrolled up the chip floats over the well; the content keeps a lane
         // free for it so the last line of output is never covered.
         val chipLane = if (stickToBottom) 0.dp else 56.dp
@@ -598,7 +585,18 @@ fun AgentScreen(
             // the whole page past the viewport.
             Column(Modifier.fillMaxWidth().fillMaxHeight()) {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.10f))
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                // Only states that need a word appear here. "Load older" also lives in the
+                // overflow menu: a permanent 40dp band above every terminal is a band the shell
+                // does not get, and the grid is what this page is for.
+                if (!showChat) {
+                    TerminalHistoryBar(
+                        loading = detail.loading && detail.text.isNotBlank(),
+                        failed = detail.historyFailed,
+                        ended = detail.historyEnded,
+                        onLoad = onLoadOlder,
+                    )
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (detail.text.isBlank() && detail.loading) {
                             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 NeoSpinner(Modifier.size(20.dp), color = TerminalMuted)
@@ -613,6 +611,8 @@ fun AgentScreen(
                                 scroll = paneScroll,
                                 loadingOlder = detail.loading && detail.text.isNotBlank(),
                                 historyEnded = detail.historyEnded,
+                                historyFailed = detail.historyFailed,
+                                onLoadOlder = onLoadOlder,
                                 askPending = detail.ask != null,
                                 working = agent.status == AgentStatus.WORKING,
                                 changedAt = detail.textChangedAt,
@@ -669,8 +669,10 @@ fun AgentScreen(
             // The decision lives in the flow, not behind a button: the question, the exact words
             // the agent used, and every option stay on screen until answered. A bottom sheet hid
             // the very characters an approval is about, which is why it needed a second door back.
+            // It also stays while the keyboard is up: hiding it there took the answer away exactly
+            // when the reader was typing one.
             AnimatedVisibility(
-                visible = detail.ask != null && !typing,
+                visible = detail.ask != null,
                 enter = fadeIn(tween(motionMillis(160))) + expandVertically(tween(motionMillis(200))),
                 exit = fadeOut(tween(motionMillis(120))) + shrinkVertically(tween(motionMillis(160))),
             ) {
@@ -738,7 +740,6 @@ fun AgentScreen(
                                 row.forEach { (label, key) ->
                                     Box(
                                         Modifier.weight(1f).semantics {
-                                            if (key == "__ctrl") stateDescription = ctrlStateLabel
                                             when (key) {
                                                 "up" -> contentDescription = arrowUpDescription
                                                 "down" -> contentDescription = arrowDownDescription
@@ -750,42 +751,21 @@ fun AgentScreen(
                                         NeoKey(
                                             label = label,
                                             onPress = {
-                                                when {
-                                                    key == "__stop" -> confirmStop = true
-                                                    key == "__ctrl" -> ctrlLatched = !ctrlLatched
+                                                when (key) {
+                                                    "__stop" -> confirmStop = true
+                                                    "__ctrl" -> ctrlSheetOpen = true
                                                     // Escape sequences go in as literal bytes through
                                                     // pane.send_input: the bridge's key vocabulary has
                                                     // no name for them, and a terminal sends bytes.
-                                                    key == "__shift_tab" -> {
-                                                        onSendRawBytes("\u001B[Z")
-                                                        ctrlLatched = false
-                                                    }
-                                                    key == "__backspace" -> {
-                                                        onSendRawBytes("")
-                                                        ctrlLatched = false
-                                                    }
-                                                    key == "__page_up" -> {
-                                                        onSendRawBytes("\u001B[5~")
-                                                        ctrlLatched = false
-                                                    }
-                                                    key == "__page_down" -> {
-                                                        onSendRawBytes("\u001B[6~")
-                                                        ctrlLatched = false
-                                                    }
-                                                    ctrlLatched && key.length == 1 -> {
-                                                        onSendKeys(listOf("ctrl-$key"))
-                                                        ctrlLatched = false
-                                                    }
-
-                                                    else -> {
-                                                        onSendKeys(listOf(key))
-                                                        ctrlLatched = false
-                                                    }
+                                                    "__shift_tab" -> onSendRawBytes("\u001B[Z")
+                                                    "__backspace" -> onSendRawBytes("\u007F") // Del: backspace is a control byte, never a printable one.
+                                                    "__page_up" -> onSendRawBytes("\u001B[5~")
+                                                    "__page_down" -> onSendRawBytes("\u001B[6~")
+                                                    else -> onSendKeys(listOf(key))
                                                 }
                                             },
                                             modifier = Modifier.fillMaxWidth(),
                                             stretch = true,
-                                            active = key == "__ctrl" && ctrlLatched,
                                         )
                                     }
                                 }
@@ -794,9 +774,9 @@ fun AgentScreen(
                     }
                 }
             }
-            // One thing at a time in the dock: while the agent waits for a decision the composer
-            // steps aside, so the options are never pushed below the keyboard or the gesture bar.
-            AnimatedVisibility(visible = detail.ask == null || typing) {
+            // The composer never steps aside. It used to hide while an ask was pending, which left
+            // the page without a send control the moment the keyboard came up; the options above and
+            // this field can both be on screen, and Send answers whichever one the reader chooses.
             // A disabled Send button with no reason reads as a broken app. One line under the field
             // says which of the three blocks is in the way, so nobody sits typing into a composer
             // that silently refuses to submit.
@@ -821,7 +801,10 @@ fun AgentScreen(
                 corner = DsRadius.control,
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.xs),
+                    // The well draws its highlight just inside its own edge. The controls used to
+                    // sit on top of it (`end = xs`), which cut the bright edge off behind the send
+                    // button and made the field look like it had a notch.
+                    Modifier.fillMaxWidth().padding(start = DsSpace.l, end = DsSpace.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicTextField(
@@ -830,7 +813,13 @@ fun AgentScreen(
                         modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = DsSpace.m).semantics { contentDescription = replyDescription },
                         textStyle = DsTypography.body.copy(color = colors.text),
                         cursorBrush = SolidColor(colors.accent),
-                        maxLines = if (compact) 1 else 4,
+                        // A draft is prose: it starts on one line and grows to four as it wraps,
+                        // even with the keyboard up. `compact` is about available height, and using
+                        // it here meant the keyboard — open exactly while typing — collapsed the
+                        // composer to one visible line. The terminal layout stays one line because
+                        // there the field is a command line, not a message.
+                        minLines = 1,
+                        maxLines = if (showChat) 4 else 1,
                         decorationBox = { inner ->
                             if (detail.draft.isEmpty()) Text(
                                 stringResource(
@@ -850,7 +839,22 @@ fun AgentScreen(
                             inner()
                         },
                     )
-                    if (showChat) {
+                    // The options chevron only exists while the TUI draws a menu. Reserving its
+                    // slot either way keeps the send button from sliding sideways under the
+                    // thumb that was already on it.
+                    Box(Modifier.width(48.dp + DsSpace.s)) {
+                        if (screenMenu != null) {
+                            NeoIconButton(
+                                glyph = NeoGlyph.ChevronDown,
+                                contentDescription = stringResource(R.string.agent_menu_options),
+                                onClick = { optionsOpen = true },
+                                modifier = Modifier.padding(end = DsSpace.s),
+                            )
+                        }
+                    }
+                    if (!showChat) {
+                        // Commands are typed at the terminal prompt, so the shortcut lives with the
+                        // keys it belongs to; the chat composer is for sentences.
                         // Slash commands differ per agent, so the list comes from the pane this
                         // very agent is painting (see AgentCommandCatalog); the button only puts
                         // text in the composer and never sends on its own.
@@ -873,16 +877,33 @@ fun AgentScreen(
                         tone = NeoButtonTone.Primary,
                         enabled = detail.draft.isNotBlank() && detail.canSend,
                         compact = true,
-                        modifier = Modifier.semantics { contentDescription = sendDescription },
+                        modifier = Modifier
+                            .padding(vertical = DsSpace.xs)
+                            .semantics { contentDescription = sendDescription },
                     )
                 }
-            }
             }
             }
         }
     }
     }
-    if (selecting) SelectionSheet(condenseScreenText(stripAnsi(detail.text)), onOpenLink = { link ->
+    if (optionsOpen && screenMenu != null) {
+        ScreenMenuSheet(
+            menu = screenMenu,
+            onChoose = { row -> optionsOpen = false; onChooseScreenRow(screenMenu, row) },
+            onDismiss = { optionsOpen = false },
+        )
+    }
+    if (ctrlSheetOpen) {
+        CtrlSheet(
+            onSend = { letter ->
+                ctrlSheetOpen = false
+                onSendKeys(listOf("ctrl-$letter"))
+            },
+            onDismiss = { ctrlSheetOpen = false },
+        )
+    }
+    if (selecting) SelectionSheet(condenseScreenText(stripAnsi(detail.text)), resetKey = agent.key, onOpenLink = { link ->
         openLink(context, link)
     }, onCopy = {
         clipboard.setText(AnnotatedString(it))
@@ -901,23 +922,6 @@ fun AgentScreen(
             },
             onDismiss = { commandsOpen = false },
         )
-    }
-    detail.explain?.let { text ->
-        // Read-only explainer: the only action is "close", so it is the ghost dismissal slot.
-        NeoDialog(
-            onDismissRequest = onDismissExplain,
-            title = stringResource(R.string.agent_explain_title),
-            dismissLabel = stringResource(R.string.common_close),
-        ) {
-            SelectionContainer {
-                Text(
-                    text,
-                    style = MonoStyle,
-                    color = colors.text,
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                )
-            }
-        }
     }
     if (confirmVerification) {
         NeoDialog(
@@ -1284,36 +1288,6 @@ private fun ApprovalOption(
     }
 }
 
-/** Display-only folding. The original snapshot remains the source for copying and approval. */
-private fun focusTerminalText(text: String): String {
-    val result = mutableListOf<String>()
-    var blanks = 0
-    text.lineSequence().forEach { line ->
-        val trimmed = line.trim()
-        val decorative = trimmed.length >= 4 && trimmed.all { it in "─━═┌┐└┘├┤┬┴┼╭╮╰╯│┃╔╗╚╝╠╣╦╩╬+|-=_ " }
-        if (decorative) return@forEach
-        if (trimmed.isBlank()) {
-            blanks++
-            if (blanks <= 1) result.add("")
-        } else { blanks = 0; result.add(line) }
-    }
-    // Trailing chrome: an agent TUI prints a status footer (cwd, token counters, model name) after
-    // its prose. In a reading view those lines are the least useful thing on the screen.
-    while (result.isNotEmpty() && isStatusFooter(result.last())) result.removeAt(result.lastIndex)
-    return result.joinToString("\n").trim('\n')
-}
-
-/** Heuristic for an agent's own footer lines. Deliberately narrow: it must never eat prose. */
-private fun isStatusFooter(line: String): Boolean {
-    val t = line.trim()
-    if (t.isEmpty()) return true
-    if (t.startsWith("↑") || t.startsWith("↓")) return true
-    if (t.startsWith("/") && t.none { it.isWhitespace() }) return true
-    val tokens = t.split(" · ").map { it.trim() }
-    if (tokens.size == 2 && tokens[1].lowercase() in setOf("high", "medium", "low")) return true
-    return Regex("^[\\w.-]+/[\\w.-]+$").matches(t)
-}
-
 /**
  * A screen read with SGR is padded and full of holes: every row is padded to the PTY width and a
  * TUI leaves blank rows between its blocks. Copying that verbatim gives a page of spaces with a
@@ -1349,13 +1323,18 @@ internal fun condenseScreenText(text: String): String {
 @Composable
 private fun SelectionSheet(
     text: String,
+    resetKey: Any,
     onCopy: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var value by remember(text) { mutableStateOf(TextFieldValue(text)) }
+    // Keyed on the page, not on the text: the transcript is polled, and re-keying on every new
+    // line reset the state on each refresh, wiping the selection mid-drag. The sheet keeps the
+    // snapshot it opened with, so the offsets it copies always index the string it shows.
+    var value by remember(resetKey) { mutableStateOf(TextFieldValue(text)) }
+    val snapshot = value.text
     val selection = value.selection
-    val selected = if (!selection.collapsed) text.substring(selection.min.coerceIn(0, text.length), selection.max.coerceIn(0, text.length)) else ""
+    val selected = if (!selection.collapsed) snapshot.substring(selection.min.coerceIn(0, snapshot.length), selection.max.coerceIn(0, snapshot.length)) else ""
     val terminal = LocalTerminalTokens.current
     // The picker is drawn on the terminal material, so the design palette is remapped to the
     // terminal inks for everything inside it: a chassis-dark label on a dark well would be
@@ -1379,7 +1358,7 @@ private fun SelectionSheet(
                     Text(stringResource(R.string.agent_select_copy_title), style = DsTypography.title, color = colors.text, modifier = Modifier.weight(1f))
                     NeoButton(
                         label = stringResource(R.string.agent_select_all),
-                        onClick = { value = value.copy(selection = TextRange(0, text.length)) },
+                        onClick = { value = value.copy(selection = TextRange(0, snapshot.length)) },
                         tone = NeoButtonTone.Ghost,
                         compact = true,
                     )
@@ -1400,7 +1379,7 @@ private fun SelectionSheet(
                 Text(stringResource(R.string.agent_selection_hint), style = DsTypography.caption, color = colors.textSoft)
                 // Same reason as the terminal sheet: a link on the screen is what the screen is
                 // about, and selecting it by hand on a phone is not a reasonable price.
-                val links = remember(text) { urlsIn(text) }
+                val links = remember(snapshot) { urlsIn(snapshot) }
                 if (links.isNotEmpty()) {
                     Column(
                         Modifier.fillMaxWidth().padding(top = DsSpace.xs),
@@ -1483,6 +1462,8 @@ private fun TranscriptView(
     scroll: androidx.compose.foundation.ScrollState,
     loadingOlder: Boolean = false,
     historyEnded: Boolean = false,
+    historyFailed: Boolean = false,
+    onLoadOlder: () -> Unit = {},
     askPending: Boolean = false,
     working: Boolean = false,
     changedAt: Long = 0L,
@@ -1521,10 +1502,31 @@ private fun TranscriptView(
                 )
             }
         }
+        // A failed wider read is different from an exhausted buffer: the first one is worth another
+        // tap, and without a visible door the reader concluded the page had no history. This is a
+        // 40dp row, not an error banner — the text above is still readable while it shows.
+        if (historyFailed && !loadingOlder) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(DsRadius.control))
+                    .clickable(role = Role.Button, onClick = onLoadOlder)
+                    .padding(horizontal = DsSpace.s),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.agent_history_retry),
+                    style = DsTypography.caption,
+                    color = colors.accent,
+                )
+            }
+        }
         // The bridge has no cursor, so history can only be a bigger tail. When even the biggest
         // tail the host will serve fails, the reader deserves one plain sentence instead of an
         // error strip that looks like the machine dropped.
-        if (historyEnded) {
+        if (historyEnded && !loadingOlder) {
             Text(
                 stringResource(R.string.agent_history_end),
                 style = DsTypography.caption,
@@ -1537,10 +1539,11 @@ private fun TranscriptView(
             // Only the newest turn animates: it is the one that changed. Animating a list of
             // forty cards on every poll is exactly the "everything jitters" effect users call
             // cheap.
-            if (index == blocks.lastIndex && index > 0) {
-                NewestTurn(block.text) { TranscriptBlockView(block, askPending) }
+            val newest = index == blocks.lastIndex
+            if (newest && index > 0) {
+                NewestTurn(block.text) { TranscriptBlockView(block, askPending, newest) }
             } else {
-                TranscriptBlockView(block, askPending)
+                TranscriptBlockView(block, askPending, newest)
             }
         }
         // Our own sends appear immediately, even before the agent echoes them on the screen.
@@ -1549,9 +1552,29 @@ private fun TranscriptView(
             TranscriptBlockView(TranscriptBlock(TranscriptRole.USER, message.text, message.text, false), false)
         }
         if (working) WorkingHint(changedAt, aliveAt)
-        // No "看原文" button here: the 对话/终端 switch above is that action, and a second door to
-        // the same room was pure noise at the bottom of every conversation.
+        // No "看原文" button here: the header toggle is that action, and a second door to the same
+        // room was pure noise at the bottom of every conversation.
     }
+}
+
+/**
+ * The elapsed clock on the status line.
+ *
+ * It ticks inside this one label: reading a clock at page level would recompose the whole detail
+ * page every second, and reading it once at composition froze the number at the value the header
+ * happened to be built with.
+ */
+@Composable
+private fun ElapsedLabel(since: Long) {
+    val colors = ds()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(since) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    Text(formatElapsed(since, now), style = DsTypography.mono, color = colors.textFaint, maxLines = 1)
 }
 
 /**
@@ -1630,7 +1653,11 @@ private fun NewestTurn(key: String, content: @Composable () -> Unit) {
 
 /** One turn. My words sit right in an accent wash; the agent's sit left on a raised card. */
 @Composable
-private fun TranscriptBlockView(block: TranscriptBlock, askPending: Boolean = false) {
+private fun TranscriptBlockView(
+    block: TranscriptBlock,
+    askPending: Boolean = false,
+    newest: Boolean = false,
+) {
     val colors = ds()
     val roleLabel = stringResource(
         when (block.role) {
@@ -1713,7 +1740,13 @@ private fun TranscriptBlockView(block: TranscriptBlock, askPending: Boolean = fa
                 // lines on a phone, which is the same wall the fold was supposed to remove.
                 val total = remember(block.text) { visualWidth(block.text) }
                 val long = total > COLLAPSED_COLUMNS
-                var expanded by remember(block.text) { mutableStateOf(!long) }
+                // The turn that just finished opens whole. Folding it meant the page answered
+                // "what did it say?" with twelve lines and a tap, which is the "there is too
+                // little to read here" complaint this page keeps earning. Older turns still fold
+                // so a long session stays scannable.
+                // Keyed on the text alone: a block that stops being the newest must not snap shut
+                // under the reader's eyes, which is what re-keying on [newest] would do.
+                var expanded by remember(block.text) { mutableStateOf(!long || newest) }
                 Column(
                     Modifier.fillMaxWidth().padding(DsSpace.m),
                     verticalArrangement = Arrangement.spacedBy(DsSpace.s),
@@ -1729,8 +1762,18 @@ private fun TranscriptBlockView(block: TranscriptBlock, askPending: Boolean = fa
                     val hiddenLines = (
                         (total - shown.sumOf { visualWidth(it) }) / COLUMNS_PER_LINE
                         ).coerceAtLeast(if (cut) 1 else 0)
+                    val codeStyle = SpanStyle(
+                        fontFamily = prose.fontFamily,
+                        fontSize = prose.fontSize * 0.94f,
+                        background = colors.well,
+                    )
+                    val strongStyle = SpanStyle(fontWeight = FontWeight.SemiBold, color = colors.text)
                     shown.forEach { paragraph ->
-                        Text(paragraph, style = prose, color = colors.text)
+                        Text(
+                            text = emphasized(paragraph, code = codeStyle, strong = strongStyle),
+                            style = prose,
+                            color = colors.textSoft,
+                        )
                     }
                     if (long) {
                         Row(
@@ -2025,6 +2068,168 @@ private fun ToolBlock(block: TranscriptBlock, roleLabel: String) {
 
 
 /**
+ * The pane's own selector, offered as a list.
+ *
+ * The rows and the current choice come from the terminal screen, so this sheet can never show a
+ * menu the pane is not drawing. Choosing a row sends no text: it moves the pointer with arrow keys
+ * and presses Enter, which is what the TUI would have received from a hardware keyboard.
+ *
+ * A tap only selects. The keys this sheet sends drive the live pane, and Enter on the wrong row
+ * cannot be taken back, so sending is a second, deliberate tap on a visible confirm.
+ */
+@Composable
+private fun ScreenMenuSheet(
+    menu: ScreenMenu,
+    onChoose: (ScreenMenuRow) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = ds()
+    var selected by remember(menu) { mutableIntStateOf(-1) }
+    NeoSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(start = DsSpace.xl, end = DsSpace.xl, bottom = DsSpace.xxl),
+        ) {
+            Text(stringResource(R.string.agent_options_title), style = DsTypography.title, color = colors.text)
+            Text(
+                stringResource(R.string.agent_options_body),
+                style = DsTypography.body,
+                color = colors.textSoft,
+            )
+            Spacer(Modifier.height(DsSpace.m))
+            menu.rows.forEachIndexed { index, row ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(DsRadius.control))
+                        .then(
+                            if (index == selected) Modifier.background(colors.accentWash)
+                            else Modifier,
+                        )
+                        .clickable(role = Role.Button) { selected = index }
+                        .padding(horizontal = DsSpace.s, vertical = DsSpace.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DsSpace.s),
+                ) {
+                    // The dot marks where the pane's pointer is now; the highlight marks what the
+                    // reader just picked, and the two are not always the same row.
+                    if (row.selected) {
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .background(colors.accent, CircleShape),
+                        )
+                    } else {
+                        Spacer(Modifier.size(6.dp))
+                    }
+                    Text(row.label, style = DsTypography.body, color = colors.text)
+                }
+            }
+            Spacer(Modifier.height(DsSpace.s))
+            NeoButton(
+                label = stringResource(R.string.agent_options_confirm),
+                onClick = { menu.rows.getOrNull(selected)?.let(onChoose) },
+                tone = NeoButtonTone.Primary,
+                enabled = selected in menu.rows.indices,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * Ctrl as a letter grid instead of a latch.
+ *
+ * A latch is a hidden mode: after one tap the next letter means something else, and a stray tap
+ * sends a control key to a live agent. The grid makes the whole set visible in one place, and a
+ * letter both sends and closes the sheet.
+ */
+@Composable
+private fun CtrlSheet(
+    onSend: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = ds()
+    NeoSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .padding(start = DsSpace.xl, end = DsSpace.xl, bottom = DsSpace.xxl),
+        ) {
+            Text(stringResource(R.string.agent_ctrl_title), style = DsTypography.title, color = colors.text)
+            Spacer(Modifier.height(DsSpace.m))
+            ('a'..'z').chunked(7).forEach { row ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(NeoShadowBleed),
+                ) {
+                    row.forEach { letter ->
+                        Box(Modifier.weight(1f)) {
+                            NeoKey(
+                                label = letter.toString(),
+                                onPress = { onSend(letter.toString()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                stretch = true,
+                            )
+                        }
+                    }
+                    repeat(7 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(NeoShadowBleed + 2.dp))
+            }
+        }
+    }
+}
+
+/**
+ * One line that explains why the terminal above will not get any taller.
+ *
+ * Silent when there is nothing to say: a permanent band over a grid costs the shell a row and
+ * teaches nobody anything.
+ */
+@Composable
+private fun TerminalHistoryBar(
+    loading: Boolean,
+    failed: Boolean,
+    ended: Boolean,
+    onLoad: () -> Unit,
+) {
+    if (!loading && !failed && !ended) return
+    val label = when {
+        loading -> stringResource(R.string.agent_reading_older)
+        failed -> stringResource(R.string.agent_history_retry)
+        else -> stringResource(R.string.agent_history_end)
+    }
+    val actionable = failed && !loading
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .then(if (actionable) Modifier.clickable(role = Role.Button, onClick = onLoad) else Modifier)
+            .padding(horizontal = DsSpace.m),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (loading) {
+            NeoSpinner(Modifier.size(12.dp), color = TerminalMuted, strokeWidth = 1.4.dp)
+            Spacer(Modifier.width(DsSpace.xs))
+        }
+        Text(
+            label,
+            style = DsTypography.caption,
+            color = if (actionable) TerminalMuted else TerminalMuted.copy(alpha = 0.55f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
  * The slash commands this agent actually offers.
  *
  * Two sections, because they carry different weight: what the pane is printing right now is
@@ -2132,13 +2337,6 @@ private fun CommandGroup(
 }
 
 
-/**
- * The first meaningful line of a tool block, or null if there is nothing worth showing.
- *
- * Tool blocks are what make a conversation long; a column of identical "tools · 3 lines" pills makes
- * it unreadable instead of shorter. The first line is the command in the CLI conventions this app
- * sees (`$ rg …`, `⌘ read file`, plain argv), so it is a reliable one-line summary.
- */
 internal fun stripFence(text: String): String {
     val lines = text.lines()
     if (!lines.first().trimStart().startsWith("```")) return text
@@ -2150,9 +2348,46 @@ internal fun stripFence(text: String): String {
     return body.joinToString("\n")
 }
 
+/**
+ * The first meaningful line of a tool block, or null if there is nothing worth showing.
+ *
+ * Tool blocks are what make a conversation long; a column of identical "tools · 3 lines" pills makes
+ * it unreadable instead of shorter. The first line is the command in the CLI conventions this app
+ * sees (`$ rg …`, `⌘ read file`, plain argv), so it is a reliable one-line summary.
+ */
 internal fun toolPreview(text: String): String? =
     text.lineSequence()
         .map { it.trim() }
         .filterNot { it.startsWith("```") }
         .firstOrNull { it.isNotEmpty() && it.any { ch -> ch.isLetterOrDigit() } }
         ?.take(120)
+
+/**
+ * Emphasis for a paragraph of agent prose: `code` becomes mono, **strong** becomes semibold.
+ *
+ * Chat text arrives as a wall where a path, a command and the sentence around them all weigh the
+ * same. The terminal beside it separates those by colour, so the chat view does too - without
+ * pretending to parse Markdown.
+ */
+internal fun emphasized(text: String, code: SpanStyle, strong: SpanStyle): AnnotatedString =
+    buildAnnotatedString {
+        var at = 0
+        while (at < text.length) {
+            val tick = text.indexOf('`', at)
+            val star = text.indexOf("**", at)
+            val next = listOf(tick, star).filter { it >= 0 }.minOrNull()
+            if (next == null) {
+                append(text.substring(at)); break
+            }
+            val closing = if (next == tick) text.indexOf('`', next + 1) else text.indexOf("**", next + 2)
+            if (next > at) append(text.substring(at, next))
+            if (closing < 0) {
+                // Unpaired marker: it is punctuation, not formatting.
+                append(text.substring(next)); break
+            }
+            val body = if (next == tick) text.substring(next + 1, closing) else text.substring(next + 2, closing)
+            withStyle(if (next == tick) code else strong) { append(body) }
+            at = closing + if (next == tick) 1 else 2
+        }
+    }
+

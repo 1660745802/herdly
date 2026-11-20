@@ -25,7 +25,7 @@ Herdr bridge 一行一个 JSON 请求，一条 exec 通道处理一次请求，�
 bash -lc 'herdr [--session <name>] remote-api-bridge'
 ```
 
-自定义命令按配置运行。请求按字符串 `id` 匹配响应，最多跳过 20 行启动输出；RPC 错误转成 `HerdrRpcException`。每个主机一条逻辑客户端，客户端内串行请求。阻塞 SSH 工作放在可取消的执行器任务里：取消断开 session，关闭的客户端不复用。读屏取消只上抛 `CancellationException`，不拆会话；历史读取用 `failFast`，超时不牵连正常连接。主路径不需要主机额外安装 Python、代理或守护进程。
+自定义命令按配置运行。请求按字符串 `id` 匹配响应，最多跳过 20 行启动输出；RPC 错误转成 `HerdrRpcException`。每个主机一条逻辑客户端，客户端内串行请求。阻塞 SSH 工作放在可取消的执行器任务里：取消断开 session，关闭的客户端不复用。读屏取消只上抛 `CancellationException`，不拆会话。一次请求失败不等于连接坏了：`useHost` 的 `dropDeadSession` 只在 `client.isConnected == false`（socket 真的没了）或主机密钥出错时才关客户端，其余异常原样上抛给调用方。早先任何异常都 `fail()` 掉整个会话，于是"一次读超时"变成"重新握手"，在蜂窝网络下就是用户看到的"连接很不稳定"。主路径不需要主机额外安装 Python、代理或守护进程。
 
 ## 3. 数据流与并发
 
@@ -66,7 +66,11 @@ BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REV
 
 ## 6. 读屏、解析与发送
 
-读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`。`lines` 从 `PANE_READ_LINES = 1200` 起步，上滑到顶按 `historyLines` 翻倍，上限 `MAX_HISTORY_LINES = 12_000`，直到 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能请求更长的尾部，每次响应都是上一次的超集；48k 行会是 20 MB 文本挤过一条 exec 通道并超时，界面上表现为断线，所以停在 12k。读取失败保留旧原文并标注错误与过期状态。
+`pane.read` 没有宽度参数，`pane.resize` 改的是分屏布局而不是列数（见 `docs/herdr-api-schema.json`），所以远端 pty 永远按它自己的宽度渲染，手机拿到的行可能比屏幕宽得多。`ui/TerminalDump.kt` 因此分两类画：散文行按视口宽度折行（否则右侧内容直接看不见），含制表符框线（`hasBoxDrawing`）的行保持原宽、单行裁剪并可横向平移（`horizontalScroll` 常开），整行都是框线（`isBoxRule`）时当作一条线画出来。早先统一折行会把一条 `──────` 折成三四行、并给每一行加上幻影 `│`。
+
+读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`。`lines` 从 `PANE_READ_LINES = 1200` 起步，上滑到顶按 `historyLines` 翻倍，直到 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能请求更长的尾部，每次响应都是上一次的超集；所以唯一的天然终点是主机自己说"没有了"。`MAX_HISTORY_LINES = 1_000_000` 只是防溢出的护栏，不是产品上限 —— 早先把它压到 12k/20k 的理由是"更大的请求会超时"，那是传输问题，不该变成"历史只有这么多"的规则；超时就报超时，让读者决定要不要再试。读取失败保留旧原文并标注错误与过期状态。
+
+历史读取有三种结局，界面必须能区分：`truncated=false` 是主机真的没有更早的内容（顶部写「更早的屏幕内容服务端已经不留了」）；主机返回了 `truncated=true` 就继续翻倍；超时或读失败置 `historyFailed`，顶部出现可点的「读取更早内容 / 读取失败，点一下重试」。`historyFrontier` 记住最后一次**真正拿到**的宽度：失败后重试请求的是这个宽度，而不是更大的宽度——失败后继续加宽，放大的正是刚刚超时的那次请求。`TimeoutCancellationException` 也是 `CancellationException`，`loadPane` 必须先捕获它，否则重试提示永远不会出现。
 
 两条渲染路径：整机终端走 `term/VtScreen.kt`（真 VT 解析：备用屏幕、SGR、括号粘贴、OSC 标题、BEL），分屏走 `ui/TerminalDump.kt`（按列对齐的等宽网格，默认自动换行——快照没有横向滚动，不换行等于丢掉右半边）。`ui/ContrastColor.kt` 把远端假设为浅底终端的墨色提到深底可读。审批证据、复制与核对始终用原始文本；复制整屏只做去 ANSI，不做压缩。
 
@@ -110,6 +114,8 @@ resume 参数集中在 `domain/AgentKinds.kt`：claude/pi/opencode 用 `--contin
 - 密码登录同时支持 `password` 与 `keyboard-interactive`：`keyboardInteractiveAnswers` 只用存储的密码回答**隐藏**字段；`keyboardInteractiveRefusal` 区分「要动态口令」与「要的不是密码」两种拒绝，文案不同。一次性口令提示按整词匹配（`pin` 不能命中 `pinning`）。错答一次会消耗尝试机会并看起来像密码错了，所以宁可拒绝。
 - 认证失败按传输报文分类（`isAuthRejection()` 走 cause 链找 `auth fail` / `auth cancel` / `userauth`），不比对给用户看的译文——改一句文案不该把错密码变成可重试失败。
 - 首次连接不静默 TOFU：没有已保存指纹时握手阶段中止并抛 `UnknownHostKeyException`（带 SHA-256 指纹与算法名），凭证不发给未确认的主机。终端页弹确认框，确认后以 `allowUnknownKey=true` 重连；桥连接把待确认指纹放进 `HostRuntime.pendingKey`，卡片显示「确认主机密钥」，`trustNewFingerprint` 先落盘再重连。已有指纹在握手阶段校验（`StrictHostKeyChecking=yes`），JSch 认证与校验配置按 session 设置。session 只在握手成功后发布，握手中途退出不留孤儿 socket。
+- 模型列表由 CLI 画、由 CLI 编号（`ui/ModelMenu.kt` 的 `parseModelChoices`）：剥掉 ANSI，只看屏幕最后 30 行，锚定在最后一条含 `model` / `模型` 的标题行，只读它下面的编号行（允许 2 行间隔，取最后一块），去重时"屏幕上靠后的赢"。没有标题时只在编号块不超过 20 行时才接受——否则返回空，让界面说"读不到"，而不是把一段构建日志的编号当模型发出去。AppViewModel 侧是 `requestModels` → 发 `/model` → `awaitModelMenu`（6 次、400ms 起、600ms 间隔、读 80 行）→ `chooseModel` 发送编号；发送走 `sendManual`，与手动发送共用连接检查、在途去重与草稿清理。
+- 备用地址不是"两个主机"：`HostConfig.endpoints` 先给主地址，再给备用地址（端口 0 表示沿用主端口），两者共用凭证与指纹。只有地址本身没应答（`ConnectException` / `NoRouteToHostException` / `UnknownHostException` / `SocketTimeoutException` / `PortUnreachableException`，沿异常 cause 链识别，因为 JSch 会把 socket 异常包进 `JSchException`）才换下一条；认证失败、指纹不符立刻停，换地址重试只会把一次错密码变成两次并掩盖原因。成功连接后把实际路由写进 `HostRuntime.activeAddress`（卡片显示「经主地址 / 经备用地址」），并用 `HostConfig.lastGoodEndpoint` 记住它：下次连接把这个地址排在第一位，否则回到前台时总要先等主地址超时——移动网络下这就是"回首页要等很久"。`lastGoodEndpoint` 用 `store.save` 单独落盘，不递增 `versions[hostId]`，因为它不是用户配置。单条地址握手超时 8 秒（`HerdrClient.HANDSHAKE_TIMEOUT_MS` / `ShellSession.CONNECT_TIMEOUT_MS`），够局域网握手、也够一条死地址及早让位。
 - 主机密钥算法固定 `ssh-ed25519, rsa-sha2-512/256, ecdsa-sha2-nistp256/384/521`（`HostKeyPolicy`），与 OpenSSH 默认顺序一致，用户核对的指纹能和 `ssh-keygen -lf` 对上；不提供 SHA-1 的 `ssh-rsa`/`ssh-dss`。
 - 首次指纹必须同步持久化成功再发布就绪；保存失败暴露错误，不能只在内存里信任。指纹落盘在 IO 线程，失败有自己的文案，不伪装成连接失败。
 - 密钥变化展示保存值与本次观察值，显式确认后更新；认证错误不伪装成密钥变化。
@@ -142,3 +148,16 @@ Python 模拟桥接测试覆盖状态转换、并发 mutation、故障原子性�
 - 简体中文（`res/values/`）与英文（`res/values-en/`），`res/xml/locales_config.xml` 声明支持语言。Android 13+ 用 `LocaleManager` 应用级语言，切换靠 `configChanges=locale|layoutDirection` + `key(localeRevision)` 原地重组，不重建 Activity（避免黑屏闪烁）；Android 12 及以下提示跟随系统。
 - 非界面层（Repository、SSH、解析器、ViewModel）用 `dev.herdwatch.i18n.Str.get(R.string.x, args)`，provider 在 `HerdwatchApp.onCreate` 安装一次；单元测试用 `TestStrings.install()`。资源与文案规则见 [development.md](development.md)。
 - 偏好只有习惯项：语言、主题、终端字号（`data/Preferences.kt`，独立文件 `herdwatch.prefs`，`commit()` 写入，`StateFlow` 暴露，`PreferencesStore.inMemory()` 供测试注入）。动效跟随系统「减少动态效果」，排版节奏由 `DsSpacing` 固定，不做成开关。`HostStore` 只存主机与凭据。
+
+### Host keys, credential store and visibility
+- A pin is written only after the user confirms the fingerprint the dialog showed
+  (`AppViewModel.trustNewFingerprint`, which also rejects a pending key that changed since it was
+  rendered). The connect path never persists a key it merely saw: a host with no pin stays in the
+  "needs confirmation" state until someone taps 信任.
+- If the Keystore entry is lost, `HostStore` raises `HostStoreUnavailable` instead of deleting the
+  stored payload; the repository exposes it as `RepoState.storeError` and the UI tells the reader
+  that machine config cannot be read or saved, rather than appearing to work.
+- A process recreated without an Activity (service restart) starts hidden, so polling runs at the
+  background cadence until ON_START says otherwise. The pill keeps a `dataSync` foreground service
+  that stops itself when the last host disconnects; it is restarted from ON_START and host changes,
+  not from the background, because Android 14 forbids that.

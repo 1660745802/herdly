@@ -50,6 +50,9 @@ data class RepoState(
     val refreshing: Boolean = false,
     val lastSyncAt: Long? = null,
     val error: String? = null,
+    // Set when the credential store could not be read at startup. The UI must say so instead of
+    // showing an empty fleet as if the user had never added a machine.
+    val storeError: String? = null,
     val foreground: Boolean = true,
 )
 
@@ -84,8 +87,12 @@ class HerdRepository internal constructor(
     private val networkSlots = Semaphore(4)
     private var generation = 0L
     private var pollJob: Job? = null
-    @Volatile private var visible = true
-    private var storedHosts = store.load()
+    // A process can be recreated by the system just to run the keep-alive service, with no Activity
+    // ever reporting ON_START. Until then poll at the background cadence rather than the foreground
+    // 5 s one.
+    @Volatile private var visible = false
+    private val loadedHosts = runCatching { store.load() }
+    private var storedHosts = loadedHosts.getOrDefault(emptyList())
     private val cached = storedHosts.flatMap { host ->
         store.loadAgents(host.id).filter { it.hostId == host.id }.map { it.copy(hostLabel = host.label) }
     }.distinctBy { it.key }.also { agents ->
@@ -94,6 +101,7 @@ class HerdRepository internal constructor(
     private val _state = MutableStateFlow(RepoState(
         hosts = storedHosts.map { HostRuntime(it) },
         agents = cached.sortedWith(agentOrder),
+        storeError = loadedHosts.exceptionOrNull()?.let { humanize(it) },
     ))
     val state: StateFlow<RepoState> = _state.asStateFlow()
 
@@ -154,7 +162,7 @@ class HerdRepository internal constructor(
                 store.save(updated)
                 synchronized(gate) {
                     storedHosts = updated
-                    _state.update { it.copy(hosts = it.hosts + HostRuntime(config)) }
+                    _state.update { it.copy(hosts = it.hosts + HostRuntime(config), storeError = null) }
                 }
             }
         }
@@ -175,6 +183,7 @@ class HerdRepository internal constructor(
                 _state.update { s -> s.copy(
                     hosts = s.hosts.map { if (it.host.id == config.id) HostRuntime(config) else it },
                     agents = s.agents.map { if (it.hostId == config.id) it.copy(hostLabel = config.label) else it },
+                    storeError = null,
                 ) }
                 old
             }
@@ -204,6 +213,7 @@ class HerdRepository internal constructor(
                 _state.update { s -> s.copy(
                     hosts = s.hosts.filterNot { it.host.id == hostId },
                     agents = s.agents.filterNot { it.hostId == hostId },
+                    storeError = null,
                 ) }
                 old
             }
@@ -304,6 +314,7 @@ class HerdRepository internal constructor(
                     // a cache after its host has been removed.
                     synchronized(configGate) {
                         if (synchronized(gate) { current(lease) }) {
+                            recordRoute(lease)
                             try { store.saveAgents(hostId, cache) }
                             catch (t: Exception) { _state.update { it.copy(error = Str.get(R.string.repo_cache_save_failed, humanize(t))) } }
                         }
@@ -381,20 +392,33 @@ class HerdRepository internal constructor(
                 result
             }
             catch (e: TimeoutCancellationException) {
-                if (!failFast) {
-                    // Reading further back is a guess about how much the host can serve. When the
-                    // guess is too big, keep the session and let the next poll decide its health.
-                    currentCoroutineContext().ensureActive()
-                    throw e
-                }
-                fail(lease, e); throw e
+                // A slow request says nothing about the session. The socket is still up and the
+                // next request can use it; closing here is why a slow read turned into a fresh SSH
+                // handshake, and why a connection that was fine felt like it kept dropping.
+                currentCoroutineContext().ensureActive()
+                dropDeadSession(lease, e)
+                throw e
             }
             // A cancelled request is not a broken connection. Superseding a read (a newer poll,
             // a history fetch, a page leave) used to close the shared client and mark the host
             // failed, which is why scrolling for history looked like the machine had dropped.
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { fail(lease, e); throw e }
+            catch (e: Exception) { dropDeadSession(lease, e); throw e }
         }
+    }
+
+    /**
+     * Close the shared client only when the *session* is gone, not when one request failed.
+     *
+     * A rejected key, a mismatched fingerprint or a bridge that answered with an error all leave a
+     * usable SSH session behind: reconnecting would cost a handshake and, with a public address
+     * configured, might land on a different route for no reason. `isConnected` is the fact we act
+     * on; everything else is the request's own problem and reaches the caller as an error.
+     */
+    private fun dropDeadSession(lease: Lease, error: Exception) {
+        if (error is HostKeyMismatchException || error is UnknownHostKeyException) return
+        if (synchronized(gate) { lease.client.isConnected }) return
+        fail(lease, error)
     }
 
     // RPC acceptance is the operation's result. Refresh belongs to a separate task;
@@ -491,6 +515,36 @@ class HerdRepository internal constructor(
         mutate(agent.hostId) { it.prompt(agent.paneId, text) }
     }
 
+    /**
+     * Remembers which address the live session is on, so the next reconnect dials it first.
+     *
+     * Two addresses exist to make one machine reachable from two places; which one worked is the
+     * only thing the client learns on its own, and re-deriving it costs a full connect timeout on
+     * the address that cannot answer (a LAN address on mobile data, say). Failure to persist is
+     * harmless: the session is already up, only the next dial pays for it.
+     */
+    private fun recordRoute(lease: Lease) {
+        val address = lease.client.activeAddress ?: return
+        if (lease.client.config.lastGoodEndpoint == address) return
+        val host = synchronized(gate) { storedHosts.firstOrNull { it.id == lease.hostId } } ?: return
+        if (host.lastGoodEndpoint == address) {
+            lease.client.updateConfig(lease.client.config.copy(lastGoodEndpoint = address))
+            return
+        }
+        val updated = synchronized(gate) {
+            storedHosts.map { if (it.id == host.id) it.copy(lastGoodEndpoint = address) else it }
+        }
+        // A route hint is not user configuration: it must not bump the host version, or every
+        // reconnect would invalidate in-flight work the way an edited config does.
+        try {
+            store.save(updated)
+            synchronized(gate) { storedHosts = updated }
+        } catch (t: Exception) {
+            // Keep the in-memory hint regardless: this session is alive on that address.
+        }
+        lease.client.updateConfig(lease.client.config.copy(lastGoodEndpoint = address))
+    }
+
     private fun persistFingerprint(lease: Lease, fingerprint: String) {
         synchronized(configGate) {
             val host = synchronized(gate) {
@@ -501,20 +555,10 @@ class HerdRepository internal constructor(
                 if (host.fingerprint != fingerprint) throw HostKeyMismatchException(host.fingerprint, fingerprint)
                 return
             }
-            val updated = synchronized(gate) { storedHosts.map {
-                if (it.id == host.id) it.copy(fingerprint = fingerprint) else it
-            } }
-            store.save(updated) // Must succeed before readiness, ping or snapshot publication.
-            synchronized(gate) {
-                storedHosts = updated
-                // The cached client keeps the config it was built with: replacing it here would
-                // hand the next handshake a null pin again, so the confirmation the user just gave
-                // would be silently lost and the machine would ask a second time.
-                lease.client.updateConfig(lease.client.config.copy(fingerprint = fingerprint))
-                _state.update { s -> s.copy(hosts = s.hosts.map {
-                    if (it.host.id == host.id) it.copy(host = host.copy(fingerprint = fingerprint)) else it
-                }) }
-            }
+            // First contact is never implicit trust. The real client refuses an unpinned handshake,
+            // but a connection that did present a key must not write it either: the pin is the
+            // user's decision. Surface it for confirmation through the normal failure path.
+            throw UnknownHostKeyException(fingerprint)
         }
     }
 
@@ -636,6 +680,7 @@ class HerdRepository internal constructor(
 }
 
 fun humanize(t: Throwable): String = when (t) {
+    is HostStoreUnavailableException -> t.message ?: Str.get(R.string.store_unavailable)
     // One short line: the card has room for a sentence, and the review dialog shows both keys.
     is UnknownHostKeyException -> Str.get(R.string.repo_host_key_first)
     is HostKeyMismatchException -> Str.get(R.string.repo_host_key_mismatch)

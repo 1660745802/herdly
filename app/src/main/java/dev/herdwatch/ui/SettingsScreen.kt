@@ -73,6 +73,7 @@ import dev.herdwatch.ui.design.spacing
 fun SettingsScreen(
     hosts: List<HostRuntime>,
     preferences: AppPreferences = AppPreferences(),
+    storeError: String? = null,
     onLanguage: (LanguageMode) -> Unit = {},
     onTheme: (ThemeMode) -> Unit = {},
     onFontSize: (Float) -> Unit = {},
@@ -95,6 +96,27 @@ fun SettingsScreen(
             title = stringResource(R.string.settings_title),
             subtitle = stringResource(R.string.settings_subtitle),
         )
+
+        // The credential store can fail independently of any host (a lost Keystore entry). Say so
+        // where the user comes to fix configuration, instead of showing an empty fleet as if the
+        // machines had never been added.
+        if (!storeError.isNullOrBlank()) {
+            NeoWell(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = spacing().gutter, end = spacing().gutter, top = spacing().block),
+                corner = DsRadius.control,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = DsSpace.l, vertical = DsSpace.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    NeoIcon(NeoGlyph.Warning, modifier = Modifier.size(18.dp), tint = colors.warn)
+                    Spacer(Modifier.width(DsSpace.m))
+                    Text(storeError, style = DsTypography.body, color = colors.warn)
+                }
+            }
+        }
 
         SettingsGroup(stringResource(R.string.settings_group_appearance)) {
             LanguageRow(preferences.language, onLanguage)

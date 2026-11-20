@@ -35,6 +35,7 @@ import dev.herdwatch.model.AuthType
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.model.Screen
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
@@ -65,6 +66,8 @@ data class DetailState(
     val loadedAt: Long? = null,
     /** How many lines from the tail we ask for. Grows when the reader scrolls to the top. */
     val historyLines: Int = PANE_READ_LINES,
+    /** The widest tail the host has actually delivered; a retry asks for this, not for more. */
+    val historyFrontier: Int = PANE_READ_LINES,
     /** When the snapshot text last differed. Polls that return the same screen do not count. */
     val textChangedAt: Long = 0L,
     /**
@@ -78,6 +81,14 @@ data class DetailState(
     /** Set once a wider read failed: the page stops retrying and says so inline instead. */
     val historyEnded: Boolean = false,
     /**
+     * The last attempt to read further back failed, as opposed to "the host has nothing older".
+     *
+     * These are different answers and used to be the same flag: a single timeout made the page
+     * claim it had reached the beginning of the buffer, so scrolling up never asked again for the
+     * rest of the visit. A failure is retryable and says so; exhaustion is final.
+     */
+    val historyFailed: Boolean = false,
+    /**
      * What this app has sent to the pane, newest last.
      *
      * The bridge returns a screen, not a transcript: our own message only becomes visible once the
@@ -85,8 +96,6 @@ data class DetailState(
      * the conversation feel answered the moment Send is pressed.
      */
     val sent: List<SentMessage> = emptyList(),
-    val explain: String? = null,
-    val explainLoading: Boolean = false,
     val draft: String = "",
     val operationNotice: String? = null,
     val operationUncertain: Boolean = false,
@@ -109,6 +118,8 @@ data class UiState(
     val detail: DetailState = DetailState(),
     val addingHost: Boolean = false,
     val message: String? = null,
+    /** Bumped by [AppViewModel.say], so an identical repeat is still a new message. */
+    val messageSeq: Long = 0,
     val showAddHost: Boolean = false,
     val editingHost: HostConfig? = null,
     val startAgent: StartAgentRequest? = null,
@@ -148,12 +159,18 @@ private const val PANE_READ_LINES = 1200
 private var nextSendId: Long = 1
 
 /**
- * Ceiling for "read further back". The bridge has no cursor, so every step re-reads the whole tail:
- * wider history costs a bigger payload, not a cheaper page. 48k lines was 20 MB of text through one
- * exec channel and timed out, which the page then reported as a disconnect. Past 12k the honest
- * answer is "this is a pane, not an archive" — durable history would have to live on the host.
+ * Step for "read further back".
+ *
+ * There is no ceiling any more: as long as the host still reports `truncated`, scrolling up keeps
+ * asking for a bigger tail, which is the only thing the protocol offers (no cursor, every response
+ * a superset of the last). A limit would be a wall the reader cannot see the reason for — and the
+ * reason for the old one was a request so large it timed out, which is a transport problem, not a
+ * rule about how much history exists.
+ *
+ * Only an overflow guard remains, plus the natural stopping points: `truncated = false` (the host
+ * has nothing older) and a failed read (the retry row appears and the reader decides).
  */
-private const val MAX_HISTORY_LINES = 12_000
+private const val MAX_HISTORY_LINES = 1_000_000
 
 class AppViewModel(
     private val repository: HerdRepository,
@@ -186,10 +203,8 @@ class AppViewModel(
     val terminalState: StateFlow<TerminalUiState> = terminal.state
 
     private var loadJob: Job? = null
-    private var explainJob: Job? = null
     private var pageGeneration = 0L
     private var readGeneration = 0L
-    private var explainGeneration = 0L
     private val operations = OperationState()
     /**
      * The page stack above the current tab root.
@@ -266,9 +281,7 @@ class AppViewModel(
     private fun leavePage() {
         pageGeneration++
         readGeneration++
-        explainGeneration++
         loadJob?.cancel()
-        explainJob?.cancel()
         // The alert rule asks "is this agent's page on screen"; nothing is being looked at once the
         // page is gone. [showAgent] re-arms it for the page it opens.
         AppPresence.detailKey = null
@@ -357,7 +370,7 @@ class AppViewModel(
         // The terminal and the bridge clients stay open: the keep-alive service holds the process
         // and the connection. Closing them here was what made every return a reconnect.
         repository.setVisible(false)
-        _ui.update { it.copy(detail = decorate(it.detail.copy(stale = true, loading = false, explainLoading = false))) }
+        _ui.update { it.copy(detail = decorate(it.detail.copy(stale = true, loading = false))) }
     }
 
     override fun onCleared() {
@@ -596,11 +609,6 @@ class AppViewModel(
         launchInstaller(installer, apk)
     }
 
-    fun openInstallPermission() {
-        updateInstaller?.requestInstallPermission()
-        _update.update { it.copy(needsPermission = true) }
-    }
-
     private fun launchInstaller(installer: UpdateInstaller, apk: File) {
         if (!installer.canInstall()) {
             // Ask once, then leave the state visible: the user comes back from Settings and the
@@ -780,31 +788,6 @@ class AppViewModel(
         }
     }
 
-    private fun humanizeExplain(json: kotlinx.serialization.json.JsonObject): String {
-        fun str(key: String) = json[key]?.jsonPrimitive?.contentOrNull
-        val lines = mutableListOf<String>()
-        lines += Str.get(R.string.vm_explain_state, str("state") ?: "unknown")
-        str("matched_rule")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_matched_rule, it) }
-        if (json["screen_detection_skipped"]?.jsonPrimitive?.booleanOrNull == true) {
-            val why = str("screen_detection_skip_reason")
-            lines += if (why == "full_lifecycle_hook_authority") {
-                Str.get(R.string.vm_explain_detect_skipped_hook)
-            } else {
-                why?.let { Str.get(R.string.vm_explain_detect_skipped_reason, it) }
-                    ?: Str.get(R.string.vm_explain_detect_skipped)
-            }
-        }
-        listOf(
-            "visible_blocker" to Str.get(R.string.vm_visible_blocker),
-            "visible_idle" to Str.get(R.string.vm_visible_idle),
-            "visible_working" to Str.get(R.string.vm_visible_working),
-        )
-            .filter { json[it.first]?.jsonPrimitive?.booleanOrNull == true }
-            .forEach { lines += Str.get(R.string.vm_visible_signal, it.second) }
-        str("fallback_reason")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_fallback_reason, it) }
-        str("warning")?.takeIf { it.isNotBlank() }?.let { lines += Str.get(R.string.vm_explain_warning, it) }
-        return lines.joinToString("\n")
-    }
 
     companion object {
         fun resumeArgs(kind: String): List<String> =
@@ -876,29 +859,28 @@ class AppViewModel(
         loadPane(agent)
     }
 
-    fun explainAgent() {
-        val page = ticket() ?: return
-        val agent = _ui.value.detail.agent ?: return
-        if (_ui.value.detail.explainLoading || !foreground) return
-        val request = ++explainGeneration
-        updateDetail(page) { it.copy(explainLoading = true, explain = Str.get(R.string.vm_explain_loading)) }
-        explainJob = viewModelScope.launch {
-            try {
-                val json = repository.explain(agent)
-                currentCoroutineContext().ensureActive()
-                if (request == explainGeneration) updateDetail(page) { it.copy(explainLoading = false, explain = humanizeExplain(json)) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (t: Throwable) {
-                if (request == explainGeneration) updateDetail(page) { it.copy(explainLoading = false, explain = Str.get(R.string.vm_explain_failed, dev.herdwatch.data.humanize(t))) }
-            }
-        }
-    }
 
-    fun dismissExplain() {
-        explainGeneration++
-        explainJob?.cancel()
-        _ui.update { it.copy(detail = it.detail.copy(explain = null, explainLoading = false)) }
+
+    /**
+     * Answers any interactive prompt by driving the selector the pane is already drawing.
+     *
+     * The keys are the terminal's own: move the pointer onto the chosen row with the arrow keys the
+     * TUI listens for, then press Enter. Nothing is typed as text, so prompts that have no numbers
+     * (Yes/No confirmations, permission dialogs, diff reviews) all work the same way.
+     */
+    fun chooseScreenRow(menu: ScreenMenu, row: ScreenMenuRow) {
+        val agent = _ui.value.detail.agent ?: return
+        val target = menu.rows.indexOf(row)
+        if (target < 0) return
+        val delta = target - menu.cursor
+        val keys = buildList {
+            repeat(kotlin.math.abs(delta)) { add(if (delta > 0) "down" else "up") }
+            add("enter")
+        }
+        sendManual(
+            label = Str.get(R.string.vm_label_menu),
+            rpc = { repository.sendInput(it, null, keys) },
+        )
     }
 
     /** Quiet reads still have their own request generation and retain visible read errors. */
@@ -967,9 +949,30 @@ class AppViewModel(
                 currentCoroutineContext().ensureActive()
                 if (request == readGeneration) {
                     applyPane(page, pane, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
+                    // A history read that came back complete means the host had nothing older to
+                    // give: the page should say "earliest" rather than silently ignoring the next
+                    // swipe.
+                    if (history) updateDetail(page) {
+                        // Remember the width that actually came back. A failed retry must ask for
+                        // that same width again, not for a bigger one: widening after a failure
+                        // grows exactly the request that just timed out.
+                        it.copy(historyFrontier = lines, historyEnded = !pane.truncated)
+                    }
                     // The page is on screen and the content has been rendered: this finished turn is
                     // no longer news. Only agents have a turn to acknowledge.
                     if (agent.hasAgent) SeenMarks.mark(agent.key, agent.completionSeq)
+                }
+            } catch (timedOut: TimeoutCancellationException) {
+                // A timeout is an answer, not a supersession: the request was ours and it failed.
+                // It has to be caught before `CancellationException`, which it also is, or the page
+                // never learns that the wider read was too big and the retry row never appears.
+                if (request == readGeneration) updateDetail(page) {
+                    if (history) it.copy(loading = false, historyFailed = true, historyEnded = false)
+                    else it.copy(
+                        loading = false,
+                        stale = true,
+                        error = Str.get(R.string.vm_read_failed, dev.herdwatch.data.humanize(timedOut)),
+                    )
                 }
             } catch (cancelled: CancellationException) {
                 // Superseded, not broken: whoever replaced this read owns the page state now.
@@ -979,8 +982,9 @@ class AppViewModel(
                 if (request == readGeneration) updateDetail(page) {
                     if (history) {
                         // The screen keeps what it already shows and says so quietly; an error strip
-                        // for "we could not fetch older lines" read as a broken connection.
-                        it.copy(loading = false, historyEnded = true)
+                        // for "we could not fetch older lines" read as a broken connection. This is
+                        // retryable, unlike exhaustion, so the page offers the action again.
+                        it.copy(loading = false, historyFailed = true, historyEnded = false)
                     } else {
                         it.copy(
                             loading = false,
@@ -999,18 +1003,45 @@ class AppViewModel(
      * The bridge has no cursor, so "older" means "ask for a bigger tail". Doubling the request is
      * the honest way to do it: every response is a superset of the previous one, and the reader
      * keeps its place because the page re-anchors on the new height.
+     *
+     * [force] is the difference between the two callers. The automatic trigger fires while the
+     * reader sits at the top, which is also exactly when a poll or a wide read may be in flight;
+     * dropping those requests is why scrolling up looked like it did nothing. An explicit tap
+     * therefore wins the race — [loadPane] cancels the read it supersedes.
      */
-    fun loadMoreHistory() {
+    fun loadMoreHistory(force: Boolean = false) {
         val detail = _ui.value.detail
         val agent = detail.agent ?: return
-        if (detail.loading || detail.sending) return
+        if (detail.sending) return
+        if (!force && (detail.loading || detail.historyFailed)) return
+        if (!force && detail.historyEnded) return
+        if (force) return retryWiderHistory(agent, detail)
         // `truncated == false` means the host already returned its whole buffer; there is nothing
-        // further back to fetch and asking again would be a round trip for nothing.
-        if (!detail.truncated && detail.text.isNotBlank()) return
-        if (detail.historyEnded) return
-        val next = (detail.historyLines * 2).coerceAtMost(MAX_HISTORY_LINES)
-        if (next == detail.historyLines) return
-        updateDetail(ticket() ?: return) { it.copy(historyLines = next) }
+        // further back to fetch. Say so once instead of leaving the reader pulling at a wall.
+        if (!detail.truncated && detail.text.isNotBlank()) {
+            updateDetail(ticket() ?: return) { it.copy(historyEnded = true) }
+            return
+        }
+        retryWiderHistory(agent, detail)
+    }
+
+    private fun retryWiderHistory(agent: Agent, detail: DetailState) {
+        val base = if (detail.historyFailed) detail.historyFrontier else detail.historyLines
+        val next = (base * 2).coerceAtMost(MAX_HISTORY_LINES)
+        // Compared with the base, not with the last attempt: after a failure the last attempt WAS
+        // this width, and asking for it again is the retry the page promises.
+        if (next == base) {
+            updateDetail(ticket() ?: return) { it.copy(historyEnded = true) }
+            return
+        }
+        updateDetail(ticket() ?: return) {
+            it.copy(
+                historyLines = next,
+                historyFrontier = base,
+                historyFailed = false,
+                historyEnded = false,
+            )
+        }
         loadPane(agent, quiet = true, history = true)
     }
 
@@ -1336,7 +1367,7 @@ class AppViewModel(
     fun eatMessage() = _ui.update { it.copy(message = null) }
 
     /** One short line for the user about something the app could not do; never about a remote task. */
-    fun say(text: String) = _ui.update { it.copy(message = text) }
+    fun say(text: String) = _ui.update { it.copy(message = text, messageSeq = it.messageSeq + 1) }
 
     class Factory(private val app: HerdwatchApp) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

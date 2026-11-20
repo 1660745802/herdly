@@ -34,6 +34,14 @@ internal fun Agent.markSeen(marks: Map<String, Long>): Agent {
 internal fun List<Agent>.markSeen(marks: Map<String, Long>): List<Agent> =
     if (marks.isEmpty()) this else map { it.markSeen(marks) }
 
+/**
+ * The one derivation every surface uses when it shows an agent's status. Keeping it here means the
+ * queue, the host strip and the detail header cannot disagree about what the person has read.
+ */
+internal fun withSeen(agent: Agent, marks: Map<String, Long>): Agent = agent.markSeen(marks)
+
+internal fun withSeen(agents: List<Agent>, marks: Map<String, Long>): List<Agent> = agents.markSeen(marks)
+
 private val inboxOrder = compareBy<Agent> { inboxStatusOrder.indexOf(it.status) }
     .thenBy { if (it.status == AgentStatus.WAITING) it.sinceMillis else -it.stateChangeSeq }
     .thenBy { it.name.lowercase() }

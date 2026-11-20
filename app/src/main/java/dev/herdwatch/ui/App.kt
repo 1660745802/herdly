@@ -55,11 +55,16 @@ fun HerdwatchRoot(vm: AppViewModel) {
     // when the connection used to be dropped. No hosts, no reason to hold the process.
     val hasHosts = ui.repo.hosts.isNotEmpty()
     val keepAliveFailed = stringResource(R.string.service_start_failed)
-    LaunchedEffect(hasHosts) {
+    // Keyed on the Activity's foreground state too: an Android 14 `dataSync` budget can end the
+    // service while the user is away, and returning must restart it. A background start is refused
+    // by the platform, so only the visible transition starts the service; ON_STOP just leaves the
+    // running one alone.
+    LaunchedEffect(hasHosts, ui.repo.foreground) {
         if (!hasHosts) {
             runCatching { ConnectionService.stop(context) }
             return@LaunchedEffect
         }
+        if (!ui.repo.foreground) return@LaunchedEffect
         // Android can refuse the start (background restrictions, a revoked notification channel on
         // some OEMs). Swallowing that left the user believing the connection would survive, so say
         // what actually happens instead: it stays up only while the app is on screen.
@@ -80,7 +85,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
         onDispose { processLifecycle.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(ui.message) {
+    LaunchedEffect(ui.message, ui.messageSeq) {
         ui.message?.let {
             snackbar.showSnackbar(it)
             vm.eatMessage()
@@ -182,7 +187,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             ui = ui,
                             seen = seen,
                             onRefresh = vm::refresh,
-                            onOpenAgent = { agent, _ -> vm.openAgent(agent) },
+                            onOpenAgent = vm::openAgent,
                             onQuery = vm::setQuery,
                             onToggleSearch = vm::setSearching,
                             onAddHost = { vm.showAddHost(true) },
@@ -203,7 +208,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onManage = vm::openStructure,
                             onOpenHelp = { vm.navigate(Screen.Settings) },
                             onTrustNewKey = vm::trustNewFingerprint,
-                            agents = ui.repo.agents.markSeen(seen),
+                            agents = withSeen(ui.repo.agents, seen),
                         )
                         is Screen.Structure -> {
                             val runtime = ui.repo.hosts.firstOrNull { it.host.id == screen.hostId }
@@ -235,6 +240,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                         Screen.Settings -> SettingsScreen(
                             hosts = ui.repo.hosts,
                             preferences = prefs,
+                            storeError = ui.repo.storeError,
                             onLanguage = vm::setLanguage,
                             onTheme = vm::setTheme,
                             onFontSize = vm::terminalFontSize,
@@ -249,13 +255,17 @@ fun HerdwatchRoot(vm: AppViewModel) {
                         is Screen.Detail -> AgentScreen(
                             // The strip describes this page's agent; a finished turn already on screen
                             // is idle here too, so the row and the page never disagree.
-                            detail = ui.detail.copy(agent = ui.detail.agent?.markSeen(seen)),
+                            detail = ui.detail.copy(agent = ui.detail.agent?.let { withSeen(it, seen) }),
                             onBack = vm::back,
                             onRefresh = vm::reloadPane,
                             onReconnect = { ui.detail.agent?.hostId?.let(vm::reconnect) },
                             onAutoRefresh = vm::refreshPaneQuietly,
                             onReadingPaused = vm::setReadingPaused,
-                            onLoadMoreHistory = vm::loadMoreHistory,
+                            // Two entry points, one difference: the automatic trigger yields to a
+                            // read already in flight (`historyFailed` gates it), while an explicit
+                            // tap means "try now" and supersedes it.
+                            onLoadMoreHistory = { vm.loadMoreHistory() },
+                            onLoadOlder = { vm.loadMoreHistory(force = true) },
                             onReadingPosition = vm::rememberReadingPosition,
                             onChoose = vm::choose,
                             onVerifyOperation = vm::confirmOperationVerified,
@@ -265,8 +275,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onSendInput = vm::sendInput,
                             onSendRawBytes = vm::sendRawBytes,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },
-                            onExplain = vm::explainAgent,
-                            onDismissExplain = vm::dismissExplain,
+                            onChooseScreenRow = vm::chooseScreenRow,
                             onRename = vm::renameAgent,
                             onStartAgent = ui.detail.agent?.takeIf { !it.hasAgent }?.let { pane ->
                                 { vm.openStartAgent(pane.hostId, pane.paneId) }
@@ -319,6 +328,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
         AddHostSheet(
             adding = ui.addingHost,
             initial = ui.editingHost,
+            storeError = ui.repo.storeError,
             onDismiss = { vm.showAddHost(false) },
             onSave = vm::saveHost,
         )

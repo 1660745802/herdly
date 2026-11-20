@@ -13,6 +13,7 @@ import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AuthType
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.model.PaneText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -155,7 +156,7 @@ class HerdrClient internal constructor(
                     session = s
                 }
                 try {
-                    s.connect(12_000)
+                    s.connect(HANDSHAKE_TIMEOUT_MS)
                 } catch (e: Exception) {
                     s.disconnect()
                     // A mismatch is reported only when the host-key callback actually observed a
@@ -321,57 +322,127 @@ class HerdrClient internal constructor(
         request("agent.prompt", params)
     }
 
-    private suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject = try {
-        withTimeout(requestTimeoutMillis) {
-            mutex.withLock {
-                blockingIo {
-                val s = session?.takeIf { !closed && it.isConnected }
-                    ?: throw IllegalStateException(Str.get(R.string.ssh_not_connected, config.label))
-                val id = ids.incrementAndGet().toString()
-                val payload = buildJsonObject {
-                    put("id", id)
-                    put("method", method)
-                    put("params", params)
-                }.toString() + "\n"
-
-                var channel: ChannelExec? = null
-                try {
-                    channel = s.openChannel("exec") as ChannelExec
-                    channel.setCommand(bridgeCommand())
-                    val stderr = ByteArrayOutputStream()
-                    channel.setErrStream(stderr)
-                    // Feed stdin before connect: with no input stream JSch sends EOF
-                    // immediately, which makes the bridge exit before it sees our request.
-                    channel.setInputStream(ByteArrayInputStream(payload.toByteArray(Charsets.UTF_8)))
-                    channel.connect(12_000)
-                    val reader = channel.inputStream.bufferedReader(Charsets.UTF_8)
-                    var attempts = 0
-                    while (attempts++ < 20) {
-                        val line = reader.readLine() ?: break
-                        if (!line.trimStart().startsWith("{")) continue
-                        val obj = runCatching { Json.parseToJsonElement(line).jsonObject }.getOrNull() ?: continue
-                        if (obj["id"]?.jsonPrimitive?.content != id) continue
-                        return@blockingIo BridgeCodec.resultOf(line, id)
-                    }
-                    throw HerdrRpcException(
-                        null,
-                        Str.get(
-                            R.string.ssh_bridge_no_reply,
-                            config.label,
-                            stderr.toString("UTF-8").trim().take(300),
-                        ),
-                    )
-                } finally {
-                    runCatching { channel?.disconnect() }
+    private suspend fun request(method: String, params: JsonObject = JsonObject(emptyMap())): JsonObject =
+        // Take the queueing slot before the deadline starts: waiting behind another request is
+        // not remote latency and must never be reported as a timeout against the host.
+        mutex.withLock {
+            val attempt = InFlightRequest()
+            try {
+                withTimeout(requestTimeoutMillis) {
+                    requestIo(attempt) { requestOnce(attempt, method, params) }
                 }
-                }
+            } catch (timeout: TimeoutCancellationException) {
+                // Only our own deadline is a request failure. Caller/lifecycle cancellation
+                // must keep propagating as cancellation so no follow-up work is initiated.
+                currentCoroutineContext().ensureActive()
+                throw HerdrRequestTimeoutException()
             }
         }
-    } catch (timeout: TimeoutCancellationException) {
-        // Only our own deadline is a request failure. Caller/lifecycle cancellation
-        // must keep propagating as cancellation so no follow-up work is initiated.
-        currentCoroutineContext().ensureActive()
-        throw HerdrRequestTimeoutException()
+
+    /**
+     * One bridge round trip on its own exec channel. The channel — never the session — is what
+     * cancellation aborts: `herdr remote-api-bridge` serves exactly one request per connection,
+     * so a cancelled read must not take polling and every later caller down with it.
+     */
+    private fun requestOnce(attempt: InFlightRequest, method: String, params: JsonObject): JsonObject {
+        val s = session?.takeIf { !closed && it.isConnected }
+            ?: throw IllegalStateException(Str.get(R.string.ssh_not_connected, config.label))
+        val id = ids.incrementAndGet().toString()
+        val payload = buildJsonObject {
+            put("id", id)
+            put("method", method)
+            put("params", params)
+        }.toString() + "\n"
+
+        val channel = s.openChannel("exec") as ChannelExec
+        if (!attempt.attach(channel)) {
+            // The caller gave up while the channel was being created.
+            runCatching { channel.disconnect() }
+            throw CancellationException()
+        }
+        try {
+            channel.setCommand(bridgeCommand())
+            val stderr = ByteArrayOutputStream()
+            channel.setErrStream(stderr)
+            // Feed stdin before connect: with no input stream JSch sends EOF
+            // immediately, which makes the bridge exit before it sees our request.
+            channel.setInputStream(ByteArrayInputStream(payload.toByteArray(Charsets.UTF_8)))
+            channel.connect(12_000)
+            val reader = channel.inputStream.bufferedReader(Charsets.UTF_8)
+            var attempts = 0
+            while (attempts++ < 20) {
+                val line = reader.readLine() ?: break
+                if (!line.trimStart().startsWith("{")) continue
+                val obj = runCatching { Json.parseToJsonElement(line).jsonObject }.getOrNull() ?: continue
+                if (obj["id"]?.jsonPrimitive?.content != id) continue
+                return BridgeCodec.resultOf(line, id)
+            }
+            throw HerdrRpcException(
+                null,
+                Str.get(
+                    R.string.ssh_bridge_no_reply,
+                    config.label,
+                    stderr.toString("UTF-8").trim().take(300),
+                ),
+            )
+        } catch (failure: Throwable) {
+            // An abandoned request only lost its channel. The session is discarded solely when
+            // the transport itself is gone, never because one caller walked away.
+            discardBrokenSession(s)
+            throw failure
+        } finally {
+            attempt.detach(channel)
+            runCatching { channel.disconnect() }
+        }
+    }
+
+    /**
+     * Runs one request on the IO dispatcher. Cancelling the caller aborts this request's exec
+     * channel only, leaving the shared session reusable by every other caller.
+     */
+    private suspend fun <T> requestIo(attempt: InFlightRequest, block: () -> T): T =
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { attempt.abandon() }
+            Dispatchers.IO.dispatch(EmptyCoroutineContext) {
+                if (!continuation.isActive) return@dispatch
+                try { continuation.resume(block()) }
+                catch (t: Throwable) { continuation.resumeWithException(t) }
+            }
+        }
+
+    /** Drops the shared session only when its transport is genuinely gone. */
+    private fun discardBrokenSession(s: Session) {
+        if (s.isConnected) return
+        synchronized(sessionGate) {
+            if (session === s) session = null
+        }
+        runCatching { s.disconnect() }
+    }
+
+    /** The exec channel of one request: the only thing a cancellation may abort. */
+    private class InFlightRequest {
+        private val gate = Any()
+        private var channel: ChannelExec? = null
+        private var abandoned = false
+
+        /** Registers the channel; false means the caller gave up before it could be used. */
+        fun attach(value: ChannelExec): Boolean = synchronized(gate) {
+            channel = value
+            !abandoned
+        }
+
+        fun detach(value: ChannelExec) = synchronized(gate) {
+            if (channel === value) channel = null
+        }
+
+        /** Marks this request dead and aborts only its channel. */
+        fun abandon() {
+            val live = synchronized(gate) {
+                abandoned = true
+                channel.also { channel = null }
+            }
+            runCatching { live?.disconnect() }
+        }
     }
 
     private fun bridgeCommand(): String {
@@ -393,7 +464,7 @@ class HerdrClient internal constructor(
         runCatching { old?.disconnect() }
     }
 
-    /** Cancel blocking socket IO by disconnecting its session. No retry is performed. */
+    /** Cancel an in-flight handshake by disconnecting its session. No retry is performed. */
     private suspend fun <T> blockingIo(block: () -> T): T = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { close() }
         Dispatchers.IO.dispatch(EmptyCoroutineContext) {
@@ -423,6 +494,15 @@ class HerdrClient internal constructor(
 
     companion object {
         private const val TIMEOUT_MS = 15_000
+
+        /**
+         * Per-address TCP connect plus SSH handshake budget.
+         *
+         * A dead address has to fail fast enough that a second one is worth trying: with the phone
+         * on mobile data the LAN address never answers, and this is the wait the user sees when
+         * coming back to the app before the public route is even dialled.
+         */
+        internal const val HANDSHAKE_TIMEOUT_MS = 8_000
 
         fun hasAgent(agents: List<Agent>, paneId: String) = agents.any { it.paneId == paneId }
     }

@@ -25,6 +25,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,9 +98,9 @@ import androidx.compose.ui.semantics.Role
  * overflow menu; destructive entries go through a NeoDialog that names the target and counts
  * what will end.
  *
- * [onOpenAgent] is optional: App.kt does not wire it yet, so pane rows fall back to focusing the
- * pane and the "Open agent" menu entry renders disabled with a reason. When a caller supplies it,
- * agent panes get a trailing chevron and tapping opens the agent instead.
+ * [onOpenAgent] is optional: App.kt wires it, so agent panes get a trailing chevron and tapping
+ * opens the agent instead. A caller that leaves it out falls back to focusing the pane, and the
+ * "Open agent" menu entry renders disabled with a reason.
  */
 @Composable
 fun StructureScreen(
@@ -121,7 +125,7 @@ fun StructureScreen(
 ) {
     val structure = runtime.structure
     val colors = ds()
-    var pendingClose by remember { mutableStateOf<CloseTarget?>(null) }
+    var pendingClose by rememberSaveable(stateSaver = CloseTargetSaver) { mutableStateOf<CloseTarget?>(null) }
     var renaming by remember { mutableStateOf<RenameTarget?>(null) }
     val availablePaneIds = structure.panes.filter { it.isAvailableShell(runtime, currentAgents) }.map { it.id }.toSet()
     val occupancyAvailable = currentAgents != null
@@ -132,18 +136,15 @@ fun StructureScreen(
         return listOfNotNull(runtime.host.label, workspace?.label, tab?.label, pane?.let { "${it.title.ifBlank { it.id }} (${it.id})" }, pane?.cwd ?: workspace?.worktreePath).joinToString("\n")
     }
     // Cards resolve the consequence sentence (counts, agent name) during composition where
-    // string resources are available, then hand it up with the target id.
+    // string resources are available, then hand it up with the target id. The path is not part of
+    // it: the dialog derives that from the live tree, so a stale path can never be shown.
     val requestClose: (String, String, String) -> Unit = { type, id, detail ->
-        pendingClose = CloseTarget(
-            type = type,
-            id = id,
-            path = targetPath(
-                paneId = id.takeIf { type == "pane" },
-                tabId = id.takeIf { type == "tab" },
-                workspaceId = id.takeIf { type == "workspace" },
-            ),
-            detail = detail,
-        )
+        pendingClose = CloseTarget(type = type, id = id, detail = detail)
+    }
+    fun targetExists(type: String, id: String): Boolean = when (type) {
+        "workspace" -> structure.workspaces.any { it.id == id }
+        "tab" -> structure.tabs.any { it.id == id }
+        else -> structure.panes.any { it.id == id }
     }
     val requestRename: (String, String, String) -> Unit = { type, id, label ->
         renaming = RenameTarget(type, id, label)
@@ -284,26 +285,50 @@ fun StructureScreen(
     }
 
     pendingClose?.let { target ->
-        NeoDialog(
-            onDismissRequest = { pendingClose = null },
-            title = stringResource(R.string.structure_close_title, typeName(target.type)),
-            subtitle = stringResource(R.string.structure_close_message, target.path, target.detail),
-            confirmLabel = stringResource(R.string.common_close),
-            onConfirm = {
-                when (target.type) {
-                    "workspace" -> onCloseWorkspace(target.id)
-                    "tab" -> onCloseTab(target.id)
-                    else -> onClosePane(target.id)
-                }
-                pendingClose = null
-            },
-            dismissLabel = stringResource(R.string.common_cancel),
-            destructive = true,
-        )
+        // The tree can change under a dialog that outlived rotation. A close for an id that is no
+        // longer in the tree would act on something the person can no longer see, so drop it.
+        if (!targetExists(target.type, target.id)) {
+            LaunchedEffect(target) { pendingClose = null }
+        } else {
+            NeoDialog(
+                onDismissRequest = { pendingClose = null },
+                title = stringResource(R.string.structure_close_title, typeName(target.type)),
+                subtitle = stringResource(
+                    R.string.structure_close_message,
+                    targetPath(
+                        paneId = target.id.takeIf { target.type == "pane" },
+                        tabId = target.id.takeIf { target.type == "tab" },
+                        workspaceId = target.id.takeIf { target.type == "workspace" },
+                    ),
+                    target.detail,
+                ),
+                confirmLabel = stringResource(R.string.common_close),
+                onConfirm = {
+                    // Re-checked here too: the composition that drew the dialog may be a poll old.
+                    if (targetExists(target.type, target.id)) {
+                        when (target.type) {
+                            "workspace" -> onCloseWorkspace(target.id)
+                            "tab" -> onCloseTab(target.id)
+                            else -> onClosePane(target.id)
+                        }
+                    }
+                    pendingClose = null
+                },
+                dismissLabel = stringResource(R.string.common_cancel),
+                destructive = true,
+            )
+        }
     }
 }
 
-private data class CloseTarget(val type: String, val id: String, val path: String, val detail: String)
+private data class CloseTarget(val type: String, val id: String, val detail: String)
+
+// Saved as the target's identity plus the already-resolved consequence, so an open dialog survives
+// rotation without saving the tree. The path is re-derived and existence re-checked on every draw.
+private val CloseTargetSaver: Saver<CloseTarget?, Any> = listSaver(
+    save = { target -> target?.let { listOf(it.type, it.id, it.detail) }.orEmpty() },
+    restore = { saved -> if (saved.size == 3) CloseTarget(saved[0], saved[1], saved[2]) else null },
+)
 
 private data class RenameTarget(val type: String, val id: String, val label: String)
 
@@ -423,7 +448,7 @@ private fun SummaryCard(
                     modifier = Modifier.padding(top = DsSpace.s),
                 )
             }
-            val lastSync = formatAgo(runtime.lastSyncAt)
+            val lastSync = formatAgo(runtime.lastSyncAt, System.currentTimeMillis())
             Text(
                 if (runtime.conn !is ConnState.Connected) {
                     stringResource(R.string.structure_last_sync_offline, lastSync)
@@ -920,6 +945,9 @@ fun StartAgentSheet(
     val resumeLabel = stringResource(R.string.structure_resume_label)
     val colors = ds()
     val invalidName = duplicateName || name.isBlank()
+    // A body longer than the window scrolls inside a sheet that stays a sheet; without a cap the
+    // target list and the options below it could turn this into a full-screen page.
+    val maxSheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
 
     fun applyResume(on: Boolean) {
         resume = on
@@ -936,6 +964,7 @@ fun StartAgentSheet(
         Column(
             Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
                 .verticalScroll(rememberScrollState())
                 .imePadding()
                 .padding(start = DsSpace.xl, end = DsSpace.xl, bottom = DsSpace.xxl),

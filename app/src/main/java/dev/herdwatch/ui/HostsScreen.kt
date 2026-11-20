@@ -46,6 +46,7 @@ import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
 import dev.herdwatch.model.ConnState
 import dev.herdwatch.model.HostConfig
+import dev.herdwatch.model.HostEndpoint
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.design.DsElev
 import dev.herdwatch.ui.design.DsRadius
@@ -389,7 +390,9 @@ private fun HostCard(
             if (host.hasFallback && route != null) {
                 // Compare the rendered form: `HostEndpoint` drops `:22`, so "host" and
                 // "host:22" are the same route and must not be reported as the fallback.
-                val primary = host.endpoints.firstOrNull()?.toString()
+                // The configured primary, not `endpoints.first()`: that list is reordered to
+                // try the route that worked last, which would label the fallback "primary".
+                val primary = HostEndpoint(host.host, host.port).toString()
                 Text(
                     stringResource(
                         if (route == primary) R.string.hosts_route_primary
@@ -440,7 +443,7 @@ private fun HostCard(
             }
             Spacer(Modifier.height(DsSpace.xs))
             Text(
-                stringResource(R.string.hosts_last_sync, formatAgo(runtime.lastSyncAt)),
+                stringResource(R.string.hosts_last_sync, formatAgo(runtime.lastSyncAt, System.currentTimeMillis())),
                 style = DsTypography.caption,
                 color = colors.textFaint,
             )

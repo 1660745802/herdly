@@ -39,9 +39,10 @@ class HerdRepositoryTest {
         val old = connection(host, "obsolete").apply {
             onConnect = { withContext(NonCancellable) { reply.await() } }
         }
-        val replacement = connection(host, "replacement")
         var attempts = 0
-        val repo = repository(prefs) { if (attempts++ == 0) old else replacement }
+        val repo = repository(prefs) { config ->
+            if (attempts++ == 0) old else connection(config, "replacement")
+        }
         val pending = launch { repo.connectHost(host.id) }
         runCurrent()
         val edited = host.copy(label = "edited", host = "new-address", fingerprint = null)
@@ -58,6 +59,16 @@ class HerdRepositoryTest {
         assertTrue(prefs.store.loadAgents(host.id).isEmpty())
 
         repo.connectHost(host.id)
+        // The edited config has no pin left, so the first contact asks instead of trusting the
+        // key the replacement client presented.
+        assertFalse(repo.isHostReady(host.id))
+        assertEquals("SHA256:test", repo.state.value.hosts.single().pendingKey?.fingerprint)
+        assertNull(prefs.store.load().single().fingerprint)
+
+        repo.trustNewFingerprint(host.id, "SHA256:test")
+        // The reconnect is launched on the test's background scope; run it explicitly.
+        runCurrent()
+        advanceUntilIdle()
         assertTrue(repo.isHostReady(host.id))
         assertEquals("replacement", repo.state.value.agents.single().name)
         assertEquals("SHA256:test", prefs.store.load().single().fingerprint)
@@ -193,7 +204,7 @@ class HerdRepositoryTest {
         assertTrue(repo.isHostReady(host.id))
     }
 
-    @Test fun `ordinary read timeout invalidates connection but history timeout preserves it`() = runTest {
+    @Test fun `a stalled read keeps the session and a dead socket does not`() = runTest {
         suspend fun exercise(history: Boolean): Pair<HerdRepository, FakeHostConnection> {
             val prefs = preferences(host)
             val client = connection(host)
@@ -204,13 +215,38 @@ class HerdRepositoryTest {
             return repo to client
         }
 
-        val (ordinaryRepo, ordinaryClient) = exercise(history = false)
-        assertTrue(ordinaryClient.closed)
-        assertFalse(ordinaryRepo.isHostReady(host.id))
+        // A slow read is a slow read. The session stays up either way, so the next tap does not
+        // pay for a handshake, and the machine never flashes "disconnected" for a stalled reply.
+        for (history in listOf(false, true)) {
+            val (repo, client) = exercise(history)
+            assertFalse("history=$history closed the client", client.closed)
+            assertTrue("history=$history lost the host", repo.isHostReady(host.id))
+        }
 
-        val (historyRepo, historyClient) = exercise(history = true)
-        assertFalse(historyClient.closed)
-        assertTrue(historyRepo.isHostReady(host.id))
+        // A dead socket is the one thing that must force a handshake: the next use reconnects
+        // instead of pretending the session is fine.
+        val prefs = preferences(host)
+        val dead = connection(host)
+        val repo = repository(prefs) { dead }
+        repo.connectHost(host.id)
+        val handshakes = dead.connectCalls
+        dead.kill()
+        runCatching { repo.readPane(snapshot(host, "agent").agents.single()) }
+        runCurrent()
+        assertEquals(handshakes + 1, dead.connectCalls)
+        assertTrue(repo.isHostReady(host.id))
+
+        // And when that reconnect cannot reach the machine, the host is reported failed rather
+        // than left looking connected with a client behind it.
+        val refused = connection(host)
+        val refusedRepo = repository(preferences(host)) { refused }
+        refusedRepo.connectHost(host.id)
+        refused.kill()
+        refused.onConnect = { throw java.net.ConnectException("Connection refused") }
+        runCatching { refusedRepo.readPane(snapshot(host, "agent").agents.single()) }
+        runCurrent()
+        assertTrue(refused.closed)
+        assertFalse(refusedRepo.isHostReady(host.id))
     }
 
     @Test fun `concurrent refresh in same generation coalesces without clearing active flag`() = runTest {
@@ -300,23 +336,74 @@ class HerdRepositoryTest {
         assertTrue(repo.state.value.hosts.single().conn is ConnState.Failed)
     }
 
-    @Test fun `failed durable first pin refuses readiness and any host RPC`() = runTest {
+    @Test fun `failed durable confirmation refuses readiness and any host RPC`() = runTest {
+        TestStrings.install()
         val unpinned = host.copy(fingerprint = null)
         val prefs = preferences(unpinned)
         val client = connection(unpinned)
         val repo = repository(prefs) { client }
-        prefs.commitSucceeds = false
         repo.connectHost(host.id)
+        // The handshake is only asked about; nothing is written until the user confirms.
+        assertEquals("SHA256:test", repo.state.value.hosts.single().pendingKey?.fingerprint)
 
-        assertTrue(client.closed)
+        prefs.commitSucceeds = false
+        val failure = runCatching { repo.trustNewFingerprint(host.id, "SHA256:test") }
+
+        assertTrue(failure.isFailure)
         assertEquals(0, client.pingCalls)
         assertEquals(0, client.snapshotCalls)
         assertFalse(repo.isHostReady(host.id))
-        assertTrue(repo.state.value.hosts.single().conn is ConnState.Failed)
         assertNull(repo.state.value.hosts.single().host.fingerprint)
         assertNull(prefs.store.load().single().fingerprint)
         assertTrue(repo.state.value.agents.isEmpty())
         assertTrue(prefs.store.loadAgents(host.id).isEmpty())
+    }
+
+    @Test fun `successful unpinned handshake is never written before confirmation`() = runTest {
+        TestStrings.install()
+        val unpinned = host.copy(fingerprint = null)
+        val prefs = preferences(unpinned)
+        val client = connection(unpinned)
+        val repo = repository(prefs) { client }
+
+        repo.connectHost(host.id)
+
+        val runtime = repo.state.value.hosts.single()
+        assertEquals("SHA256:test", runtime.pendingKey?.fingerprint)
+        assertTrue(runtime.conn is ConnState.Failed)
+        assertFalse(repo.isHostReady(host.id))
+        assertNull(prefs.store.load().single().fingerprint)
+        assertEquals(0, client.pingCalls)
+        assertEquals(0, client.snapshotCalls)
+    }
+
+    @Test fun `previously pinned host connects without asking again`() = runTest {
+        val prefs = preferences(host)
+        val client = connection(host)
+        val repo = repository(prefs) { client }
+
+        repo.connectHost(host.id)
+
+        val runtime = repo.state.value.hosts.single()
+        assertEquals(ConnState.Connected, runtime.conn)
+        assertNull(runtime.pendingKey)
+        assertTrue(client.snapshotCalls >= 1)
+        assertEquals("SHA256:test", prefs.store.load().single().fingerprint)
+    }
+
+    @Test fun `unreadable host store is surfaced and its payload kept`() = runTest {
+        TestStrings.install()
+        val prefs = RepositoryPreferences()
+        prefs.values["hosts.v1"] = "broken primary"
+        prefs.values["hosts.v1.bak"] = "broken backup"
+
+        val repo = repository(prefs) { error("must not connect") }
+
+        assertTrue(repo.state.value.hosts.isEmpty())
+        assertEquals(TestStrings.text("store_unavailable"), repo.state.value.storeError)
+        // The unreadable generations still hold the user's configuration: do not erase them.
+        assertEquals("broken primary", prefs.values["hosts.v1"])
+        assertEquals("broken backup", prefs.values["hosts.v1.bak"])
     }
 
     @Test fun `first connection asks before any credential and trusting pins it`() = runTest {

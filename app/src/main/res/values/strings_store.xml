@@ -3,6 +3,6 @@
     <!-- 主机配置/缓存持久化失败：都是 check() 的说明，用户看不到成功路径 -->
     <string name="store_cache_save_failed">无法持久化主机缓存</string>
     <string name="store_cache_delete_failed">无法删除主机缓存</string>
-    <string name="store_config_undecryptable">主机配置无法解密，拒绝覆盖现有数据</string>
+    <string name="store_unavailable">凭据存储不可用，机器配置无法保存/读取</string>
     <string name="store_config_save_failed">无法持久化主机配置</string>
 </resources>

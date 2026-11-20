@@ -10,6 +10,13 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
+ * The credential store cannot read or write the saved hosts (the Android Keystore entry is gone or
+ * unreadable). Distinct from an ordinary failed commit: retrying cannot fix it, and the stored
+ * payload must never be replaced by one encrypted with a different key.
+ */
+class HostStoreUnavailableException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
  * Encrypted, synchronous preferences store.  `commit()` is intentional here: a host
  * fingerprint or credential change must not be reported as saved before it is durable.
  */
@@ -29,9 +36,16 @@ class HostStore internal constructor(
 
     fun load(): List<HostConfig> {
         val primary = prefs.getString(KEY_HOSTS, null)
-        return primary?.let(::decode)
-            ?: prefs.getString(KEY_BACKUP, null)?.let(::decode)
-            ?: emptyList()
+        val backup = prefs.getString(KEY_BACKUP, null)
+        primary?.let { packed -> decode(packed)?.let { return it } }
+        backup?.let { packed -> decode(packed)?.let { return it } }
+        // A payload exists but neither copy decodes: the Keystore key is gone or unreadable. Do not
+        // report "no hosts" — that looks like a fresh install, and the next save would overwrite
+        // credentials that are still sitting there and may be recoverable.
+        if (primary != null || backup != null) {
+            throw HostStoreUnavailableException(Str.get(R.string.store_unavailable))
+        }
+        return emptyList()
     }
 
     private fun decode(packed: String): List<HostConfig>? = runCatching {
@@ -63,12 +77,20 @@ class HostStore internal constructor(
      * an older generation could resurrect deleted credentials or silently remove a pin.
      */
     fun save(hosts: List<HostConfig>, removedHostIds: Set<String> = emptySet()) {
-        val plain = json.encodeToString(serializer, hosts)
-        val ciphertext = encrypt(plain)
         val primary = prefs.getString(KEY_HOSTS, null)
         val backup = prefs.getString(KEY_BACKUP, null)
-        check((primary == null && backup == null) || primary?.let(::decode) != null || backup?.let(::decode) != null) {
-            Str.get(R.string.store_config_undecryptable)
+        // Refuse before touching the payload: an unreadable generation means we cannot tell which
+        // credentials a new ciphertext would overwrite (encrypting with a regenerated key succeeds).
+        if ((primary != null || backup != null) &&
+            primary?.let(::decode) == null && backup?.let(::decode) == null
+        ) {
+            throw HostStoreUnavailableException(Str.get(R.string.store_unavailable))
+        }
+        val plain = json.encodeToString(serializer, hosts)
+        val ciphertext = try {
+            encrypt(plain)
+        } catch (t: Exception) {
+            throw HostStoreUnavailableException(Str.get(R.string.store_unavailable), t)
         }
         val edit = prefs.edit().putString(KEY_HOSTS, ciphertext).putString(KEY_BACKUP, ciphertext)
         removedHostIds.forEach { edit.remove(agentsKey(it)) }

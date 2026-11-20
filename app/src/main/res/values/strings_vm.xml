@@ -79,4 +79,5 @@
     <string name="vm_pane_not_found">这个分屏已经不在了。</string>
     <string name="vm_label_input">终端输入</string>
     <string name="vm_trust_failed">接受新密钥失败，请重试。</string>
+    <string name="vm_label_menu">选择</string>
 </resources>

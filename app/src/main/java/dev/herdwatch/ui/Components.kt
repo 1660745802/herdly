@@ -134,7 +134,7 @@ fun GlassBackdrop(modifier: Modifier = Modifier, content: @Composable BoxScope.(
     }
 }
 
-fun formatElapsed(since: Long, now: Long = System.currentTimeMillis()): String {
+fun formatElapsed(since: Long, now: Long): String {
     val s = ((now - since).coerceAtLeast(0)) / 1000
     return when {
         s < 5 -> Str.get(R.string.components_just_now)
@@ -149,7 +149,7 @@ fun formatElapsed(since: Long, now: Long = System.currentTimeMillis()): String {
     }
 }
 
-fun formatAgo(at: Long?, now: Long = System.currentTimeMillis()): String {
+fun formatAgo(at: Long?, now: Long): String {
     if (at == null) return Str.get(R.string.components_not_synced)
     val s = ((now - at).coerceAtLeast(0)) / 1000
     return when {

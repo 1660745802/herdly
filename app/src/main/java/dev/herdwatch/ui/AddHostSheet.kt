@@ -55,6 +55,7 @@ import dev.herdwatch.ui.design.ds
 fun AddHostSheet(
     adding: Boolean,
     initial: HostConfig? = null,
+    storeError: String? = null,
     onDismiss: () -> Unit,
     onSave: (
         id: String?,
@@ -122,6 +123,12 @@ fun AddHostSheet(
                 style = DsTypography.body,
                 color = colors.textSoft,
             )
+            // Without a readable credential store every save will fail; say it before the user
+            // fills the form, not only as a snackbar that the sheet covers.
+            if (!storeError.isNullOrBlank()) {
+                Spacer(Modifier.height(DsSpace.m))
+                Text(storeError, style = DsTypography.body, color = colors.danger)
+            }
             Spacer(Modifier.height(DsSpace.l))
 
             NeoField(

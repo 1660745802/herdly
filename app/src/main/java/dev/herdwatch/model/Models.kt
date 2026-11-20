@@ -31,16 +31,29 @@ data class HostConfig(
     val fallbackHost: String = "",
     /** `0` means "same port as the primary address". */
     val fallbackPort: Int = 0,
+    /**
+     * The address that last carried a live session, as `HostEndpoint.toString()` renders it.
+     *
+     * A route hint, not configuration: it only reorders [endpoints] so the address that worked
+     * last time is dialled first. Without it, a phone on mobile data spends the whole connect
+     * timeout on a LAN address that cannot answer before it ever tries the public one.
+     */
+    val lastGoodEndpoint: String = "",
 ) {
-    /** Addresses to try, in order. Empty fallback entries collapse to a single address. */
+    /** Addresses to try, in order: the one that worked last time, then its siblings. */
     val endpoints: List<HostEndpoint>
-        get() = listOfNotNull(
-            HostEndpoint(host, port),
-            fallbackHost.trim().takeIf { it.isNotBlank() }
-                ?.let { HostEndpoint(it, if (fallbackPort in 1..65535) fallbackPort else port) },
-        // Typing the same address twice must not dial it twice on failure: the second attempt
-        // fails for the same reason and only doubles the wait before the user sees an error.
-        ).distinct()
+        get() {
+            val all = listOfNotNull(
+                HostEndpoint(host, port),
+                fallbackHost.trim().takeIf { it.isNotBlank() }
+                    ?.let { HostEndpoint(it, if (fallbackPort in 1..65535) fallbackPort else port) },
+            // Typing the same address twice must not dial it twice on failure: the second attempt
+            // fails for the same reason and only doubles the wait before the user sees an error.
+            ).distinct()
+            if (all.size < 2) return all
+            val preferred = all.firstOrNull { it.toString() == lastGoodEndpoint } ?: return all
+            return listOf(preferred) + all.filterNot { it == preferred }
+        }
 
     val hasFallback: Boolean get() = fallbackHost.isNotBlank()
 }

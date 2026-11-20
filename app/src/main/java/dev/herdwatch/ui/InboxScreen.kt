@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.draw.rotate
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -109,7 +110,7 @@ fun InboxScreen(
     ui: UiState,
     seen: Map<String, Long> = emptyMap(),
     onRefresh: () -> Unit,
-    onOpenAgent: (Agent, String?) -> Unit,
+    onOpenAgent: (Agent) -> Unit,
     onQuery: (String) -> Unit,
     onToggleSearch: (Boolean) -> Unit,
     onAddHost: () -> Unit,
@@ -121,13 +122,9 @@ fun InboxScreen(
     val agents = ui.repo.agents
     val configuration = LocalConfiguration.current
     val compact = configuration.screenWidthDp < 360 || configuration.fontScale >= 1.3f
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
+    // One ticker for the page, but the value is only read inside the row that renders a relative
+    // label. Reading it here would recompose the whole inbox every second.
+    val now = rememberNow()
 
     var selectedHostId by rememberSaveable { mutableStateOf<String?>(null) }
     // One list: every pane the fleet has. A pane running an agent shows that agent's name, lamp
@@ -148,7 +145,7 @@ fun InboxScreen(
     val scopedAgents = liveHosts.flatMap { runtime -> agents.filter { it.hostId == runtime.host.id } }
         // A finished agent the person has already read is idle, not news. Applied once here so the
         // queue, the counts, the lamps and the search all describe the same status.
-        .markSeen(seen)
+        .let { withSeen(it, seen) }
     // Agents get their own section whenever the host reports any: "who is working" is a different
     // question from "what is running where", and a section that vanishes when everyone is idle makes
     // the page look like it lost half its content.
@@ -209,7 +206,7 @@ fun InboxScreen(
         if (ui.repo.hosts.size > 1) {
             HostStrip(
                 hosts = ui.repo.hosts,
-                agents = ui.repo.agents.markSeen(seen),
+                agents = withSeen(ui.repo.agents, seen),
                 selectedHostId = selectedHostId,
                 onSelectHost = { selectedHostId = it },
             )
@@ -223,7 +220,9 @@ fun InboxScreen(
             exit = fadeOut(tween(motionMillis(120))),
         ) {
             val searchFocus = remember { FocusRequester() }
-            LaunchedEffect(Unit) { searchFocus.requestFocus() }
+            // The field can be gone before this effect runs (search closed again); a focus
+            // request against a detached node throws, and losing the caret is not worth a crash.
+            LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
             InboxSearchField(
                 value = ui.query,
                 onValueChange = onQuery,
@@ -260,8 +259,9 @@ fun InboxScreen(
 
         // One list on a phone, two columns on a wide screen. Both branches emit the same items
         // through the same builders, so the queue cannot drift between the two layouts.
-        val wide = configuration.screenWidthDp >= 600 ||
-            configuration.screenWidthDp > configuration.screenHeightDp
+        // Two columns need a real tablet, not any landscape phone: 840dp is the expanded-width
+        // breakpoint where two readable columns actually fit side by side.
+        val wide = configuration.screenWidthDp >= 840
         val listPadding = PaddingValues(
             start = spacing().gutter,
             end = spacing().gutter,
@@ -327,7 +327,6 @@ fun InboxScreen(
                                         agentGroup = agentGroup,
                                         panes = panes,
                                         now = now,
-                                        hostScope = hostScope,
                                         onOpenAgent = onOpenAgent,
                                         onOpenPane = onOpenPane,
                                         emitPanes = false,
@@ -344,7 +343,6 @@ fun InboxScreen(
                                         agentGroup = agentGroup,
                                         panes = panes,
                                         now = now,
-                                        hostScope = hostScope,
                                         onOpenAgent = onOpenAgent,
                                         onOpenPane = onOpenPane,
                                         emitAgents = false,
@@ -384,7 +382,6 @@ fun InboxScreen(
                         agentGroup = agentGroup,
                         panes = panes,
                         now = now,
-                        hostScope = hostScope,
                         onOpenAgent = onOpenAgent,
                         onOpenPane = onOpenPane,
                     )
@@ -406,6 +403,21 @@ fun InboxScreen(
 }
 
 /**
+ * A single 1 Hz clock, returned as state so reading it does not recompose the page that owns it.
+ */
+@Composable
+private fun rememberNow(): State<Long> {
+    val now = remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now.longValue = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    return now
+}
+
+/**
  * The phone queue: one block per machine.
  *
  * Order inside a block answers the two questions a reader actually has, in order: who needs me here
@@ -417,9 +429,8 @@ private fun LazyListScope.hostQueueBlocks(
     hosts: List<HostRuntime>,
     agentGroup: List<Agent>,
     panes: List<Pair<HostRuntime, HerdPane>>,
-    now: Long,
-    hostScope: String?,
-    onOpenAgent: (Agent, String?) -> Unit,
+    now: State<Long>,
+    onOpenAgent: (Agent) -> Unit,
     onOpenPane: ((String, String) -> Unit)?,
     // On a wide screen the two columns are the same machine blocks, split: the left column is the
     // agents of each machine, the right column the sessions of the same machine. Splitting the page
@@ -469,7 +480,6 @@ private fun LazyListScope.hostQueueBlocks(
             agentQueueItems(
                 agentGroup = shownAgents,
                 hosts = listOf(runtime),
-                hostScope = hostScope,
                 now = now,
                 showHeader = false,
                 showHostHeadings = false,
@@ -486,7 +496,6 @@ private fun LazyListScope.hostQueueBlocks(
                 scopedHosts = listOf(runtime),
                 panes = shownPanes,
                 scopedAgents = shownAgents,
-                hostScope = hostScope,
                 showHeader = false,
                 showHostHeadings = false,
                 onOpenPane = onOpenPane,
@@ -687,11 +696,10 @@ private fun HostBlockHeader(runtime: HostRuntime, agents: List<Agent>, panes: Li
 private fun LazyListScope.agentQueueItems(
     agentGroup: List<Agent>,
     hosts: List<HostRuntime>,
-    hostScope: String?,
-    now: Long,
+    now: State<Long>,
     showHeader: Boolean,
     showHostHeadings: Boolean,
-    onOpenAgent: (Agent, String?) -> Unit,
+    onOpenAgent: (Agent) -> Unit,
 ) {
     if (agentGroup.isEmpty()) return
     if (showHeader) {
@@ -760,7 +768,7 @@ private fun LazyListScope.agentQueueItems(
                                 hostRuntime,
                                 hostScoped = true,
                                 compact = true,
-                            ) { onOpenAgent(agent, hostScope) }
+                            ) { onOpenAgent(agent) }
                             if (index != workspaceAgents.lastIndex) NeoDivider(inset = DsSpace.l)
                         }
                     }
@@ -780,11 +788,10 @@ private fun LazyListScope.paneItems(
     scopedHosts: List<HostRuntime>,
     panes: List<Pair<HostRuntime, HerdPane>>,
     scopedAgents: List<Agent>,
-    hostScope: String?,
     showHeader: Boolean,
     showHostHeadings: Boolean = true,
     onOpenPane: ((String, String) -> Unit)?,
-    onOpenAgent: (Agent, String?) -> Unit,
+    onOpenAgent: (Agent) -> Unit,
 ) {
     if (showHeader) {
         item(key = "panes-header") {
@@ -873,7 +880,7 @@ private fun LazyListScope.paneItems(
                                 ) {
                                     if (onOpenPane != null) onOpenPane(runtime.host.id, pane.id)
                                     else runtimeHostAgent(scopedAgents, pane, runtime)
-                                        ?.let { onOpenAgent(it, hostScope) }
+                                        ?.let { onOpenAgent(it) }
                                 }
                                 if (index != group.lastIndex) NeoDivider(inset = DsSpace.l)
                             }
@@ -1339,12 +1346,14 @@ private fun runtimeHostAgent(agents: List<Agent>, pane: HerdPane, runtime: HostR
 @Composable
 private fun AgentRow(
     agent: Agent,
-    now: Long,
+    now: State<Long>,
     runtime: HostRuntime?,
     hostScoped: Boolean,
     compact: Boolean = false,
     onClick: () -> Unit,
 ) {
+    // Read here, not in the list builder: only visible rows recompose on each tick.
+    val nowMillis = now.value
     val colors = ds()
     val statusDescription = stringResource(agent.status.labelRes)
     val lamp = agentStatusColor(agent.status)
@@ -1382,7 +1391,7 @@ private fun AgentRow(
             }
             Spacer(Modifier.width(DsSpace.s))
             Text(
-                if (agent.status == AgentStatus.WAITING) formatElapsed(agent.sinceMillis, now) else statusDescription,
+                if (agent.status == AgentStatus.WAITING) formatElapsed(agent.sinceMillis, nowMillis) else statusDescription,
                 style = DsTypography.caption,
                 color = colors.textSoft,
                 maxLines = 1,
@@ -1406,12 +1415,12 @@ private fun AgentRow(
             )
         }
         val lastSync = runtime?.lastSyncAt
-        val stale = runtime?.conn !is ConnState.Connected || lastSync == null || now - lastSync > 15_000
+        val stale = runtime?.conn !is ConnState.Connected || lastSync == null || nowMillis - lastSync > 15_000
         if (stale) {
             Text(
                 if (runtime?.conn is ConnState.Connected)
-                    stringResource(R.string.inbox_stale_snapshot, formatAgo(lastSync, now))
-                else stringResource(R.string.inbox_offline_snapshot, formatAgo(lastSync, now)),
+                    stringResource(R.string.inbox_stale_snapshot, formatAgo(lastSync, nowMillis))
+                else stringResource(R.string.inbox_offline_snapshot, formatAgo(lastSync, nowMillis)),
                 style = DsTypography.micro,
                 color = colors.textFaint,
                 maxLines = 1,
