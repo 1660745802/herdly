@@ -35,8 +35,7 @@
   body::before{
     content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
     background:
-      radial-gradient(900px 520px at 12% -8%, rgba(123,155,234,.10), transparent 70%),
-      radial-gradient(700px 420px at 100% 0%, rgba(69,199,176,.05), transparent 70%);
+      linear-gradient(180deg, rgba(123,155,234,.055), transparent 340px);
   }
   main,header,footer{position:relative; z-index:1}
   a{color:var(--accent); text-decoration:none}
@@ -48,7 +47,7 @@
      page past the viewport. Every column must be allowed to shrink. */
   .hero>*,.row>*,.install>*,.ledger>*{min-width:0}
   body{overflow-wrap:break-word}
-  .mono{font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint)}
+  .mono{font-family:var(--mono); font-size:12.5px; letter-spacing:.01em; color:var(--faint)}
 
   /* ── instrument bar ───────────────────────────────────────────── */
   .bar{
@@ -74,12 +73,14 @@
   /* ── hero ─────────────────────────────────────────────────────── */
   .hero{display:grid; grid-template-columns:1.05fr .95fr; gap:clamp(24px,5vw,72px); align-items:center; padding:clamp(48px,8vw,104px) 0 clamp(40px,6vw,72px)}
   .hero h1{font-size:clamp(32px,4.6vw,50px); font-weight:650; text-wrap:balance}
-  .hero h1 em{font-style:normal; color:var(--accent); white-space:nowrap}
+  .hero h1 em{font-style:normal}
+  /* Keep "agent" from being orphaned on its own line at any width. */
+  .hero h1 span{white-space:nowrap}
   .lede{margin-top:20px; font-size:clamp(16px,1.6vw,19px); color:var(--soft); max-width:46ch}
   .cta{display:flex; gap:12px; flex-wrap:wrap; margin-top:32px}
   .btn{
     display:inline-flex; align-items:center; gap:9px; font:inherit; font-weight:600;
-    padding:13px 22px; border-radius:14px; border:1px solid transparent; cursor:pointer;
+    padding:13px 20px; border-radius:10px; border:1px solid transparent; cursor:pointer;
     transition:transform .12s ease, background .16s ease;
   }
   .btn:active{transform:translateY(1px)}
@@ -91,10 +92,14 @@
 
   /* ── device plate ─────────────────────────────────────────────── */
   .plate{
-    padding:14px; border-radius:34px; background:var(--raised);
-    border:1px solid var(--rim); box-shadow:var(--shadow);
+    padding:10px; border-radius:16px; background:var(--raised);
+    border:1px solid var(--rim);
   }
-  .plate img{display:block; width:100%; height:auto; border-radius:22px; background:var(--deep)}
+  /* The captures are full screens: some sections of the app are emptier than others, and
+     an empty list tail was eating half of every picture. Each plate shows a 9:19.5 screen
+     window instead, so the reader sees the part that has the content. */
+  .plate{aspect-ratio:9/19.5; overflow:hidden}
+  .plate img{display:block; width:100%; height:100%; object-fit:cover; object-position:top center; border-radius:10px; background:var(--deep)}
   .shot{margin:0}
   /* A phone screenshot is 2.15:1 — at column width it would tower over the copy and leave the
      text floating in empty space. Cap the plate, not the column. */
@@ -104,9 +109,9 @@
 
   /* ── sections ─────────────────────────────────────────────────── */
   section{padding:clamp(40px,6vw,76px) 0; border-top:1px solid var(--hair)}
-  .head{display:flex; align-items:baseline; gap:14px; margin-bottom:28px}
-  .head .num{font-family:var(--mono); font-size:12px; color:var(--accent)}
+  .head{display:flex; align-items:baseline; gap:16px; margin-bottom:26px; padding-bottom:12px; border-bottom:1px solid var(--hair)}
   .head h2{font-size:clamp(22px,2.6vw,30px); font-weight:620}
+  .head .aside{margin-left:auto; font-size:13.5px; color:var(--faint); text-align:right; max-width:34ch}
   .rows{display:grid; gap:clamp(28px,4vw,56px)}
   .row{display:grid; grid-template-columns:1fr .8fr; gap:clamp(24px,4vw,56px); align-items:center}
   .row.flip .copy{order:2}
@@ -125,10 +130,29 @@
   .dot{width:7px; height:7px; border-radius:50%; flex:none}
   .dot.no{background:var(--danger)} .dot.yes{background:var(--ok)}
 
+  /* ── the herd ─────────────────────────────────────────────────
+     The hero shows the product's own object: machines, the agents on them, and
+     what each is waiting for. Not a phone floating in a card. */
+  .herd{border:1px solid var(--hair); border-radius:14px; background:var(--well); overflow:hidden; font-size:14px}
+  .herd-top{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; padding:12px 16px; border-bottom:1px solid var(--hair); color:var(--soft); font-size:13.5px}
+  .herd-top b{color:var(--text); font-weight:600}
+  .herd-top .right{margin-left:auto; color:var(--faint); font-family:var(--mono); font-size:12px}
+  .herd-row{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 14px; padding:13px 16px 13px 15px; border-left:3px solid transparent; border-top:1px solid var(--hair)}
+  .herd-row:first-of-type{border-top:0}
+  .herd-row.wait{border-left-color:var(--warn); background:rgba(227,174,94,.055)}
+  .herd-who{display:flex; align-items:center; gap:9px; min-width:0}
+  .herd-who .host{font-family:var(--mono); font-size:12.5px; color:var(--faint); white-space:nowrap}
+  .herd-who .name{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .herd-why{grid-column:1; color:var(--soft); font-size:13.5px; padding-left:16px}
+  .herd-wait{grid-column:2; grid-row:1; align-self:center; font-size:12.5px; color:var(--warn); white-space:nowrap}
+  .herd-row:not(.wait) .herd-wait{color:var(--faint)}
+  .herd-kbd{grid-column:2; grid-row:2; justify-self:end; align-self:center; font-family:var(--mono); font-size:11px; color:var(--soft); border:1px solid var(--rim); border-radius:6px; padding:2px 7px; background:var(--raised)}
+  .herd-foot{padding:11px 16px; border-top:1px solid var(--hair); color:var(--faint); font-size:12.5px; display:flex; gap:10px; flex-wrap:wrap}
+
   /* ── install ──────────────────────────────────────────────────── */
   .install{display:grid; grid-template-columns:1fr 1fr; gap:clamp(24px,4vw,48px); align-items:start}
   pre{
-    margin:0; padding:18px 20px; border-radius:16px; background:var(--well);
+    margin:0; padding:18px 20px; border-radius:10px; background:var(--well);
     border:1px solid var(--hair); overflow-x:auto;
     font-family:var(--mono); font-size:13px; line-height:1.8; color:var(--soft);
   }
@@ -144,6 +168,11 @@
   footer{border-top:1px solid var(--hair); padding:32px 0 56px; color:var(--faint); font-size:14px}
   footer .wrap{display:flex; gap:18px; flex-wrap:wrap; align-items:center}
 
+  @media (max-width:560px){
+    /* the sync stamp is the first thing to go when the row is narrow */
+    .herd-top .right{display:none}
+    .herd-why{padding-left:0}
+  }
   @media (max-width:860px){
     .hero,.row,.install{grid-template-columns:1fr}
     .row.flip .copy{order:0}
@@ -164,7 +193,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5h14M8 8.5V6.2A1.2 1.2 0 0 1 9.2 5h5.6A1.2 1.2 0 0 1 16 6.2v2.3M6.5 8.5v8A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-8" stroke="#7B9BEA" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.4" fill="#7B9BEA"/></svg>
     Herdly
   </span>
-  <span class="spec" data-i="spec">v0.2.4 · Android 8.0+</span>
+  <span class="spec" data-i="spec">v0.2.4　Android 8.0+</span>
   <span class="grow"></span>
   <div class="lang" role="group" aria-label="Language">
     <button type="button" data-lang="zh" aria-pressed="true">简体中文</button>
@@ -176,25 +205,45 @@
   <div class="wrap">
     <div class="hero">
       <div>
-        <p class="mono" data-i="kicker">SSH 终端 · agent 值守</p>
-        <h1 data-i="h1">离开电脑，<em>也不丢掉</em><br>正在等你的 agent。</h1>
+        <h1 data-i="h1">离开电脑，<br>也不丢掉<br>正在等你的 <span>agent</span>。</h1>
         <p class="lede" data-i="lede">Herdly 先是一个能用的 SSH 终端：真 PTY、颜色、按键条、vim 与 tmux。在此之上，它把多台机器上停下来的 coding agent 收进一个列表——谁在等你、原文是什么、点哪一项，都在一屏里。</p>
         <div class="cta">
           <a class="btn btn-primary" id="dl" href="https://github.com/1660745802/herdly/releases/latest" data-i="cta_dl">下载 APK</a>
           <a class="btn btn-quiet" href="https://github.com/1660745802/herdly" data-i="cta_src">源码与文档</a>
         </div>
-        <p class="fine" data-i="fine">开源 · 无账号 · 无云端中转 · 无遥测</p>
+        <p class="fine" data-i="fine">开源。没有账号，没有云端中转，没有遥测。</p>
       </div>
-      <figure class="shot">
-        <div class="plate"><img src="assets/terminal.webp" data-shot="terminal" width="640" height="1375" alt="Herdly 终端页：彩色输出、程序状态条与两排按键"></div>
-        <figcaption data-i="cap_hero">真机截图 · 终端页</figcaption>
-      </figure>
+      <div class="herd" role="img" aria-label="Herdly 任务页：三台机器四个 agent，其中一个正在等你决定">
+        <div class="herd-top"><b data-i="herd_h">任务</b><span data-i="herd_s">3 台机器 · 4 个 agent · 1 个在等你</span><span class="right" data-i="herd_t">刚刚同步</span></div>
+        <div class="herd-row wait">
+          <div class="herd-who"><span class="dot" style="background:var(--warn)"></span><span class="name" data-i="herd_r1n">π - repo-audit</span><span class="host">build-01</span></div>
+          <span class="herd-wait" data-i="herd_r1s">等待你决定</span>
+          <div class="herd-why" data-i="herd_r1w">要跑完整测试吗？三个选项，原文未改写</div>
+          <span class="herd-kbd" data-i="herd_r1k">1 · 2 · 3</span>
+        </div>
+        <div class="herd-row">
+          <div class="herd-who"><span class="dot" style="background:var(--ok)"></span><span class="name" data-i="herd_r2n">π - migrator</span><span class="host">edge-02</span></div>
+          <span class="herd-wait" data-i="herd_r2s">完成 · 未看</span>
+          <div class="herd-why" data-i="herd_r2w">迁移脚本跑完了，等你读结果</div>
+        </div>
+        <div class="herd-row">
+          <div class="herd-who"><span class="dot" style="background:var(--soft)"></span><span class="name" data-i="herd_r3n">π - docs</span><span class="host">mini.lan</span></div>
+          <span class="herd-wait" data-i="herd_r3s">工作中 63%</span>
+          <div class="herd-why" data-i="herd_r3w">正在改第 12 篇，不用管它</div>
+        </div>
+        <div class="herd-row">
+          <div class="herd-who"><span class="dot" style="background:var(--soft)"></span><span class="name" data-i="herd_r4n">pane · vim</span><span class="host">mini.lan</span></div>
+          <span class="herd-wait" data-i="herd_r4s">空闲</span>
+          <div class="herd-why" data-i="herd_r4w">分屏还连着，随时能接着敲</div>
+        </div>
+        <div class="herd-foot"><span data-i="herd_f1">SSH 直连 · 无中转</span><span data-i="herd_f2">只有你看不到那一屏时才响</span></div>
+      </div>
     </div>
   </div>
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">01</span><h2 data-i="s1">一个列表，回答「现在该看谁」</h2></div>
+      <div class="head"><h2 data-i="s1">一个列表，回答「现在该看谁」</h2></div>
       <div class="rows">
         <div class="row">
           <div class="copy">
@@ -216,7 +265,7 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">02</span><h2 data-i="s2">审批看原文，不看你猜的摘要</h2></div>
+      <div class="head"><h2 data-i="s2">审批看原文，不看你猜的摘要</h2></div>
       <div class="rows">
         <div class="row flip">
           <div class="copy">
@@ -238,7 +287,7 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">03</span><h2 data-i="s3">先是个合格的终端</h2></div>
+      <div class="head"><h2 data-i="s3">先是个合格的终端</h2><p class="aside" data-i="s3_aside">没有这一层，agent 列表就只是一个聊天框。</p></div>
       <div class="rows">
         <div class="row">
           <div class="copy">
@@ -251,8 +300,8 @@
             </div>
           </div>
           <figure class="shot">
-            <div class="plate"><img src="assets/hosts.webp" data-shot="hosts" width="640" height="1375" alt="Herdly 机器页：连接状态、agent 数与打开终端入口"></div>
-            <figcaption data-i="cap_hosts">机器页</figcaption>
+            <div class="plate"><img src="assets/terminal.webp" data-shot="terminal" width="640" height="1375" alt="Herdly 终端页：彩色输出、程序状态条与两排按键"></div>
+            <figcaption data-i="cap_hero">真机截图 · 终端页</figcaption>
           </figure>
         </div>
       </div>
@@ -261,10 +310,14 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">04</span><h2 data-i="s4">凭据与信任留在本机</h2></div>
+      <div class="head"><h2 data-i="s4">凭据与信任留在本机</h2></div>
       <div class="rows">
         <div class="row flip">
           <div class="copy">
+            <figure class="shot" style="margin:0 0 22px; max-width:250px">
+              <div class="plate"><img src="assets/hosts.webp" data-shot="hosts" width="640" height="1375" alt="Herdly 机器页：连接状态、agent 数与打开终端入口"></div>
+              <figcaption data-i="cap_hosts">机器页</figcaption>
+            </figure>
             <h3 data-i="s4a_h">第一次连接一定问你</h3>
             <p data-i="s4a_p">首次连接先显示主机密钥指纹（并标出算法），你核对确认后才发送凭据。之后指纹变了，连接停下来等你再确认——不会静默信任。</p>
             <div class="kv">
@@ -283,7 +336,7 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">05</span><h2 data-i="s5">它不做的事</h2></div>
+      <div class="head"><h2 data-i="s5">它不做的事</h2></div>
       <div class="ledger">
         <div><h3><span class="dot no"></span><span data-i="n1h">没有云端中转</span></h3><p data-i="n1p">SSH 从手机直连你的机器。没有我们的服务器，也没有账号。</p></div>
         <div><h3><span class="dot no"></span><span data-i="n2h">没有遥测</span></h3><p data-i="n2p">不上报使用数据、崩溃日志或终端内容。唯一的联网请求是你主动点的「检查更新」。</p></div>
@@ -295,7 +348,7 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">06</span><h2 data-i="s5b">设置里只有习惯</h2></div>
+      <div class="head"><h2 data-i="s5b">设置里只有习惯</h2></div>
       <div class="rows">
         <div class="row">
           <div class="copy">
@@ -317,7 +370,7 @@
 
   <section>
     <div class="wrap">
-      <div class="head"><span class="num">07</span><h2 data-i="s6">装上，连一台机器</h2></div>
+      <div class="head"><h2 data-i="s6">装上，连一台机器</h2></div>
       <div class="install">
         <div>
           <ol class="steps">
@@ -359,12 +412,25 @@
 <script>
 // Every string lives here, so switching language never re-fetches or re-renders the page.
 const EN = {
-  spec:"v0.2.4 · Android 8.0+",
-  kicker:"SSH terminal · agent watch",
-  h1:"Leave the desk.<br><em>Keep</em> the agent that waits.",
+  spec:"v0.2.4　Android 8.0+",
+  h1:"Leave the desk.<br>Do not lose<br>the <span>agent</span> that waits for you.",
+  herd_h:"Tasks",
+  herd_s:"3 machines · 4 agents · 1 waiting on you",
+  herd_t:"synced just now",
+  herd_r1n:"π - repo-audit", herd_r1s:"needs your call",
+  herd_r1w:"Run the full test suite? Three options, printed verbatim",
+  herd_r1k:"1 · 2 · 3",
+  herd_r2n:"π - migrator", herd_r2s:"finished · unseen",
+  herd_r2w:"The migration finished; the result is waiting",
+  herd_r3n:"π - docs", herd_r3s:"working 63%",
+  herd_r3w:"Editing the twelfth file, nothing to do",
+  herd_r4n:"pane · vim", herd_r4s:"idle",
+  herd_r4w:"The pane is still attached and ready",
+  herd_f1:"SSH direct · no relay", herd_f2:"It only rings when that pane is off your screen",
+  s3_aside:"Without this layer the agent list is just a chat window.",
   lede:"Herdly is a working SSH terminal first: a real PTY, colour, a key bar, vim and tmux. On top of that it collects the coding agents that stopped across your machines into one list — who is waiting, what the screen actually says, and which option to press.",
   cta_dl:"Download APK", cta_src:"Source & docs", cta_dl2:"Download latest APK", cta_rel:"All releases & checksums",
-  fine:"Open source · no account · no relay · no telemetry",
+  fine:"Open source. No account, no relay, no telemetry.",
   cap_hero:"Real device · terminal", cap_inbox:"Tasks", cap_agent:"Agent · approval card",
   cap_hosts:"Machines", cap_fp:"First connection · host key",
   s1:"One list that answers “who needs me now”",
