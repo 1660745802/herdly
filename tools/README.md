@@ -120,11 +120,16 @@ be combined with any scenario (0–60000 ms). Add `--delay-method pane.read` to
 delay only pane reads, leaving SSH authentication, ping and snapshots responsive.
 The request is counted before sleeping, so tests can distinguish server receipt
 from a cancellation before dispatch. `--ask-form` selects `numbered`,
-`yes-no`, or `enter-esc` for p1. Scenarios expose no destructive controls and
+`yes-no`, `enter-esc`, `colour`, or `boxed` for p1. `colour` wraps the pointer in
+SGR sequences and `boxed` draws the menu inside box characters, because those are
+the two shapes a real TUI writes and a parser that reads raw bytes sees no menu
+in either. Scenarios expose no destructive controls and
 never execute the commands shown in fixture text.
 
-Supported methods: `ping`, `session.snapshot`, `pane.read`, `agent.send_keys`,
-`agent.prompt`, `agent.explain`, `workspace.list`, `tab.list`, and `pane.list`.
+Supported methods: `ping`, `session.snapshot`, `pane.read`, `pane.send_input`,
+`agent.send_keys`, `agent.prompt`, `workspace.list`, `tab.list`, and `pane.list`.
+`pane.send_input` drives the selector the way the app does: up/down move the
+pointer and repaint, Enter answers the row it sits on, anything else is refused.
 Lists support workspace/tab filtering. Snapshots use the flat shape accepted by
 `BridgeCodec`, and pane reads use its `read` wrapper. This is a focused approval
 fixture: Structure mutations and NewTask creation/start calls are not implemented

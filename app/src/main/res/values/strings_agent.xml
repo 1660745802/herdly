@@ -7,7 +7,6 @@
 
     <!-- Agent 详情：更多菜单 -->
     <string name="agent_rename">重命名</string>
-    <string name="agent_menu_status_source">状态来源</string>
     <string name="agent_menu_copy_screen">复制完整屏幕</string>
     <string name="agent_toast_copied_screen">已复制完整屏幕</string>
     <string name="agent_menu_wrap_on">开启自动换行</string>
@@ -63,7 +62,6 @@
     <string name="agent_blocked_cannot_approve">当前不可审批，请返回重新读取并核对屏幕。</string>
 
     <!-- Agent 详情：对话框 -->
-    <string name="agent_explain_title">Herdr 的状态判断</string>
     <string name="agent_confirm_verify_title">已核对远端状态？</string>
     <string name="agent_confirm_verify_body">请先刷新并阅读屏幕，确认上次操作是否已执行。解除限制后可以再次操作；重复提交可能再次执行命令。</string>
     <string name="agent_confirm_verify_action">已核对，继续操作</string>
@@ -143,5 +141,7 @@
     <string name="agent_menu_options">交互选项</string>
     <string name="agent_options_title">这个提示在等一个选择</string>
     <string name="agent_options_body">列表来自终端当前画面。先点一项选中，再按发送；发送的是方向键和回车，不会输入文字。</string>
+    <string name="agent_options_gone">屏幕上的选项已经变了，这份列表不再对应当前画面。关掉它，重新看一眼再选。</string>
+    <string name="agent_options_close">知道了</string>
     <string name="agent_options_confirm">发送这一项</string>
 </resources>

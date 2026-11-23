@@ -35,8 +35,9 @@ data class Transcript(
  *  2. Pure chrome = non-blank line with no letter/digit at all (rules, spinners, punctuation,
  *     empty composer). Dropped everywhere.
  *  3. Isolated key hints / composer placeholders ("? for shortcuts", "ctrl+o ...",
- *     "Type your message") are dropped anywhere; token counters, model lines and bare cwd
- *     paths are only dropped in a trailing footer scan that stops at the first prose line.
+ *     "Type your message") are dropped anywhere; a "press enter to ..." row only when no prose
+ *     touches it. Token counters, model lines and bare cwd paths are only dropped in a trailing
+ *     footer scan that stops at the first prose line.
  *  4. Turns start at leading markers; approval menus (numbered 1..n with choice words or a
  *     preceding question) and `(y/n)` questions become one APPROVAL block, absorbing the
  *     question line from the current prose block.
@@ -66,6 +67,25 @@ object AgentTranscript {
 
     /** Banner section headings a CLI prints before its first turn: `[Skills]`, `[Pi 1.2]`. */
     private val sectionHead = Regex("""^\[[A-Za-z][A-Za-z0-9 ._/-]{0,28}\]$""")
+
+    /**
+     * One entry in a banner's indented list: a bare name or path (`android-cli`,
+     * `billion-context:dist/agent/billion-context.js`). No internal spaces, so a sentence,
+     * a code line or a `- list item` never matches and is kept as real content.
+     */
+    private val bannerEntry = Regex("""^[A-Za-z0-9_./~][A-Za-z0-9_.:/@+~-]*$""")
+
+    /**
+     * Whether an indented line under a banner heading is itself furniture. A comma-separated
+     * run of bare names/paths is the CLI listing its skills/extensions; model, token, cwd and
+     * status lines are furniture too. Anything else (prose, code, a list item) is the answer
+     * starting right after the heading and must survive.
+     */
+    private fun bannerContinuation(t: String): Boolean {
+        if (t.isEmpty()) return false
+        if (t.split(',').all { bannerEntry.matches(it.trim()) }) return true
+        return modelLine.matches(t) || tokenSignal.findAll(t).count() >= 2 || informational(t)
+    }
 
     /**
      * The screen with the furniture removed, still as plain lines.
@@ -108,8 +128,18 @@ object AgentTranscript {
 
     /** Mark everything that is furniture: prompts, banners, footers. */
     private fun markFurniture(lines: ArrayList<Line>) {
-        for (ln in lines) {
-            if (!ln.blank && !ln.chrome && isolatedChrome(ln.trimmed)) {
+        for (idx in lines.indices) {
+            val ln = lines[idx]
+            if (ln.blank || ln.chrome) continue
+            val t = ln.trimmed
+            if (isolatedChrome(t)) {
+                ln.isolated = true
+                ln.dropped = true
+            } else if (t.length <= 60 && t.lowercase().startsWith("press enter to") &&
+                hintIsolated(lines, idx)
+            ) {
+                // A "press enter to ..." row is only furniture when it stands alone; inside a
+                // paragraph it is the agent telling the user what to press, so it stays.
                 ln.isolated = true
                 ln.dropped = true
             }
@@ -127,9 +157,18 @@ object AgentTranscript {
             if (!ln.blank && sectionHead.matches(ln.trimmed)) {
                 ln.dropped = true
                 b++
-                while (b < lines.size && (lines[b].blank || lines[b].norm.startsWith("  "))) {
-                    lines[b].dropped = true
-                    b++
+                // Only drop continuation lines that are themselves banner furniture. The first
+                // indented line that is real content (code, a list, prose) ends the region and
+                // is kept, so an answer that opens with an indented block loses nothing.
+                while (b < lines.size) {
+                    val cont = lines[b]
+                    if (cont.blank) { cont.dropped = true; b++; continue }
+                    if (cont.norm.startsWith("  ") && bannerContinuation(cont.trimmed)) {
+                        cont.dropped = true
+                        b++
+                        continue
+                    }
+                    break
                 }
                 continue
             }
@@ -143,11 +182,19 @@ object AgentTranscript {
         }
 
         // Trailing footer scan: skip blank/chrome, drop footer-ish lines, stop at real prose.
+        // footerSeen records that we are inside the bottom status strip, so a bare path is only
+        // treated as a cwd footer when it sits on top of an already-dropped token/model line.
         var tail = lines.size - 1
+        var footerSeen = false
         while (tail >= 0) {
             val ln = lines[tail]
             if (ln.blank || ln.chrome || ln.dropped) { tail--; continue }
-            if (footerish(ln.trimmed)) { ln.dropped = true; tail--; continue }
+            if (footerish(ln.trimmed, footerSeen)) {
+                ln.dropped = true
+                footerSeen = true
+                tail--
+                continue
+            }
             break
         }
     }
@@ -338,15 +385,47 @@ object AgentTranscript {
     }
 
     private val controlHint = Regex("""\b(?:ctrl|alt|shift|cmd|meta)\+|\besc(?:ape)?\b""", RegexOption.IGNORE_CASE)
+    private val keyLead = Regex("""^(?:ctrl|alt|shift|cmd|meta|esc)\b""", RegexOption.IGNORE_CASE)
+
+    /** The terse status vocabulary a hotkey legend uses; prose words are deliberately absent. */
+    private val legendWords = setOf(
+        "press", "to", "for", "more", "help", "show", "full", "startup", "interrupt",
+        "clear", "exit", "quit", "expand", "collapse", "shortcuts", "toggle", "menu",
+        "scroll", "copy", "paste", "send", "newline", "resume", "retry",
+    )
 
     /** A line listing keyboard shortcuts: a header legend, never prose. */
     private fun headerLegend(t: String): Boolean {
-        if (t.length > 140) return false
+        if (t.length > 140 || t.isEmpty()) return false
+        // A turn marker means an agent sentence, even when it names one or two keys.
+        if (t.first() in "●•⏺>❯›⎿└") return false
         val hits = controlHint.findAll(t).count()
-        // A legend usually advertises two keys, but pi leads with its own logo and one hint
-        // (`▀▀█ v1.5.2 / Press ctrl+o to show full startup help`). A line that does not start
-        // with a letter and names a key is furniture; prose that mentions a shortcut is not.
-        return hits >= 2 || (hits == 1 && t.isNotEmpty() && !t.first().isLetter())
+        if (hits == 0) return false
+        // A single hint only counts when the line does not lead with a letter (pi's logo row).
+        if (hits == 1 && t.first().isLetter()) return false
+        // Genuine legends are short runs of key combos and status words. If any word is ordinary
+        // prose ("the", "run", "partial", ...) this is a sentence that mentions a shortcut, not
+        // a legend, so it survives.
+        val words = t.lowercase().split(Regex("[\\s·|/]+")).filter { it.isNotEmpty() }
+        return words.all { w ->
+            controlHint.containsMatchIn(w) || versionRe.containsMatchIn(w) ||
+                w in legendWords || w.none { it.isLetterOrDigit() }
+        }
+    }
+
+    /**
+     * A "press enter to ..." hint is isolated only when no prose touches it on either side:
+     * both nearest non-blank neighbours are chrome/dropped or absent. Between two rules or at
+     * the very bottom it is furniture; inside a paragraph it is part of the answer.
+     */
+    private fun hintIsolated(lines: List<Line>, idx: Int): Boolean {
+        var above = idx - 1
+        while (above >= 0 && lines[above].blank) above--
+        var below = idx + 1
+        while (below < lines.size && lines[below].blank) below--
+        val aboveClear = above < 0 || lines[above].chrome || lines[above].dropped
+        val belowClear = below >= lines.size || lines[below].chrome || lines[below].dropped
+        return aboveClear && belowClear
     }
 
     /** Whole-line chrome that is safe to drop anywhere (never part of a sentence). */
@@ -356,20 +435,31 @@ object AgentTranscript {
         return l.startsWith("? for shortcuts") || l.startsWith("esc to interrupt") ||
             l.startsWith("ctrl+") || l.startsWith("shift+tab") || l.startsWith("alt+") ||
             l.startsWith("type your message") || l.startsWith("type a message") ||
-            l.startsWith("press enter to") || l == ">" || l == "❯"
+            l == ">" || l == "❯"
     }
 
-    /** Footer-ish: only applied by the trailing scan, so prose is never touched. */
-    private fun footerish(t: String): Boolean {
+    /**
+     * Footer-ish: only applied by the trailing scan, so prose is never touched. [footerSeen]
+     * means a stronger footer line (token counter, model, hint) was already dropped below, i.e.
+     * we are inside the bottom status strip; only then is a bare path read as a cwd footer.
+     */
+    private fun footerish(t: String, footerSeen: Boolean): Boolean {
+        // A marked turn is never a footer, even if it mentions a shortcut or ends in a path.
+        if (t.length > 1 && t.first() in "●•⏺>❯›⎿└") return false
         if (isolatedChrome(t)) return true
         val l = t.lowercase()
-        if (l.length <= 80 && (l.contains("for shortcuts") || l.contains("esc to interrupt") ||
+        if (l.length <= 60 && l.startsWith("press enter to")) return true
+        // Expand/collapse/interrupt hints are footer vocabulary only when the line leads with a
+        // key combo or a glyph; a sentence like "Run ctrl+o to expand the log." is prose.
+        val keyLed = keyLead.containsMatchIn(l) || (t.isNotEmpty() && !t.first().isLetter())
+        if (l.length <= 80 && keyLed &&
+            (l.contains("for shortcuts") || l.contains("esc to interrupt") ||
                 l.contains("to expand") || l.contains("to collapse") || l.contains("to interrupt"))
         ) return true
         if (l.contains("type your message") || l.contains("type a message")) return true
         if (modelLine.matches(t)) return true
-        if (t.length <= 80 && t.lowercase().startsWith("model:")) return true
-        if (isCwd(t)) return true
+        if (t.length <= 80 && l.startsWith("model:")) return true
+        if (footerSeen && isCwd(t)) return true
         // Require two independent counter signals so a sentence mentioning "$0.30" survives.
         return tokenSignal.findAll(t).count() >= 2
     }

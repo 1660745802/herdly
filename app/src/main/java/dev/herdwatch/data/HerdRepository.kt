@@ -13,6 +13,7 @@ import dev.herdwatch.model.PaneText
 import dev.herdwatch.model.PendingHostKey
 import dev.herdwatch.ssh.HostConnection
 import dev.herdwatch.ssh.HerdrClient
+import dev.herdwatch.ssh.HerdrRequestTimeoutException
 import dev.herdwatch.ssh.HerdrRpcException
 import dev.herdwatch.ssh.HostKeyMismatchException
 import dev.herdwatch.ssh.UnknownHostKeyException
@@ -320,8 +321,8 @@ class HerdRepository internal constructor(
                         }
                     }
                 } catch (e: TimeoutCancellationException) {
-                    // A request's own deadline is a host failure. The enclosing host or
-                    // caller cancellation must still propagate to its owner.
+                    // The enclosing connect attempt's deadline is a host failure. The enclosing
+                    // host or caller cancellation must still propagate to its owner.
                     if (!currentCoroutineContext().isActive) {
                         fail(lease, null)
                         throw e
@@ -330,6 +331,18 @@ class HerdRepository internal constructor(
                 } catch (e: CancellationException) {
                     fail(lease, null)
                     throw e
+                } catch (e: HerdrRequestTimeoutException) {
+                    // Same rule as useHost/dropDeadSession: a request's own deadline says nothing
+                    // about the session. The handshake finished and the socket is still up, so a
+                    // slow first read must not close a healthy session or mark the host failed;
+                    // the next poll retries the read on the same connection. Only a session that
+                    // is actually gone is dropped.
+                    dropDeadSession(lease, e)
+                    if (synchronized(gate) { current(lease) && lease.client.isConnected }) {
+                        _state.update { s -> s.copy(hosts = s.hosts.map {
+                            if (it.host.id == hostId) it.copy(conn = ConnState.Connected) else it
+                        }) }
+                    }
                 } catch (t: Exception) {
                     fail(lease, t)
                 }
@@ -491,7 +504,6 @@ class HerdRepository internal constructor(
         mutate(hostId) { it.startAgent(paneId, kind, name, args) }
     }
 
-    suspend fun explain(agent: Agent): kotlinx.serialization.json.JsonObject = useHost(agent.hostId) { it.explain(agent.paneId) }
     // "recent_unwrapped" asks the bridge to undo the TUI's hard wrapping before we get the text.
     // Reading prose on a phone means every wrapped line otherwise becomes its own line, which is
     // what made both the raw view and the chat segmentation look shredded.

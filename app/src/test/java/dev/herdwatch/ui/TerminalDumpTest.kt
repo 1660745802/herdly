@@ -48,6 +48,25 @@ class TerminalDumpTest {
     }
 
     @Test
+    fun `tabs advance to the next multiple of eight`() {
+        assertEquals(8, terminalCells("\t"))
+        assertEquals(16, terminalCells("\t\t"))
+        assertEquals(9, terminalCells("a\tb")) // 1 + 7 to the stop + 1
+        assertEquals(9, terminalCells("ab\tc")) // 2 + 6 to the stop + 1
+        assertEquals(17, terminalCells("12345678\tx")) // on a stop: full 8, then 1
+        assertEquals(9, ansiCells("\u001b[32ma\tb\u001b[0m"))
+    }
+
+    @Test
+    fun `bmp dingbats count two cells like the font paints them`() {
+        assertEquals(2, terminalCells("\u2600")) // ☀ black sun with rays
+        assertEquals(2, terminalCells("\u2605")) // ★ black star
+        assertEquals(2, terminalCells("\u2714")) // ✔ heavy check mark
+        assertEquals(2, terminalCells("\u27BF")) // ➿ double curly loop, range end
+        assertEquals(5, terminalCells("ok \u2714")) // 3 + 2
+    }
+
+    @Test
     fun `appending lines keeps existing ordinals`() {
         val first = advanceLineIndex(emptyLineIndex(), listOf("a", "b"))
         val second = advanceLineIndex(first, listOf("a", "b", "c"))
@@ -135,5 +154,26 @@ class TerminalDumpTest {
         assertFalse(isBoxRule("1. kill 手工进程 1576920 —— 交回 systemd 托管"))
         assertFalse(isBoxRule("--- note to self ---"))
         assertFalse(isBoxRule(""))
+    }
+
+    @Test
+    fun `prose with an incidental box glyph still wraps`() {
+        // One │ or ─ in a sentence must not freeze the whole line at the pane's width.
+        assertFalse(isBoxRule("pipe the output │ through grep before reading it"))
+        assertFalse(isBoxRule("the ─ character starts a horizontal rule in markdown"))
+        assertFalse(isBoxRule("│ see the note below for the full explanation of this flag"))
+        assertFalse(isBoxRule("a long sentence that merely ends with a bar │"))
+    }
+
+    @Test
+    fun `table rows keep their frame even when mostly text`() {
+        assertTrue(isBoxRule("│ name    │ value │"))
+        assertTrue(isBoxRule("│ 手工进程 │ 1576920 │"))
+        assertTrue(isBoxRule("│ only one column │"))
+        assertTrue(isBoxRule("  │ indented │ table │  "))
+        assertTrue(isBoxRule("║ double ║ border ║"))
+        assertTrue(isBoxRule("├────┼────┤"))
+        assertTrue(isBoxRule("┌────┬────┐"))
+        assertTrue(isBoxRule("\u001b[90m│ name │ value │\u001b[0m"))
     }
 }

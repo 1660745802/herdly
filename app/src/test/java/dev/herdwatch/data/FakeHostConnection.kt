@@ -55,7 +55,6 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     }
 
     // Unexpected RPCs fail loudly so tests cannot pass by silently accepting the wrong operation.
-    override suspend fun explain(target: String): JsonObject = unexpected()
     override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = onReadPane()
     override suspend fun sendKeys(paneId: String, keys: List<String>): Unit = unexpected()
     override suspend fun sendInput(paneId: String, text: String?, keys: List<String>): Unit = unexpected()

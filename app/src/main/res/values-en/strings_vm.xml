@@ -29,19 +29,6 @@
     <string name="vm_rename_accepted">Rename request accepted.</string>
     <string name="vm_rename_uncertain">The rename result is uncertain; check the remote state.</string>
 
-    <string name="vm_explain_loading">Herdr is explaining this status…</string>
-    <string name="vm_explain_failed">Could not read an explanation: %1$s</string>
-    <string name="vm_explain_state">Herdr verdict: %1$s</string>
-    <string name="vm_explain_matched_rule">Matched rule: %1$s</string>
-    <string name="vm_explain_detect_skipped_hook">Screen detection skipped: the status comes straight from the agent lifecycle hook, not from guessing at the screen.</string>
-    <string name="vm_explain_detect_skipped_reason">Screen detection skipped: %1$s</string>
-    <string name="vm_explain_detect_skipped">Screen detection skipped.</string>
-    <string name="vm_visible_signal">Visible signal: %1$s</string>
-    <string name="vm_visible_blocker">a blocker is on screen</string>
-    <string name="vm_visible_idle">the screen is idle</string>
-    <string name="vm_visible_working">the screen is working</string>
-    <string name="vm_explain_fallback_reason">Fallback reason: %1$s</string>
-    <string name="vm_explain_warning">Note: %1$s</string>
 
     <string name="vm_read_failed">Read failed; showing the previous content: %1$s</string>
 
@@ -70,4 +57,6 @@
     <string name="vm_label_input">terminal input</string>
     <string name="vm_trust_failed">Could not accept the new key. Try again.</string>
     <string name="vm_label_menu">Choice</string>
+    <string name="vm_menu_not_sent">The host is not connected or an operation is already in progress; the choice was not sent.</string>
+    <string name="vm_menu_changed">The options on screen changed, so nothing was sent. Look again and choose.</string>
 </resources>

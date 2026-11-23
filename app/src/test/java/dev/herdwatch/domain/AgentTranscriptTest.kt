@@ -453,4 +453,114 @@ class AgentTranscriptTest {
         assertTrue(all.contains("reply just ok"))
         assertTrue(all.contains("ok"))
     }
+
+    @Test fun `indented content right after a heading is not banner continuation`() {
+        // An answer that opens with an indented code block under a bracketed heading.
+        val code = AgentTranscript.parse(
+            """
+            [Setup]
+                val config = loadConfig()
+                config.port = 8080
+            """.trimIndent(),
+        )
+        val codeText = code.blocks.joinToString("\n") { it.text }
+        assertTrue("code lost: $codeText", codeText.contains("val config = loadConfig()"))
+        assertTrue("code lost: $codeText", codeText.contains("config.port = 8080"))
+
+        // Same for an indented list: the items are the answer, not a skill inventory.
+        val list = AgentTranscript.parse(
+            """
+            [Steps]
+              - Restart the emulator
+              - Re-run the tests
+            """.trimIndent(),
+        )
+        val listText = list.blocks.joinToString("\n") { it.text }
+        assertTrue("list lost: $listText", listText.contains("Restart the emulator"))
+        assertTrue("list lost: $listText", listText.contains("Re-run the tests"))
+    }
+
+    @Test fun `a bulleted sentence naming a shortcut is not a hotkey legend`() {
+        val t = AgentTranscript.parse(
+            """
+            > stop the current run
+            ● Press Ctrl+C to cancel the run and keep the partial result.
+            """.trimIndent(),
+        )
+        assertEquals(listOf(TranscriptRole.USER, TranscriptRole.ASSISTANT), t.blocks.map { it.role })
+        assertTrue(t.blocks[1].text.contains("Press Ctrl+C to cancel the run and keep the partial result."))
+
+        // A real legend is still furniture.
+        val legend = AgentTranscript.parse(
+            """
+            escape interrupt · ctrl+c/ctrl+d clear/exit · ctrl+o more
+            > hello
+            ● hi there
+            """.trimIndent(),
+        )
+        val all = legend.blocks.joinToString("\n") { it.text }
+        assertFalse("legend leaked: $all", all.contains("interrupt"))
+        assertEquals(listOf(TranscriptRole.USER, TranscriptRole.ASSISTANT), legend.blocks.map { it.role })
+    }
+
+    @Test fun `press enter hint inside prose survives but isolated furniture is dropped`() {
+        val t = AgentTranscript.parse(
+            """
+            > how do I accept the dialog?
+            ● When the installer asks:
+            Press enter to accept the default choice.
+            The installer then continues on its own.
+            """.trimIndent(),
+        )
+        val assistant = t.blocks.first { it.role == TranscriptRole.ASSISTANT }
+        assertTrue(assistant.text.contains("Press enter to accept the default choice."))
+        assertTrue(assistant.text.contains("The installer then continues on its own."))
+
+        // The same words between two rules are a composer hint, not prose.
+        val chrome = AgentTranscript.parse(
+            """
+            ● Installation finished.
+            ────────────────────────
+            press enter to continue
+            ────────────────────────
+            """.trimIndent(),
+        )
+        val all = chrome.blocks.joinToString("\n") { it.text }
+        assertFalse("hint leaked: $all", all.contains("press enter"))
+        assertTrue(all.contains("Installation finished."))
+    }
+
+    @Test fun `an answer ending in a path or an expand sentence is not a footer`() {
+        val path = AgentTranscript.parse(
+            """
+            > which file maps hostnames?
+            ● The mapping lives in this file:
+            /etc/hosts
+            """.trimIndent(),
+        )
+        val pathAssistant = path.blocks.first { it.role == TranscriptRole.ASSISTANT }
+        assertTrue("path lost: ${pathAssistant.text}", pathAssistant.text.contains("/etc/hosts"))
+
+        val expand = AgentTranscript.parse(
+            """
+            > how do I see the whole log?
+            ● Run ctrl+o to expand the log view.
+            """.trimIndent(),
+        )
+        val expandAssistant = expand.blocks.first { it.role == TranscriptRole.ASSISTANT }
+        assertTrue(expandAssistant.text.contains("Run ctrl+o to expand the log view."))
+
+        // A bare path on top of a real token strip is still the cwd footer.
+        val footer = AgentTranscript.parse(
+            """
+            > done?
+            ● yes, all done
+            ~/Documents/herdr-mobile
+            ↑1k ↓2k ${'$'}0.01 5%
+            """.trimIndent(),
+        )
+        val all = footer.blocks.joinToString("\n") { it.text }
+        assertFalse("footer leaked: $all", all.contains("herdr-mobile"))
+        assertFalse("footer leaked: $all", all.contains("↑1k"))
+    }
 }

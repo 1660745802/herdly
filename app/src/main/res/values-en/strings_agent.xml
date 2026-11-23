@@ -7,7 +7,6 @@
 
     <!-- Agent detail: overflow menu -->
     <string name="agent_rename">Rename</string>
-    <string name="agent_menu_status_source">Status source</string>
     <string name="agent_menu_copy_screen">Copy full screen</string>
     <string name="agent_toast_copied_screen">Full screen copied</string>
     <string name="agent_menu_wrap_on">Turn on word wrap</string>
@@ -63,7 +62,6 @@
     <string name="agent_blocked_cannot_approve">Approval is unavailable. Go back, reload and check the screen.</string>
 
     <!-- Agent detail: dialogs -->
-    <string name="agent_explain_title">How Herdr judges status</string>
     <string name="agent_confirm_verify_title">Remote state verified?</string>
     <string name="agent_confirm_verify_body">Refresh and read the screen first to confirm whether the last operation ran. Once the restriction is lifted you can act again; submitting twice may run the command again.</string>
     <string name="agent_confirm_verify_action">Verified, continue</string>
@@ -142,5 +140,7 @@
     <string name="agent_menu_options">Interactive options</string>
     <string name="agent_options_title">This prompt is waiting for a choice</string>
     <string name="agent_options_body">The list is read from the terminal as it is now. Pick a row, then send — it presses arrow keys and Enter, never text.</string>
+    <string name="agent_options_gone">The options on screen have changed, so this list no longer matches. Close it and look again before choosing.</string>
+    <string name="agent_options_close">Got it</string>
     <string name="agent_options_confirm">Send this choice</string>
 </resources>

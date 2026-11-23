@@ -21,7 +21,7 @@ except ImportError:  # The scenario and its tests use only the standard library.
 
 MODES = ("normal", "stale-approval", "unchanged-output", "accepted-read-fail",
          "accepted-response-lost", "rpc-failure")
-ASK_FORMS = ("numbered", "yes-no", "enter-esc")
+ASK_FORMS = ("numbered", "yes-no", "enter-esc", "colour", "boxed")
 
 
 def approval_text(command="npm test", form="numbered"):
@@ -30,12 +30,69 @@ def approval_text(command="npm test", form="numbered"):
         return context + "Do you want to proceed? [y/N]\n"
     if form == "enter-esc":
         return context + "Do you want to proceed?\nPress Enter to confirm, Esc to cancel\n"
+    if form == "colour":
+        # What a real TUI writes: the pointer sits behind an escape sequence, so a parser that
+        # matches raw bytes sees no menu at all.
+        return context + (
+            "\x1b[1mDo you want to proceed?\x1b[0m\n"
+            "\x1b[36m\x1b[1m❯\x1b[0m 1. Yes\n"
+            "  2. Yes, and don't ask again for this session\n"
+            "\x1b[90m  3. No, and tell Claude what to do differently (esc)\x1b[0m\n"
+        )
+    if form == "boxed":
+        return context + (
+            "╭──────────────────────────────────────╮\n"
+            "│ Do you want to proceed?                    │\n"
+            "│ ❯ 1. Yes                                   │\n"
+            "│   2. Yes, and don't ask again              │\n"
+            "│   3. No, and tell Claude what to do        │\n"
+            "╰──────────────────────────────────────╯\n"
+        )
     return context + (
         "Do you want to proceed?\n"
         "❯ 1. Yes\n"
         "  2. Yes, and don't ask again for this session\n"
         "  3. No, and tell Claude what to do differently (esc)\n"
     )
+
+
+MENU_FORMS = ("numbered", "colour", "boxed")
+MENU_LABELS = [
+    "Yes",
+    "Yes, and don't ask again for this session",
+    "No, and tell Claude what to do differently (esc)",
+]
+P2_LABELS = ["Allow once", "Always allow for this session", "Deny"]
+
+
+def render_menu(menu):
+    """Draw a selector with its pointer where the app last moved it.
+
+    The forms differ only in what surrounds the rows, because that is exactly what a parser has
+    to survive: escape sequences, a box, or nothing.
+    """
+    labels, cursor, form = menu["labels"], menu["cursor"], menu["form"]
+    rows = []
+    for i, label in enumerate(labels):
+        pointer = "❯" if i == cursor else " "
+        rows.append((pointer, "%d. %s" % (i + 1, label)))
+    if form == "colour":
+        body = "\x1b[1mDo you want to proceed?\x1b[0m\n"
+        for pointer, label in rows:
+            mark = "\x1b[36m\x1b[1m%s\x1b[0m" % pointer if pointer == "❯" else pointer
+            body += "%s %s\n" % (mark, label)
+        return "Claude Code\nCommand: npm test\n" + body
+    if form == "boxed":
+        inner = 44
+        lines = ["Do you want to proceed?"] + ["%s %s" % (p, l) for p, l in rows]
+        body = "╭" + "─" * inner + "╮\n"
+        for line in lines:
+            body += "│ " + line.ljust(inner - 2) + " │\n"
+        return "Claude Code\nCommand: npm test\n" + body + "╰" + "─" * inner + "╯\n"
+    body = "Do you want to proceed?\n"
+    for pointer, label in rows:
+        body += "%s %s\n" % (pointer, label)
+    return "Claude Code\nCommand: npm test\n" + body
 
 
 SNAPSHOT = {
@@ -145,6 +202,16 @@ class CannedSession:
         self._reads = dict.fromkeys(PANE, 0)
         self._fail_reads = set()
         self._forms = {"w1:p1": self.scenario.ask_form, "w1:p2": "numbered"}
+        # A selector the app can drive with arrow keys, the way a real TUI works: the pointer
+        # moves, the screen repaints, and only Enter answers. Without this the menu path had no
+        # end-to-end exercise at all.
+        self._menus = {
+            "w1:p1": {"cursor": 0, "labels": MENU_LABELS, "form": self.scenario.ask_form},
+            "w1:p2": {"cursor": 0, "labels": P2_LABELS, "form": "numbered"},
+        }
+        for pane_id, menu in self._menus.items():
+            if menu["form"] in MENU_FORMS:
+                self._text[pane_id] = render_menu(menu)
         self._seq = 4412
         for agent in self._snapshot["agents"]:
             agent["tab_id"] = "w1:t1"
@@ -160,7 +227,7 @@ class CannedSession:
             params = req.get("params", {})
             if not isinstance(method, str) or not isinstance(params, dict):
                 raise RpcError("invalid_request", "method and params required")
-            mutation = method in ("agent.send_keys", "agent.prompt")
+            mutation = method in ("agent.send_keys", "agent.prompt", "pane.send_input")
             self.status.add(requests=1, pane_reads=int(method == "pane.read"),
                             mutation_requests=int(mutation))
             if (self.scenario.latency_ms and
@@ -237,13 +304,46 @@ class CannedSession:
             return {"type": "pane_read", "read": {"pane_id": pane_id,
                     "text": self._text[pane_id], "revision": self._revision[pane_id],
                     "truncated": False}}
-        if method in ("agent.send_keys", "agent.prompt", "agent.explain"):
+        if method == "pane.send_input":
+            pane_id = params.get("pane_id")
+            if not isinstance(pane_id, str) or pane_id not in self._text:
+                raise RpcError("invalid_params", "pane_id must name a pane")
+            text = params.get("text")
+            keys = params.get("keys") or []
+            if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+                raise RpcError("invalid_params", "keys must be a string array")
+            if isinstance(text, str) and text.strip():
+                self._change(pane_id, "New simulated task received.\n", "working")
+                return {"type": "pane_send_input", "ok": True}
+            menu = self._menus.get(pane_id)
+            if menu is None or menu["form"] not in MENU_FORMS:
+                raise RpcError("invalid_keys", "this pane is not drawing a selector")
+            if self._agent(pane_id)["agent_status"] != "blocked":
+                raise RpcError("invalid_keys", "nothing is waiting for an answer")
+            for key in keys:
+                k = key.lower()
+                if k == "up":
+                    menu["cursor"] = max(0, menu["cursor"] - 1)
+                elif k == "down":
+                    menu["cursor"] = min(len(menu["labels"]) - 1, menu["cursor"] + 1)
+                elif k == "enter":
+                    accepted = menu["cursor"] < len(menu["labels"]) - 1
+                    answer = "Approval accepted. Simulated task complete.\n" if accepted else \
+                             "Approval denied. Waiting for a new task.\n"
+                    if self.scenario.mode != "unchanged-output":
+                        self._change(pane_id, answer, "done" if accepted else "idle")
+                    return {"type": "pane_send_input", "ok": True}
+                else:
+                    raise RpcError("invalid_keys", "unsupported key " + key)
+            # Moving the pointer repaints the screen without answering it.
+            self._text[pane_id] = render_menu(menu)
+            self._revision[pane_id] += 1
+            return {"type": "pane_send_input", "ok": True}
+        if method in ("agent.send_keys", "agent.prompt"):
             pane_id = params.get("target")
             if not isinstance(pane_id, str):
                 raise RpcError("invalid_params", "target must be a pane id")
             agent = self._agent(pane_id)
-            if method == "agent.explain":
-                return {"type": "agent_explain", "explain": dict(agent)}
             if method == "agent.prompt":
                 if not isinstance(params.get("text"), str) or not params["text"].strip():
                     raise RpcError("invalid_params", "text must be nonempty")

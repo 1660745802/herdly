@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
@@ -57,9 +58,12 @@ internal fun TerminalDump(
     // Absolute line ordinals for stable LazyColumn keys. Index-based keys shift when older lines
     // are prepended, which re-anchors firstVisibleItemIndex to different content and jumps the view.
     val identityState = remember { mutableStateOf(emptyLineIndex<String>()) }
-    val lineIndex = remember(lines) {
-        advanceLineIndex(identityState.value, lines).also { identityState.value = it }
-    }
+    val lineIndex = remember(lines) { advanceLineIndex(identityState.value, lines) }
+    // Store the advanced window only after composition succeeds. Writing state inside the
+    // remember block mutated it during composition, which Compose forbids; a SideEffect keeps
+    // the same ordering (each poll advances from the last committed window) without the write
+    // leaking into a composition that might be discarded.
+    SideEffect { identityState.value = lineIndex }
     val listState = rememberLazyListState()
     val gridScroll = rememberScrollState()
 
@@ -135,8 +139,10 @@ internal fun TerminalDump(
                     // the edge. Framed rows — rules, tables, box borders — must not: wrapped, one
                     // `──────` became several short lines and every table row gained phantom
                     // leading `│` per wrap. Those keep the pane's own width and pan sideways, so
-                    // alignment survives and the frame still reads as a frame.
-                    val framed = hasBoxDrawing(line)
+                    // alignment survives and the frame still reads as a frame. The test is
+                    // proportion or table shape, not mere presence: a prose sentence with one
+                    // incidental `│` or `─` is still prose and must re-flow.
+                    val framed = isBoxRule(line)
                     Text(
                         text = ansiAnnotated(line, term.text, term.background),
                         style = textStyle,
@@ -159,19 +165,22 @@ internal fun TerminalDump(
 internal fun ansiCells(line: String): Int = terminalCells(stripAnsi(line))
 
 /**
- * Whether a row is a drawn line rather than text: `─────`, `━━━━`, `════`, a box edge or a
- * separator someone printed. Such a row must be painted once and clipped, never wrapped.
+ * Whether a row is a drawing rather than prose: a rule (`─────`, `━━━━`, `████`), a box edge,
+ * or a table row. Such a row keeps the pane's own width and pans sideways, never wraps.
  *
- * The test is proportion, not position: at least 8 box-drawing glyphs and at least half of the
- * visible cells being one. A sentence that happens to contain a dash is still a sentence.
+ * Two tests, because proportion alone misses half the frames:
+ * - Proportion: at least 8 box-drawing cells and at least half of the visible cells being one.
+ *   Catches rules and borders; a sentence that happens to contain a dash is still a sentence.
+ * - Table shape: the trimmed row opens and closes with a vertical box glyph (`│ name │ value │`).
+ *   A table body row is mostly text, so proportion would wrap it and break the columns; prose
+ *   with one incidental `│` fails the opens-and-closes check and still re-flows.
  */
-internal fun hasBoxDrawing(line: String): Boolean =
-    stripAnsi(line).any { it in '\u2500'..'\u257F' || it in '\u2580'..'\u259F' }
-
 internal fun isBoxRule(line: String): Boolean {
-    val plain = stripAnsi(line)
+    val plain = stripAnsi(line).trim()
+    if (plain.isEmpty()) return false
     var box = 0
     var cells = 0
+    var verticals = 0
     var index = 0
     while (index < plain.length) {
         val cp = plain.codePointAt(index)
@@ -179,10 +188,14 @@ internal fun isBoxRule(line: String): Boolean {
         if (width > 0) {
             cells += width
             if (isBoxGlyph(cp)) box += width
+            if (isVerticalBoxGlyph(cp)) verticals++
         }
         index += Character.charCount(cp)
     }
-    return box >= BOX_RULE_MIN_CELLS && box * 2 >= cells
+    if (box >= BOX_RULE_MIN_CELLS && box * 2 >= cells) return true
+    return verticals >= 2 &&
+        isVerticalBoxGlyph(plain.codePointAt(0)) &&
+        isVerticalBoxGlyph(plain.codePointBefore(plain.length))
 }
 
 private const val BOX_RULE_MIN_CELLS = 8
@@ -196,10 +209,21 @@ private fun isBoxGlyph(cp: Int): Boolean = when (cp) {
     else -> false
 }
 
+/** Vertical box glyphs a table draws its column separators with: │ ┃ ║ and dashed variants. */
+private fun isVerticalBoxGlyph(cp: Int): Boolean = when (cp) {
+    0x2502, 0x2503, 0x2551, 0x2506, 0x2507, 0x250A, 0x250B -> true
+    else -> false
+}
+
 /**
  * Terminal cells in plain text, counting code points (not UTF-16 units) with East-Asian width:
  * CJK/fullwidth/emoji occupy 2 cells, combining marks and zero-width characters 0, everything
  * else 1. Counting UTF-16 units mis-sized every CJK or emoji row and misaligned the grid.
+ *
+ * A tab advances to the next multiple of 8, the terminal convention. [terminalCellWidth] alone
+ * scores it 0 like any control character, but expansion depends on the current column, so it
+ * happens here: counting a tab as 0 measured tabbed rows narrower than they paint and left the
+ * horizontal pan short of the last columns.
  *
  * Limitation (deliberate): rows are still rendered as one Text each, not as a positioned cell
  * grid, so column alignment ultimately depends on the monospace font painting wide glyphs at
@@ -211,15 +235,20 @@ internal fun terminalCells(text: String): Int {
     var index = 0
     while (index < text.length) {
         val cp = text.codePointAt(index)
-        cells += terminalCellWidth(cp)
+        cells += if (cp == 0x09) TAB_STOP - cells % TAB_STOP else terminalCellWidth(cp)
         index += Character.charCount(cp)
     }
     return cells
 }
 
+private const val TAB_STOP = 8
+
 /**
  * Cell width of one code point. Mirrors the live renderer's heuristic in
- * `dev.herdwatch.term.VtScreen.charWidth` (private there); keep the two in sync.
+ * `dev.herdwatch.term.VtScreen.charWidth` (private there); keep the two in sync, except that
+ * the dump additionally sizes BMP dingbats as wide because the monospace font paints them at
+ * double advance. A tab is 0 here as a lone code point; [terminalCells] expands it to the next
+ * tab stop because the expansion depends on the column, not the glyph.
  */
 internal fun terminalCellWidth(cp: Int): Int {
     if (cp == 0 || cp < 0x20 || cp in 0x7F..0x9F) return 0
@@ -245,6 +274,7 @@ internal fun terminalCellWidth(cp: Int): Int {
         in 0xFE30..0xFE6F -> 2
         in 0xFF00..0xFF60 -> 2
         in 0xFFE0..0xFFE6 -> 2
+        in 0x2600..0x27BF -> 2         // BMP dingbats the mono font paints double-width
         in 0x1F300..0x1FAFF -> 2
         in 0x20000..0x3FFFD -> 2
         else -> 1

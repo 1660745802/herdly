@@ -115,7 +115,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import dev.herdwatch.ui.theme.agentStatusColor
 import dev.herdwatch.ui.motionMillis
-import dev.herdwatch.ui.design.NeoSegmented
 import dev.herdwatch.ui.design.spacing
 
 private val TerminalBackground: Color @Composable get() = LocalTerminalTokens.current.background
@@ -133,7 +132,7 @@ fun AgentScreen(
     /** Same request, but the reader asked for it: retries a failed read instead of staying quiet. */
     onLoadOlder: () -> Unit = onLoadMoreHistory,
     /** Answers whatever selector the pane is drawing (permissions, diffs, pickers). */
-    onChooseScreenRow: (ScreenMenu, ScreenMenuRow) -> Unit = { _, _ -> },
+    onChooseScreenRow: (ScreenMenu, Int) -> Unit = { _, _ -> },
     onReadingPosition: (String, ReadingPosition) -> Unit,
     onChoose: (AskOption) -> Unit,
     onVerifyOperation: () -> Unit,
@@ -229,11 +228,15 @@ fun AgentScreen(
         snapshotFlow { restoredPosition to ReadingPosition(paneOffset = paneScroll.value, following = stickToBottom, paused = userPaused) }
             .collect { (restored, position) -> if (restored) latestPositionCallback(agent.key, position) }
     }
-    LaunchedEffect(agent.key, pauseUpdates, selecting) { onReadingPaused(pauseUpdates || selecting) }
+    // The options sheet is a decision in progress: the screen it was read from must hold still
+    // while the reader chooses, exactly as it does for an approval.
+    LaunchedEffect(agent.key, pauseUpdates, selecting, optionsOpen) {
+        onReadingPaused(pauseUpdates || selecting || optionsOpen)
+    }
     val latestRefresh by rememberUpdatedState(onAutoRefresh)
     val currentSending by rememberUpdatedState(detail.sending)
     val currentLoading by rememberUpdatedState(detail.loading)
-    val currentPaused by rememberUpdatedState(pauseUpdates || selecting)
+    val currentPaused by rememberUpdatedState(pauseUpdates || selecting || optionsOpen)
     val transcript = remember(detail.text) { AgentTranscript.parse(detail.text) }
     // A snapshot we cannot cut into turns is still readable as one turn: the agent's current
     // screen, shown as a single message. Refusing to open the chat was the wrong answer — the
@@ -257,7 +260,9 @@ fun AgentScreen(
     // whole screen as one block — still useful for reading a long build log with wrapping, and far
     // better than a layout the reader cannot leave without hunting through a menu.
     val showChat = chatLayout
-    val visibleText = remember(detail.text) { condenseScreen(trimTrailingSpaces(detail.text)) }
+    // The terminal view is the raw screen. Condensing it deleted every `────` and `----` row, so
+    // ASCII tables lost their separators in the one view that promises to show what the pane shows.
+    val visibleText = remember(detail.text) { trimTrailingSpaces(detail.text) }
     LaunchedEffect(agent.key, paneScroll) {
         snapshotFlow {
             Triple(paneScroll.isScrollInProgress, paneScroll.canScrollForward, paneScroll.maxValue)
@@ -887,10 +892,15 @@ fun AgentScreen(
         }
     }
     }
-    if (optionsOpen && screenMenu != null) {
+    // Keep the sheet mounted even if the menu disappears underneath it. Closing it silently mid
+    // choice looks like the tap was ignored, and the reader never learns why.
+    if (optionsOpen) {
         ScreenMenuSheet(
             menu = screenMenu,
-            onChoose = { row -> optionsOpen = false; onChooseScreenRow(screenMenu, row) },
+            onChoose = { index ->
+                optionsOpen = false
+                screenMenu?.let { onChooseScreenRow(it, index) }
+            },
             onDismiss = { optionsOpen = false },
         )
     }
@@ -1471,6 +1481,19 @@ private fun TranscriptView(
 ) {
     val colors = ds()
     val haptics = LocalHapticFeedback.current
+    // A turn keeps its identity while its text grows, and keeps it when older turns are prepended.
+    // Position alone handed an open card's state to whatever slid into its slot; the text alone
+    // reset it on every poll. Role plus first line plus occurrence survives both.
+    val blockKeys = remember(blocks) {
+        val seen = HashMap<String, Int>()
+        blocks.map { block ->
+            val head = block.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(80).orEmpty()
+            val seed = "${block.role}:$head"
+            val nth = seen.getOrDefault(seed, 0)
+            seen[seed] = nth + 1
+            "$seed#$nth"
+        }
+    }
     Column(
         modifier.fillMaxWidth().fillMaxHeight().verticalScroll(scroll)
             // Selection inside a scrolling column of bubbles never reliably started on device (the
@@ -1536,14 +1559,17 @@ private fun TranscriptView(
             )
         }
         blocks.forEachIndexed { index, block ->
-            // Only the newest turn animates: it is the one that changed. Animating a list of
-            // forty cards on every poll is exactly the "everything jitters" effect users call
-            // cheap.
+            // Only the newest turn animates, and only when a turn actually arrives. Keying the rise
+            // on the text made the last card fade in again on every three-second poll while the
+            // agent was still typing — a pulse that reads as a glitch, not as news.
             val newest = index == blocks.lastIndex
-            if (newest && index > 0) {
-                NewestTurn(block.text) { TranscriptBlockView(block, askPending, newest) }
-            } else {
-                TranscriptBlockView(block, askPending, newest)
+            val stateKey = blockKeys.getOrElse(index) { block.text }
+            key(stateKey) {
+                if (newest && index > 0) {
+                    NewestTurn(blocks.size.toString()) { TranscriptBlockView(block, askPending, newest, stateKey) }
+                } else {
+                    TranscriptBlockView(block, askPending, newest, stateKey)
+                }
             }
         }
         // Our own sends appear immediately, even before the agent echoes them on the screen.
@@ -1657,6 +1683,7 @@ private fun TranscriptBlockView(
     block: TranscriptBlock,
     askPending: Boolean = false,
     newest: Boolean = false,
+    stateKey: String = block.text,
 ) {
     val colors = ds()
     val roleLabel = stringResource(
@@ -1683,9 +1710,9 @@ private fun TranscriptBlockView(
             }
         }
 
-        TranscriptRole.THINKING -> ThinkingBlock(block, roleLabel)
+        TranscriptRole.THINKING -> ThinkingBlock(block, roleLabel, stateKey)
 
-        TranscriptRole.TOOL -> ToolBlock(block, roleLabel)
+        TranscriptRole.TOOL -> ToolBlock(block, roleLabel, stateKey)
 
         TranscriptRole.SYSTEM -> Text(
             block.text,
@@ -1746,7 +1773,9 @@ private fun TranscriptBlockView(
                 // so a long session stays scannable.
                 // Keyed on the text alone: a block that stops being the newest must not snap shut
                 // under the reader's eyes, which is what re-keying on [newest] would do.
-                var expanded by remember(block.text) { mutableStateOf(!long || newest) }
+                // Keyed on the turn's identity, not its text: a streaming turn changes text every
+                // poll, and re-keying on that snapped the reader's open card shut again.
+                var expanded by remember(stateKey) { mutableStateOf(!long || newest) }
                 Column(
                     Modifier.fillMaxWidth().padding(DsSpace.m),
                     verticalArrangement = Arrangement.spacedBy(DsSpace.s),
@@ -1966,9 +1995,9 @@ internal fun collapseRepeatedBlock(text: String): String {
  * body text doubled the length of every turn and buried the sentence the user came to read.
  */
 @Composable
-private fun ThinkingBlock(block: TranscriptBlock, roleLabel: String) {
+private fun ThinkingBlock(block: TranscriptBlock, roleLabel: String, stateKey: String = block.text) {
     val colors = ds()
-    var expanded by remember(block.text) { mutableStateOf(false) }
+    var expanded by remember(stateKey) { mutableStateOf(false) }
     Column(
         Modifier
             .fillMaxWidth()
@@ -2010,9 +2039,9 @@ private fun ThinkingBlock(block: TranscriptBlock, roleLabel: String) {
 
 /** Tool output is evidence, not conversation: it collapses to one quiet line until asked for. */
 @Composable
-private fun ToolBlock(block: TranscriptBlock, roleLabel: String) {
+private fun ToolBlock(block: TranscriptBlock, roleLabel: String, stateKey: String = block.text) {
     val colors = ds()
-    var expanded by remember(block.text) { mutableStateOf(false) }
+    var expanded by remember(stateKey) { mutableStateOf(false) }
     NeoWell(Modifier.fillMaxWidth(), corner = DsRadius.control) {
         Column(
             Modifier
@@ -2079,8 +2108,8 @@ private fun ToolBlock(block: TranscriptBlock, roleLabel: String) {
  */
 @Composable
 private fun ScreenMenuSheet(
-    menu: ScreenMenu,
-    onChoose: (ScreenMenuRow) -> Unit,
+    menu: ScreenMenu?,
+    onChoose: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = ds()
@@ -2095,12 +2124,12 @@ private fun ScreenMenuSheet(
         ) {
             Text(stringResource(R.string.agent_options_title), style = DsTypography.title, color = colors.text)
             Text(
-                stringResource(R.string.agent_options_body),
+                stringResource(if (menu == null) R.string.agent_options_gone else R.string.agent_options_body),
                 style = DsTypography.body,
                 color = colors.textSoft,
             )
             Spacer(Modifier.height(DsSpace.m))
-            menu.rows.forEachIndexed { index, row ->
+            menu?.rows?.forEachIndexed { index, row ->
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -2131,10 +2160,15 @@ private fun ScreenMenuSheet(
             }
             Spacer(Modifier.height(DsSpace.s))
             NeoButton(
-                label = stringResource(R.string.agent_options_confirm),
-                onClick = { menu.rows.getOrNull(selected)?.let(onChoose) },
+                label = stringResource(
+                    if (menu == null) R.string.agent_options_close else R.string.agent_options_confirm,
+                ),
+                onClick = {
+                    if (menu == null) onDismiss()
+                    else if (selected in menu.rows.indices) onChoose(selected)
+                },
                 tone = NeoButtonTone.Primary,
-                enabled = selected in menu.rows.indices,
+                enabled = menu == null || selected in menu.rows.indices,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

@@ -178,4 +178,74 @@ class HistoryLoadTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test
+    fun `a quiet poll asks for the tail again after history was widened`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val agent = agent()
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val base = FakeHostConnection(host, Snapshot("test", 1, listOf(agent), HerdStructure()))
+            val requests = mutableListOf<Int>()
+            val client = object : HostConnection by base {
+                override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
+                    requests += lines
+                    return PaneText("screen of $lines", requests.size.toLong(), true)
+                }
+            }
+            val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("vm", vm)
+            runCurrent()
+            vm.openAgent(agent)
+            runCurrent()
+            vm.loadMoreHistory()
+            runCurrent()
+            vm.loadMoreHistory()
+            runCurrent()
+            // Back at the bottom the page is a live tail again. Re-using the widened width made
+            // every three-second poll re-download the archive the reader had scrolled through.
+            vm.refreshPaneQuietly()
+            runCurrent()
+            assertEquals(listOf(1200, 2400, 4800, 1200), requests)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `a full-width answer without the truncation flag is not proof of the earliest line`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val agent = agent()
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val base = FakeHostConnection(host, Snapshot("test", 1, listOf(agent), HerdStructure()))
+            val client = object : HostConnection by base {
+                override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
+                    // Exactly as many lines as asked for and no truncation flag: the host may have
+                    // stopped at its own cap, so "earliest" would be a claim we cannot support.
+                    return PaneText(List(lines) { "line $it" }.joinToString("\n"), 1L, false)
+                }
+            }
+            val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("vm", vm)
+            runCurrent()
+            vm.openAgent(agent)
+            runCurrent()
+            vm.loadMoreHistory()
+            runCurrent()
+            assertFalse(vm.ui.value.detail.historyEnded)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
 }

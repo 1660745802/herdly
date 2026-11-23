@@ -203,11 +203,6 @@ class HerdrClient internal constructor(
         return BridgeCodec.parseSnapshot(result, config.id, config.label)
     }
 
-    override suspend fun explain(target: String): JsonObject {
-        val body = request("agent.explain", buildJsonObject { put("target", target) })
-        return (body["explain"] as? JsonObject) ?: body
-    }
-
     override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
         val params = buildJsonObject {
             put("pane_id", paneId)

@@ -44,9 +44,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.launch
 
 
@@ -63,6 +60,12 @@ data class DetailState(
     val shownSeq: Long? = null,
     val truncated: Boolean = false,
     val error: String? = null,
+    /**
+     * A refusal the reader has not answered yet ("the options changed, nothing was sent"). Quiet
+     * polls must not erase it: the page resumes reading the moment a sheet closes, so a message
+     * cleared by the next poll is a decision that vanished without an explanation.
+     */
+    val errorSticky: Boolean = false,
     val loadedAt: Long? = null,
     /** How many lines from the tail we ask for. Grows when the reader scrolls to the top. */
     val historyLines: Int = PANE_READ_LINES,
@@ -80,6 +83,8 @@ data class DetailState(
     val revisionChangedAt: Long = 0L,
     /** Set once a wider read failed: the page stops retrying and says so inline instead. */
     val historyEnded: Boolean = false,
+    /** Width of the read that produced the text on screen, so "the host gave less than asked" is measurable. */
+    val readLines: Int = PANE_READ_LINES,
     /**
      * The last attempt to read further back failed, as opposed to "the host has nothing older".
      *
@@ -868,19 +873,73 @@ class AppViewModel(
      * TUI listens for, then press Enter. Nothing is typed as text, so prompts that have no numbers
      * (Yes/No confirmations, permission dialogs, diff reviews) all work the same way.
      */
-    fun chooseScreenRow(menu: ScreenMenu, row: ScreenMenuRow) {
+    fun chooseScreenRow(menu: ScreenMenu, index: Int) {
+        val page = ticket() ?: return
         val agent = _ui.value.detail.agent ?: return
-        val target = menu.rows.indexOf(row)
-        if (target < 0) return
-        val delta = target - menu.cursor
-        val keys = buildList {
-            repeat(kotlin.math.abs(delta)) { add(if (delta > 0) "down" else "up") }
-            add("enter")
+        // The row is addressed by position, not by value: two options can carry the same label, and
+        // comparing rows would silently answer the first one.
+        val chosen = menu.rows.getOrNull(index) ?: return
+        val shown = menu.rows.map { it.label }
+        val frozen = evidence(_ui.value.detail)
+        val operation = beginOperation(agent) ?: run {
+            updateDetail(page) { it.copy(error = Str.get(R.string.vm_menu_not_sent), errorSticky = true) }
+            return
         }
-        sendManual(
-            label = Str.get(R.string.vm_label_menu),
-            rpc = { repository.sendInput(it, null, keys) },
-        )
+        val preflightRequest = readGeneration
+        viewModelScope.launch {
+            var attempted = false
+            var accepted = false
+            var notice = Str.get(R.string.vm_send_cancelled, Str.get(R.string.vm_label_menu))
+            try {
+                // The screen the reader answered may be minutes old — scrolling up pauses reading.
+                // Re-read it and rebuild the walk from where the pointer is NOW, or refuse.
+                val fresh = repository.readPane(agent, PANE_READ_LINES)
+                currentCoroutineContext().ensureActive()
+                if (!matches(page) || !connected(agent) || preflightRequest != readGeneration) return@launch
+                val now = parseScreenMenu(fresh.text)
+                val target = now?.rows?.indexOfFirst { it.label == chosen.label } ?: -1
+                if (now == null || target < 0 || now.rows.map { it.label } != shown) {
+                    applyPane(page, fresh, agent.stateChangeSeq, paneOnly = !agent.hasAgent)
+                    // Nothing was sent, so this is a refusal, not a result: it stays on screen in
+                    // the error colour until the reader acts, instead of a green "done" lamp.
+                    notice = ""
+                    updateDetail(page) {
+                        it.copy(error = Str.get(R.string.vm_menu_changed), errorSticky = true)
+                    }
+                    return@launch
+                }
+                val delta = target - now.cursor
+                val keys = buildList {
+                    repeat(kotlin.math.abs(delta)) { add(if (delta > 0) "down" else "up") }
+                    add("enter")
+                }
+                attempted = true
+                operationRpc(request = { repository.sendInput(agent, null, keys) }) { accepted = true }
+                notice = ""
+                delay(600)
+                if (matches(page) && foreground) loadPane(agent)
+            } catch (cancelled: CancellationException) {
+                notice = if (accepted) {
+                    Str.get(R.string.vm_send_accepted_verify_cancelled, Str.get(R.string.vm_label_menu))
+                } else if (attempted) {
+                    Str.get(R.string.vm_send_interrupted, Str.get(R.string.vm_label_menu))
+                } else {
+                    Str.get(R.string.vm_send_cancelled, Str.get(R.string.vm_label_menu))
+                }
+                throw cancelled
+            } catch (t: Throwable) {
+                val label = Str.get(R.string.vm_label_menu)
+                notice = if (accepted) {
+                    Str.get(R.string.vm_send_accepted_followup_failed, label, dev.herdwatch.data.humanize(t))
+                } else if (attempted) {
+                    Str.get(R.string.vm_send_uncertain, label, dev.herdwatch.data.humanize(t))
+                } else {
+                    Str.get(R.string.vm_send_not_sent, label, dev.herdwatch.data.humanize(t))
+                }
+            } finally {
+                finishOperation(agent, operation, notice, attempted && !accepted, if (attempted) frozen else null)
+            }
+        }
     }
 
     /** Quiet reads still have their own request generation and retain visible read errors. */
@@ -931,7 +990,10 @@ class AppViewModel(
                 // agent has no status to compare, so only foreground affects its freshness.
                 stale = !foreground || (!paneOnly && _ui.value.repo.agents.none { agent ->
                     agent.key == page.agentKey && agent.stateChangeSeq == shownSeq
-                }), error = null,
+                }),
+                // New screen content does not answer a refusal. "Nothing was sent" stays until the
+                // reader acts on it; only an explicit refresh or a new action clears it.
+                error = if (current.errorSticky) current.error else null,
             )
         }
     }
@@ -939,10 +1001,15 @@ class AppViewModel(
     private fun loadPane(agent: Agent, quiet: Boolean = false, history: Boolean = false) {
         val page = ticket() ?: return
         if (!matches(page) || page.agentKey != agent.key || !foreground) return
-        val lines = _ui.value.detail.historyLines
+        // A quiet poll is a tail, not an archive. Re-using the widened history width made every
+        // three-second poll re-download everything the reader had ever scrolled back to.
+        val lines = if (history) _ui.value.detail.historyLines else PANE_READ_LINES
         val request = ++readGeneration
         loadJob?.cancel()
-        updateDetail(page) { it.copy(loading = !quiet, error = null) }
+        updateDetail(page) {
+            val keep = quiet && it.errorSticky
+            it.copy(loading = !quiet, error = if (keep) it.error else null, errorSticky = keep)
+        }
         loadJob = viewModelScope.launch {
             try {
                 val pane = repository.readPane(agent, lines, history = history)
@@ -952,11 +1019,18 @@ class AppViewModel(
                     // A history read that came back complete means the host had nothing older to
                     // give: the page should say "earliest" rather than silently ignoring the next
                     // swipe.
-                    if (history) updateDetail(page) {
+                    updateDetail(page) {
+                        // "Earliest" is a claim about the host's buffer, so it needs more than the
+                        // absence of a truncation flag: the host must have returned less than asked.
+                        val complete = !pane.truncated && pane.text.count { c -> c == '\n' } + 1 < lines
                         // Remember the width that actually came back. A failed retry must ask for
                         // that same width again, not for a bigger one: widening after a failure
                         // grows exactly the request that just timed out.
-                        it.copy(historyFrontier = lines, historyEnded = !pane.truncated)
+                        if (history) {
+                            it.copy(readLines = lines, historyFrontier = lines, historyEnded = complete)
+                        } else {
+                            it.copy(readLines = lines)
+                        }
                     }
                     // The page is on screen and the content has been rendered: this finished turn is
                     // no longer news. Only agents have a turn to acknowledge.
@@ -1016,9 +1090,10 @@ class AppViewModel(
         if (!force && (detail.loading || detail.historyFailed)) return
         if (!force && detail.historyEnded) return
         if (force) return retryWiderHistory(agent, detail)
-        // `truncated == false` means the host already returned its whole buffer; there is nothing
-        // further back to fetch. Say so once instead of leaving the reader pulling at a wall.
-        if (!detail.truncated && detail.text.isNotBlank()) {
+        // Nothing older to fetch only when the host returned LESS than we asked for. A full-width
+        // answer with no truncation flag can equally mean the host stopped at its own cap.
+        val returned = detail.text.count { it == '\n' } + 1
+        if (!detail.truncated && detail.text.isNotBlank() && returned < detail.readLines) {
             updateDetail(ticket() ?: return) { it.copy(historyEnded = true) }
             return
         }
@@ -1084,7 +1159,7 @@ class AppViewModel(
         // Invalidate reads already in flight, so they cannot restore pre-write evidence.
         readGeneration++
         loadJob?.cancel()
-        _ui.update { it.copy(detail = decorate(it.detail.copy(loading = false, stale = true, error = null))) }
+        _ui.update { it.copy(detail = decorate(it.detail.copy(loading = false, stale = true, error = null, errorSticky = false))) }
         return record
     }
 
@@ -1109,11 +1184,11 @@ class AppViewModel(
         val frozen = evidence(detail)
         val invalid = ApprovalPolicy.validate(frozen, option, frozen)
         if (invalid != null || !detail.canChoose) {
-            updateDetail(page) { it.copy(error = invalid ?: Str.get(R.string.vm_approval_verify_first)) }
+            updateDetail(page) { it.copy(error = invalid ?: Str.get(R.string.vm_approval_verify_first), errorSticky = true) }
             return
         }
         val operation = beginOperation(agent) ?: run {
-            updateDetail(page) { it.copy(error = Str.get(R.string.vm_approval_not_sent)) }
+            updateDetail(page) { it.copy(error = Str.get(R.string.vm_approval_not_sent), errorSticky = true) }
             return
         }
         val preflightRequest = readGeneration

@@ -36,7 +36,6 @@ interface HostConnection : AutoCloseable {
     suspend fun connect()
     suspend fun ping(): Pair<String?, Int?>
     suspend fun snapshot(): Snapshot
-    suspend fun explain(target: String): JsonObject
     suspend fun readPane(paneId: String, lines: Int = 400, source: String = "recent"): PaneText
     suspend fun sendKeys(paneId: String, keys: List<String>)
 

@@ -29,6 +29,35 @@ class ScenarioTests(unittest.TestCase):
     def read(self, session, pane="w1:p1"):
         return self.result(session, "pane.read", pane_id=pane)["read"]
 
+    def pointer_row(self, session, pane="w1:p1"):
+        text = self.read(session, pane)["text"]
+        return next(line for line in text.splitlines() if "\u276f" in line)
+
+    def test_selector_moves_the_pointer_and_only_enter_answers(self):
+        """The app drives a menu with arrow keys, so the fixture has to behave like one."""
+        for form in fake.MENU_FORMS:
+            with self.subTest(form=form):
+                session = fake.CannedSession(fake.Scenario(ask_form=form))
+                self.assertIn("1.", self.pointer_row(session))
+                before = self.read(session)["revision"]
+                self.result(session, "pane.send_input", pane_id="w1:p1", keys=["down", "down"])
+                moved = self.read(session)
+                self.assertIn("3.", self.pointer_row(session))
+                self.assertGreater(moved["revision"], before)
+                self.assertEqual(self.result(session, "session.snapshot")["agents"][0]["agent_status"],
+                                 "blocked")
+                self.result(session, "pane.send_input", pane_id="w1:p1", keys=["enter"])
+                self.assertIn("denied", self.read(session)["text"])
+
+    def test_selector_accepts_the_first_row_and_refuses_other_keys(self):
+        session = fake.CannedSession(fake.Scenario(ask_form="boxed"))
+        with self.assertRaises(AssertionError):
+            self.result(session, "pane.send_input", pane_id="w1:p1", keys=["x"])
+        self.result(session, "pane.send_input", pane_id="w1:p1", keys=["enter"])
+        self.assertIn("accepted", self.read(session)["text"])
+        with self.assertRaises(AssertionError):
+            self.result(session, "pane.send_input", pane_id="w1:p1", keys=["enter"])
+
     def test_approval_changes_revision_text_status_and_keeps_other_pane(self):
         session = fake.CannedSession()
         before = self.read(session)
@@ -227,7 +256,8 @@ class ScenarioTests(unittest.TestCase):
         first = self.read(session)
         self.result(session, "agent.send_keys", target="w1:p2", keys=["2"])
         self.assertEqual(self.read(session), first)
-        self.assertEqual(self.result(session, "agent.explain", target="w1:p2")["explain"]["agent_status"], "done")
+        agents = self.result(session, "session.snapshot")["agents"]
+        self.assertEqual(next(a for a in agents if a["pane_id"] == "w1:p2")["agent_status"], "done")
         self.assertEqual(self.read(session, "w1:p2")["revision"], 13)
 
     def test_bad_requests_and_unknown_target_do_not_mutate(self):

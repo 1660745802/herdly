@@ -35,19 +35,6 @@
     <string name="vm_rename_uncertain">重命名结果不确定，请核对远端状态。</string>
 
     <!-- explain：把 Herdr 的解释翻成几句话 -->
-    <string name="vm_explain_loading">Herdr 正在解释这个状态…</string>
-    <string name="vm_explain_failed">读不到解释：%1$s</string>
-    <string name="vm_explain_state">Herdr 判定：%1$s</string>
-    <string name="vm_explain_matched_rule">命中规则：%1$s</string>
-    <string name="vm_explain_detect_skipped_hook">屏幕识别已跳过：状态直接来自 agent 的生命周期钩子，不靠猜屏幕。</string>
-    <string name="vm_explain_detect_skipped_reason">屏幕识别已跳过：%1$s</string>
-    <string name="vm_explain_detect_skipped">屏幕识别已跳过。</string>
-    <string name="vm_visible_signal">可见信号：%1$s</string>
-    <string name="vm_visible_blocker">屏幕上有阻塞</string>
-    <string name="vm_visible_idle">屏幕上是空闲</string>
-    <string name="vm_visible_working">屏幕上在工作</string>
-    <string name="vm_explain_fallback_reason">降级原因：%1$s</string>
-    <string name="vm_explain_warning">注意：%1$s</string>
 
     <!-- 读屏 -->
     <string name="vm_read_failed">读取失败，显示上次内容：%1$s</string>
@@ -80,4 +67,6 @@
     <string name="vm_label_input">终端输入</string>
     <string name="vm_trust_failed">接受新密钥失败，请重试。</string>
     <string name="vm_label_menu">选择</string>
+    <string name="vm_menu_not_sent">主机未连接或有操作正在进行，选择未发送。</string>
+    <string name="vm_menu_changed">屏幕上的选项已经变了，没有发送。请重新看一眼再选。</string>
 </resources>
