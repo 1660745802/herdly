@@ -95,10 +95,13 @@
     padding:10px; border-radius:16px; background:var(--raised);
     border:1px solid var(--rim);
   }
-  /* The captures are full screens: some sections of the app are emptier than others, and
-     an empty list tail was eating half of every picture. Each plate shows a 9:19.5 screen
-     window instead, so the reader sees the part that has the content. */
-  .plate{aspect-ratio:9/19.5; overflow:hidden}
+  /* The captures are 640x1375 full screens. A plate matches that ratio exactly, so a full
+     shot (terminal, agent, fingerprint, settings) is never cropped — the terminal's key bar
+     sits at the very bottom of its capture and is the point of the shot. Lists whose content
+     ends mid-screen (inbox, hosts) mark their plate data-crop="tail": a shorter, top-anchored
+     window that cuts the empty tail off instead of scaling it into view. */
+  .plate{aspect-ratio:640/1375; overflow:hidden}
+  .plate[data-crop="tail"]{aspect-ratio:9/11}
   .plate img{display:block; width:100%; height:100%; object-fit:cover; object-position:top center; border-radius:10px; background:var(--deep)}
   .shot{margin:0}
   /* A phone screenshot is 2.15:1 — at column width it would tower over the copy and leave the
@@ -169,8 +172,6 @@
   footer .wrap{display:flex; gap:18px; flex-wrap:wrap; align-items:center}
 
   @media (max-width:560px){
-    /* the sync stamp is the first thing to go when the row is narrow */
-    .herd-top .right{display:none}
     .herd-why{padding-left:0}
   }
   @media (max-width:860px){
@@ -213,8 +214,8 @@
         </div>
         <p class="fine" data-i="fine">开源。没有账号，没有云端中转，没有遥测。</p>
       </div>
-      <div class="herd" role="img" aria-label="Herdly 任务页：三台机器四个 agent，其中一个正在等你决定">
-        <div class="herd-top"><b data-i="herd_h">任务</b><span data-i="herd_s">3 台机器 · 4 个 agent · 1 个在等你</span><span class="right" data-i="herd_t">刚刚同步</span></div>
+      <div class="herd" role="img" aria-label="Herdly 任务页示意：三台机器四个 agent，其中一个正在等你决定">
+        <div class="herd-top"><b data-i="herd_h">任务</b><span data-i="herd_s">3 台机器 · 4 个 agent · 1 个在等你</span><span class="right" data-i="herd_t">示意</span></div>
         <div class="herd-row wait">
           <div class="herd-who"><span class="dot" style="background:var(--warn)"></span><span class="name" data-i="herd_r1n">π - repo-audit</span><span class="host">build-01</span></div>
           <span class="herd-wait" data-i="herd_r1s">等待你决定</span>
@@ -255,7 +256,7 @@
             </div>
           </div>
           <figure class="shot">
-            <div class="plate"><img src="assets/inbox.webp" data-shot="inbox" width="640" height="1375" alt="Herdly 任务列表：四个 agent 按紧急度排列"></div>
+            <div class="plate" data-crop="tail"><img src="assets/inbox.webp" data-shot="inbox" width="640" height="1375" alt="Herdly 任务列表：四个 agent 按紧急度排列"></div>
             <figcaption data-i="cap_inbox">任务页</figcaption>
           </figure>
         </div>
@@ -315,7 +316,7 @@
         <div class="row flip">
           <div class="copy">
             <figure class="shot" style="margin:0 0 22px; max-width:250px">
-              <div class="plate"><img src="assets/hosts.webp" data-shot="hosts" width="640" height="1375" alt="Herdly 机器页：连接状态、agent 数与打开终端入口"></div>
+              <div class="plate" data-crop="tail"><img src="assets/hosts.webp" data-shot="hosts" width="640" height="1375" alt="Herdly 机器页：连接状态、agent 数与打开终端入口"></div>
               <figcaption data-i="cap_hosts">机器页</figcaption>
             </figure>
             <h3 data-i="s4a_h">第一次连接一定问你</h3>
@@ -416,7 +417,7 @@ const EN = {
   h1:"Leave the desk.<br>Do not lose<br>the <span>agent</span> that waits for you.",
   herd_h:"Tasks",
   herd_s:"3 machines · 4 agents · 1 waiting on you",
-  herd_t:"synced just now",
+  herd_t:"illustration",
   herd_r1n:"π - repo-audit", herd_r1s:"needs your call",
   herd_r1w:"Run the full test suite? Three options, printed verbatim",
   herd_r1k:"1 · 2 · 3",
@@ -483,6 +484,12 @@ const ALT_EN = {
   settings:"Herdly settings: language, theme, terminal text size and local security",
   fingerprint:"Herdly host key confirmation on first connection",
 };
+// The hero table is fabricated sample data, so its label says "illustration" in both
+// languages — and the aria-label must switch with it, like every other string.
+const HERD_ARIA = {
+  zh:"Herdly 任务页示意：三台机器四个 agent，其中一个正在等你决定",
+  en:"Illustration of Herdly's task page: three machines, four agents, one waiting on you",
+};
 const ALT_ZH = new Map();
 document.querySelectorAll("[data-shot]").forEach(img => ALT_ZH.set(img.dataset.shot, img.alt));
 const nodes = [...document.querySelectorAll("[data-i]")];
@@ -499,6 +506,7 @@ function apply(lang){
     img.alt = lang === "en" ? (ALT_EN[base] || img.alt) : (ALT_ZH.get(base) || img.alt);
   });
   document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+  document.querySelector(".herd").setAttribute("aria-label", lang === "en" ? HERD_ARIA.en : HERD_ARIA.zh);
   document.title = lang === "en"
     ? "Herdly — SSH terminal and agent watch for Android"
     : "Herdly — 手机上的 SSH 终端与 agent 值守";
