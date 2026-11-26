@@ -194,7 +194,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8.5h14M8 8.5V6.2A1.2 1.2 0 0 1 9.2 5h5.6A1.2 1.2 0 0 1 16 6.2v2.3M6.5 8.5v8A1.5 1.5 0 0 0 8 18h8a1.5 1.5 0 0 0 1.5-1.5v-8" stroke="#7B9BEA" stroke-width="1.6" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.4" fill="#7B9BEA"/></svg>
     Herdly
   </span>
-  <span class="spec" data-i="spec">v0.2.4　Android 8.0+</span>
+  <span class="spec" data-i="spec">v0.2.5　Android 8.0+</span>
   <span class="grow"></span>
   <div class="lang" role="group" aria-label="Language">
     <button type="button" data-lang="zh" aria-pressed="true">简体中文</button>
@@ -253,6 +253,7 @@
             <div class="kv">
               <div><b data-i="s1a_k1">完成 ≠ 已看过</b><span data-i="s1a_v1">跑完的 agent 只在你还没看过那一屏时才算「待查看」；进过一次就记为看过，同一分屏在列表、机器页和通知里同时安静下来。</span></div>
               <div><b data-i="s1a_k2">按需提醒</b><span data-i="s1a_v2">被阻塞一定提醒；只是完成时，只有你没看着那一屏才提醒。重连不会把一堆旧状态补发成通知。</span></div>
+              <div><b data-i="s1a_k3">问题直接写在列表里</b><span data-i="s1a_v3">在等你回答的 agent，它的问题原文单独一行写在名字下面，不点进去也能决定先开哪个。只读正在等待的那几个，读得短，有固定时间上限；预览读失败就不显示，列表照常。</span></div>
             </div>
           </div>
           <figure class="shot">
@@ -275,6 +276,7 @@
             <div class="kv">
               <div><b data-i="s2a_k1">两种读法</b><span data-i="s2a_v1">对话模式读内容，终端模式看原始屏幕，随时切换；解析不确定时它会说，而不是硬编一个漂亮的界面。</span></div>
               <div><b data-i="s2a_k2">不替你决定</b><span data-i="s2a_v2">没有自动批准，没有后台替你按键。每一次发送都是你点的。</span></div>
+              <div><b data-i="s2a_k3">答完一个，接着下一个</b><span data-i="s2a_v3">回答完一个 agent，输入区直接给出下一个在等你的 agent：三个审批就是三次点击，不用三次退回列表。「本会话」授权只在本次会话有效，不当成永久授权。</span></div>
             </div>
           </div>
           <figure class="shot">
@@ -298,6 +300,7 @@
               <div><b data-i="s3a_k1">按键条</b><span data-i="s3a_v1">Ctrl / Alt / Esc / Tab / ⇧Tab / ⌫ / 方向 / PgUp / PgDn 常驻两排，长按连发；双指缩放字号，双击补 Tab。</span></div>
               <div><b data-i="s3a_k2">状态来自程序</b><span data-i="s3a_v2">解析 OSC 7501，程序自己报 working / blocked / 进度时才显示状态条——不靠猜屏幕。</span></div>
               <div><b data-i="s3a_k3">断线不丢事</b><span data-i="s3a_v3">前台服务保持连接，网络恢复按 1/2/4/8 秒退避重连，并告诉你第几次；密码错误这类不会重试的问题直接说原因。</span></div>
+              <div><b data-i="s3a_k4">失败分类，只给下一步</b><span data-i="s3a_v4">连不上分四种：凭据不对、主机密钥变了、主机要一次性验证码、主机根本不给 shell。每种只给一个下一步——重连，或者去改这条连接；不给 shell 的不再重试。</span></div>
             </div>
           </div>
           <figure class="shot">
@@ -413,7 +416,7 @@
 <script>
 // Every string lives here, so switching language never re-fetches or re-renders the page.
 const EN = {
-  spec:"v0.2.4　Android 8.0+",
+  spec:"v0.2.5　Android 8.0+",
   h1:"Leave the desk.<br>Do not lose<br>the <span>agent</span> that waits for you.",
   herd_h:"Tasks",
   herd_s:"3 machines · 4 agents · 1 waiting on you",
@@ -439,17 +442,20 @@ const EN = {
   s1a_p:"An agent is either running or waiting for you. The list sorts by urgency — needs you &gt; finished unseen &gt; working &gt; idle — and names the machine, workspace and pane it belongs to.",
   s1a_k1:"Finished ≠ seen", s1a_v1:"A finished agent only claims attention until you have looked at that screen once. Open it and it is marked seen; the same pane goes quiet in the list, on the machine card and in the notification at the same time.",
   s1a_k2:"Alerts only when they matter", s1a_v2:"Being blocked always alerts. Merely finishing alerts only when that pane is not on your screen. A reconnect never replays a backlog of old states as notifications.",
+  s1a_k3:"The question is printed in the list", s1a_v3:"An agent waiting on you shows its actual question on its own line under its name, so you can pick which one to open without opening any. Only the waiting agents are read, briefly and within a fixed time budget; a failed preview read never breaks the list.",
   s2:"Approvals show the screen, not a guessed summary",
   s2a_h:"The options are the lines the agent printed",
   s2a_p:"Herdly does not rewrite the agent's question. It lays out the literal command, every option and its scope: once, this session, or standing. Standing grants are flagged in red, and the question and context are re-checked before anything is sent.",
   s2a_k1:"Two ways to read", s2a_v1:"Chat mode reads the content, terminal mode shows the raw screen; switch at any time. When parsing is unsure it says so instead of inventing a tidy interface.",
   s2a_k2:"Never decides for you", s2a_v2:"No auto-approval, no background key presses. Every send is one you tapped.",
+  s2a_k3:"Answer one, get the next", s2a_v3:"After you answer an agent, the composer offers the next one that is waiting: three approvals are three taps, not three trips back to the list. A grant scoped to this session stays scoped to this session; it is never treated as standing.",
   s3:"A competent terminal first",
   s3a_h:"Completeness you rarely get on a phone",
   s3a_p:"A VT parser written for this app: 16/256/truecolour, bold, italic, underline, the alternate screen (vim, less, htop and tmux all work), 5000 lines of scrollback, bracketed paste, find and copy.",
   s3a_k1:"Key bar", s3a_v1:"Ctrl / Alt / Esc / Tab / ⇧Tab / ⌫ / arrows / PgUp / PgDn in two fixed rows, with long-press repeat. Pinch to resize text, double-tap for Tab.",
   s3a_k2:"Status from the program", s3a_v2:"OSC 7501 is parsed, so a status chip appears only when the program itself reports working / blocked / progress — never guessed from pixels.",
   s3a_k3:"A drop does not lose the thread", s3a_v3:"A foreground service holds the SSH session; when the network returns it retries at 1/2/4/8 seconds and tells you which attempt it is. Problems that must not be retried, like a wrong password, say why instead.",
+  s3a_k4:"Failures come in kinds", s3a_v4:"A failed connection is one of four kinds: wrong credentials, a changed host key, a host asking for a one-time code, or a host that refuses to give a shell at all. Each shows a single next step — reconnect, or edit the connection. A refused shell is never retried.",
   s4:"Credentials and trust stay on the phone",
   s4a_h:"The first connection always asks you",
   s4a_p:"The host key fingerprint (with its algorithm) is shown before any credential is sent. If it changes later, the connection stops and waits for you again — it is never trusted silently.",
@@ -519,6 +525,9 @@ document.querySelectorAll(".lang button").forEach(b =>
 let start = null;
 try { start = localStorage.getItem("herdly-lang"); } catch(e){}
 if (!start) start = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
+// A shared link can pick the language: ?lang=en wins over the stored choice.
+const asked = new URLSearchParams(location.search).get("lang");
+if (asked === "en" || asked === "zh") start = asked;
 apply(start);
 </script>
 </body>
