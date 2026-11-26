@@ -2,6 +2,7 @@ package dev.herdwatch.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -9,6 +10,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +51,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -63,6 +69,7 @@ import dev.herdwatch.model.HerdTab
 import dev.herdwatch.model.HerdWorkspace
 import dev.herdwatch.model.HostRuntime
 import dev.herdwatch.ui.design.DsElev
+import dev.herdwatch.ui.design.DsMotion
 import dev.herdwatch.ui.design.DsRadius
 import dev.herdwatch.ui.design.DsSpace
 import dev.herdwatch.ui.design.DsTypography
@@ -88,6 +95,7 @@ import dev.herdwatch.ui.theme.statusPalette
 import dev.herdwatch.ui.theme.statusColor
 import dev.herdwatch.ui.design.spacing
 import androidx.compose.ui.semantics.Role
+import kotlinx.coroutines.delay
 
 /**
  * Workspace > tab > pane tree.
@@ -99,8 +107,12 @@ import androidx.compose.ui.semantics.Role
  * what will end.
  *
  * [onOpenAgent] is optional: App.kt wires it, so agent panes get a trailing chevron and tapping
- * opens the agent instead. A caller that leaves it out falls back to focusing the pane, and the
- * "Open agent" menu entry renders disabled with a reason.
+ * opens the agent instead. A caller that leaves it out renders the "Open agent" menu entry
+ * disabled with a reason.
+ *
+ * Tapping a shell row calls [onOpenPane] — navigation only, never a remote mutation (App.kt wires
+ * it to the pane detail page, same destination as the inbox). Focusing a pane stays an explicit
+ * overflow-menu entry so the remote "focus" mutation is always a deliberate act.
  */
 @Composable
 fun StructureScreen(
@@ -122,6 +134,7 @@ fun StructureScreen(
     onRenamePane: (String, String) -> Unit,
     currentAgents: List<Agent>? = null,
     onOpenAgent: ((Agent) -> Unit)? = null,
+    onOpenPane: (hostId: String, paneId: String) -> Unit = { _, _ -> },
 ) {
     val structure = runtime.structure
     val colors = ds()
@@ -148,6 +161,38 @@ fun StructureScreen(
     }
     val requestRename: (String, String, String) -> Unit = { type, id, label ->
         renaming = RenameTarget(type, id, label)
+    }
+    // Close/split confirmations are accepted before the snapshot round trip lands. Each affected
+    // row carries a quiet "syncing" marker until the tree actually changes (or a bounded timeout
+    // passes), so a slow link reads as "working", not "failed" — and cannot be re-fired.
+    var pendingEdits by remember { mutableStateOf<Map<String, StructurePendingEdit>>(emptyMap()) }
+    // Fingerprint of the target's neighbourhood: "" once the target is gone, the sorted sibling
+    // ids otherwise. A close clears the marker when the row disappears; a split clears it when a
+    // new sibling pane appears in the same tab.
+    fun pendingSignature(type: String, id: String): String = when (type) {
+        "workspace" -> if (structure.workspaces.none { it.id == id }) "" else
+            "w:" + structure.tabs.filter { it.workspaceId == id }.map { it.id }.sorted().joinToString(",")
+        "tab" -> if (structure.tabs.none { it.id == id }) "" else
+            "t:" + structure.panes.filter { it.tabId == id }.map { it.id }.sorted().joinToString(",")
+        else -> structure.panes.firstOrNull { it.id == id }?.let { pane ->
+            "p:" + structure.panes.filter { it.tabId == pane.tabId }.map { it.id }.sorted().joinToString(",")
+        } ?: ""
+    }
+    val markPending: (String, String) -> Unit = { type, id ->
+        pendingEdits = pendingEdits + (id to StructurePendingEdit(type, pendingSignature(type, id), System.currentTimeMillis()))
+    }
+    LaunchedEffect(pendingEdits, structure) {
+        while (pendingEdits.isNotEmpty()) {
+            val signatures = pendingEdits.entries.associate { (id, edit) -> id to pendingSignature(edit.type, id) }
+            val pruned = pruneStructurePending(pendingEdits, signatures, System.currentTimeMillis())
+            if (pruned.size != pendingEdits.size) pendingEdits = pruned
+            if (pruned.isEmpty()) break
+            delay(500)
+        }
+    }
+    val splitWithPending: (String, String) -> Unit = { paneId, direction ->
+        markPending("pane", paneId)
+        onSplit(paneId, direction)
     }
     Column(Modifier.fillMaxSize()) {
         NeoPageHeader(
@@ -240,9 +285,11 @@ fun StructureScreen(
                     onCreateTab = { onCreateTab(workspace.id) },
                     onFocusTab = onFocusTab,
                     onFocusPane = onFocusPane,
-                    onSplit = onSplit,
+                    onSplit = splitWithPending,
                     onStartAgent = onStartAgent,
                     onOpenAgent = onOpenAgent,
+                    onOpenPane = { paneId -> onOpenPane(runtime.host.id, paneId) },
+                    pendingIds = pendingEdits.keys,
                     onRequestClose = requestClose,
                     onRequestRename = requestRename,
                 )
@@ -305,7 +352,8 @@ fun StructureScreen(
                 confirmLabel = stringResource(R.string.common_close),
                 onConfirm = {
                     // Re-checked here too: the composition that drew the dialog may be a poll old.
-                    if (targetExists(target.type, target.id)) {
+                    if (targetExists(target.type, target.id) && target.id !in pendingEdits) {
+                        markPending(target.type, target.id)
                         when (target.type) {
                             "workspace" -> onCloseWorkspace(target.id)
                             "tab" -> onCloseTab(target.id)
@@ -316,6 +364,8 @@ fun StructureScreen(
                 },
                 dismissLabel = stringResource(R.string.common_cancel),
                 destructive = true,
+                // Non-repeating: a close already awaiting its snapshot cannot be confirmed again.
+                confirmEnabled = target.id !in pendingEdits,
             )
         }
     }
@@ -331,6 +381,29 @@ private val CloseTargetSaver: Saver<CloseTarget?, Any> = listSaver(
 )
 
 private data class RenameTarget(val type: String, val id: String, val label: String)
+
+/**
+ * A structure edit (close/split) that was accepted locally and is awaiting its snapshot receipt.
+ * [signature] fingerprints the target's neighbourhood at confirm time; the marker clears when the
+ * live signature differs (row gone, sibling added) or after [STRUCTURE_PENDING_TIMEOUT_MILLIS].
+ */
+internal data class StructurePendingEdit(val type: String, val signature: String, val startedAtMillis: Long)
+
+/** Bounded wait: a marker never outlives this even if the snapshot never confirms the change. */
+internal const val STRUCTURE_PENDING_TIMEOUT_MILLIS = 20_000L
+
+/**
+ * Keeps only entries whose neighbourhood is still unchanged and whose timeout has not elapsed.
+ * An id missing from [currentSignatures] counts as changed (the row is gone — receipt received).
+ */
+internal fun pruneStructurePending(
+    pending: Map<String, StructurePendingEdit>,
+    currentSignatures: Map<String, String>,
+    nowMillis: Long,
+    timeoutMillis: Long = STRUCTURE_PENDING_TIMEOUT_MILLIS,
+): Map<String, StructurePendingEdit> = pending.filter { (id, edit) ->
+    currentSignatures[id] == edit.signature && nowMillis - edit.startedAtMillis < timeoutMillis
+}
 
 @Composable
 private fun typeName(type: String): String = when (type) {
@@ -409,6 +482,13 @@ private fun SummaryCard(
                     modifier = Modifier.weight(1f),
                 )
             }
+            // The footer hint's first sentence lives here, where it is actually seen.
+            Text(
+                stringResource(R.string.structure_summary_hint),
+                style = DsTypography.caption,
+                color = colors.textFaint,
+                modifier = Modifier.padding(top = DsSpace.xs),
+            )
             Spacer(Modifier.height(DsSpace.m))
             Row(
                 Modifier.fillMaxWidth(),
@@ -480,11 +560,19 @@ private fun WorkspaceCard(
     onSplit: (String, String) -> Unit,
     onStartAgent: (String?) -> Unit,
     onOpenAgent: ((Agent) -> Unit)?,
+    onOpenPane: (String) -> Unit,
+    pendingIds: Set<String>,
     onRequestClose: (String, String, String) -> Unit,
     onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var expanded by rememberSaveable(workspace.id) { mutableStateOf(defaultExpanded) }
+    val pending = workspace.id in pendingIds
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (pending) 0.55f else 1f,
+        animationSpec = tween(motionMillis(DsMotion.quick)),
+        label = "ws-pending-dim",
+    )
     val expandedState = stringResource(R.string.structure_state_expanded)
     val collapsedState = stringResource(R.string.structure_state_collapsed)
     val tabs = structure.tabsOf(workspace.id)
@@ -512,7 +600,7 @@ private fun WorkspaceCard(
             ) {
                 RotatingChevron(expanded = expanded, contentDescription = null)
                 Spacer(Modifier.width(DsSpace.s))
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).alpha(contentAlpha)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             workspace.label,
@@ -544,6 +632,23 @@ private fun WorkspaceCard(
                         color = colors.textSoft,
                         maxLines = 2,
                     )
+                    if (pending) {
+                        Text(
+                            stringResource(R.string.structure_pending_sync),
+                            style = DsTypography.caption,
+                            color = colors.textSoft,
+                        )
+                    }
+                }
+                // A collapsed card still offers the most common verb: new tab, one tap, same
+                // action as the overflow entry. Expanded cards keep the labelled button below.
+                if (!expanded) {
+                    NeoIconButton(
+                        glyph = NeoGlyph.Plus,
+                        onClick = onCreateTab,
+                        contentDescription = stringResource(R.string.structure_new_tab),
+                        enabled = !pending,
+                    )
                 }
                 Box {
                     NeoIconButton(
@@ -556,7 +661,7 @@ private fun WorkspaceCard(
                         NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("workspace", workspace.id, workspace.label) })
                         NeoMenuItem(label = stringResource(R.string.structure_new_tab), icon = NeoGlyph.Plus, onClick = { menu = false; onCreateTab() })
                         NeoMenuDivider()
-                        NeoMenuItem(label = stringResource(R.string.structure_close_workspace), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("workspace", workspace.id, closeDetail) })
+                        NeoMenuItem(label = stringResource(R.string.structure_close_workspace), icon = NeoGlyph.Close, danger = true, enabled = !pending, onClick = { menu = false; onRequestClose("workspace", workspace.id, closeDetail) })
                     }
                 }
             }
@@ -608,6 +713,8 @@ private fun WorkspaceCard(
                                 onSplit = onSplit,
                                 onStartAgent = onStartAgent,
                                 onOpenAgent = onOpenAgent,
+                                onOpenPane = onOpenPane,
+                                pendingIds = pendingIds,
                                 onRequestClose = onRequestClose,
                                 onRequestRename = onRequestRename,
                             )
@@ -641,11 +748,19 @@ private fun TabBlock(
     onSplit: (String, String) -> Unit,
     onStartAgent: (String?) -> Unit,
     onOpenAgent: ((Agent) -> Unit)?,
+    onOpenPane: (String) -> Unit,
+    pendingIds: Set<String>,
     onRequestClose: (String, String, String) -> Unit,
     onRequestRename: (String, String, String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var expanded by rememberSaveable(tab.id) { mutableStateOf(defaultExpanded) }
+    val pending = tab.id in pendingIds
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (pending) 0.55f else 1f,
+        animationSpec = tween(motionMillis(DsMotion.quick)),
+        label = "tab-pending-dim",
+    )
     val expandedState = stringResource(R.string.structure_state_expanded)
     val collapsedState = stringResource(R.string.structure_state_collapsed)
     val colors = ds()
@@ -674,7 +789,7 @@ private fun TabBlock(
                 size = 7.dp,
             )
             Spacer(Modifier.width(DsSpace.s))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).alpha(contentAlpha)) {
                 Text(
                     stringResource(
                         R.string.structure_tab_title,
@@ -697,6 +812,13 @@ private fun TabBlock(
                     color = colors.textSoft,
                     maxLines = 2,
                 )
+                if (pending) {
+                    Text(
+                        stringResource(R.string.structure_pending_sync),
+                        style = DsTypography.caption,
+                        color = colors.textSoft,
+                    )
+                }
             }
             RotatingChevron(expanded = expanded, contentDescription = null)
             Box {
@@ -722,7 +844,7 @@ private fun TabBlock(
                     }
                     NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("tab", tab.id, tab.label) })
                     NeoMenuDivider()
-                    NeoMenuItem(label = stringResource(R.string.structure_close_tab), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("tab", tab.id, closeDetail) })
+                    NeoMenuItem(label = stringResource(R.string.structure_close_tab), icon = NeoGlyph.Close, danger = true, enabled = !pending, onClick = { menu = false; onRequestClose("tab", tab.id, closeDetail) })
                 }
             }
         }
@@ -750,10 +872,12 @@ private fun TabBlock(
                                 agent = currentAgents?.firstOrNull { it.hostId == hostId && it.paneId == pane.id },
                                 availableShell = pane.id in availablePaneIds,
                                 occupancyAvailable = occupancyAvailable,
+                                pending = pane.id in pendingIds,
                                 onFocusPane = onFocusPane,
                                 onSplit = onSplit,
                                 onStartAgent = onStartAgent,
                                 onOpenAgent = onOpenAgent,
+                                onOpenPane = onOpenPane,
                                 onRequestClose = onRequestClose,
                                 onRequestRename = onRequestRename,
                             )
@@ -771,10 +895,12 @@ private fun PaneRow(
     agent: Agent?,
     availableShell: Boolean,
     occupancyAvailable: Boolean,
+    pending: Boolean,
     onFocusPane: (String) -> Unit,
     onSplit: (String, String) -> Unit,
     onStartAgent: (String?) -> Unit,
     onOpenAgent: ((Agent) -> Unit)?,
+    onOpenPane: (String) -> Unit,
     onRequestClose: (String, String, String) -> Unit,
     onRequestRename: (String, String, String) -> Unit,
 ) {
@@ -797,9 +923,23 @@ private fun PaneRow(
     val paneStatusLabel = stringResource(pane.status.labelRes)
     val cwdBase = pane.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
     val colors = ds()
-    // Tapping opens the agent only when the caller wired onOpenAgent; otherwise it focuses the
-    // pane, and the chevron stays hidden so the row never promises a navigation it cannot do.
+    // Tapping is navigation only: an agent row opens the agent (when wired), a shell row opens
+    // the pane detail — the same destination the inbox uses. The remote "focus" mutation lives
+    // exclusively in the overflow menu, so an accidental tap never touches the host.
     val opensAgent = agent != null && onOpenAgent != null
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressWash by animateColorAsState(
+        targetValue = if (pressed) colors.well else Color.Transparent,
+        animationSpec = tween(motionMillis(DsMotion.press)),
+        label = "pane-row-press",
+    )
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (pending) 0.55f else 1f,
+        animationSpec = tween(motionMillis(DsMotion.quick)),
+        label = "pane-pending-dim",
+    )
+    val syncingLabel = stringResource(R.string.structure_pending_sync)
     val closeDetail = if (agent != null) {
         stringResource(R.string.structure_close_pane_agent_body, agent.name)
     } else {
@@ -809,12 +949,16 @@ private fun PaneRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(DsRadius.control))
+            .background(pressWash)
             .clickable(
+                interactionSource = interaction,
+                indication = null,
                 role = Role.Button,
                 onClickLabel = if (opensAgent) stringResource(R.string.structure_open_agent_label, displayName)
-                else stringResource(R.string.structure_focus_pane_label, paneLabel),
+                else stringResource(R.string.structure_open_pane_label, paneLabel),
             ) {
-                if (opensAgent) onOpenAgent!!(agent!!) else onFocusPane(pane.id)
+                if (opensAgent) onOpenAgent!!(agent!!) else onOpenPane(pane.id)
             }
             .semantics { stateDescription = paneStatusLabel }
             .padding(vertical = DsSpace.xs),
@@ -824,9 +968,10 @@ private fun PaneRow(
             color = statusColor(pane.status, statusPalette()),
             pulse = pane.status == AgentStatus.WORKING,
             size = 7.dp,
+            modifier = Modifier.alpha(contentAlpha),
         )
         Spacer(Modifier.width(DsSpace.s))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).alpha(contentAlpha)) {
             Text(
                 // The row leads with what differs from its siblings: the agent (or shell),
                 // never the repeated word "pane".
@@ -838,6 +983,8 @@ private fun PaneRow(
             )
             Text(
                 listOfNotNull(
+                    // A quiet receipt for a close/split still awaiting its snapshot round trip.
+                    syncingLabel.takeIf { pending },
                     pane.id,
                     paneStatusLabel,
                     // The directory is already the row's name when it is a shell, so repeating it
@@ -851,14 +998,13 @@ private fun PaneRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (opensAgent) {
-            NeoIcon(
-                NeoGlyph.ChevronRight,
-                modifier = Modifier.size(18.dp),
-                tint = colors.textSoft,
-                contentDescription = null,
-            )
-        }
+        // Every row now navigates on tap, so every row carries the chevron that promises it.
+        NeoIcon(
+            NeoGlyph.ChevronRight,
+            modifier = Modifier.size(18.dp),
+            tint = colors.textSoft,
+            contentDescription = null,
+        )
         Box {
             NeoIconButton(
                 glyph = NeoGlyph.More,
@@ -878,7 +1024,7 @@ private fun PaneRow(
                         )
                     }
                 } else if (availableShell) {
-                    NeoMenuItem(label = stringResource(R.string.structure_start_agent), icon = NeoGlyph.Play, onClick = { menu = false; onStartAgent(pane.id) })
+                    NeoMenuItem(label = stringResource(R.string.structure_start_agent), icon = NeoGlyph.Play, enabled = !pending, onClick = { menu = false; onStartAgent(pane.id) })
                 } else {
                     NeoMenuItem(
                         label = if (!occupancyAvailable) stringResource(R.string.structure_start_agent_unverified)
@@ -891,10 +1037,10 @@ private fun PaneRow(
                 NeoMenuItem(label = stringResource(R.string.structure_focus_pane), onClick = { menu = false; onFocusPane(pane.id) })
                 NeoMenuItem(label = stringResource(R.string.structure_rename), icon = NeoGlyph.Edit, onClick = { menu = false; onRequestRename("pane", pane.id, pane.title) })
                 NeoMenuDivider()
-                NeoMenuItem(label = stringResource(R.string.structure_split_right), onClick = { menu = false; onSplit(pane.id, "right") })
-                NeoMenuItem(label = stringResource(R.string.structure_split_down), onClick = { menu = false; onSplit(pane.id, "down") })
+                NeoMenuItem(label = stringResource(R.string.structure_split_right), enabled = !pending, onClick = { menu = false; onSplit(pane.id, "right") })
+                NeoMenuItem(label = stringResource(R.string.structure_split_down), enabled = !pending, onClick = { menu = false; onSplit(pane.id, "down") })
                 NeoMenuDivider()
-                NeoMenuItem(label = stringResource(R.string.structure_close_pane), icon = NeoGlyph.Close, danger = true, onClick = { menu = false; onRequestClose("pane", pane.id, closeDetail) })
+                NeoMenuItem(label = stringResource(R.string.structure_close_pane), icon = NeoGlyph.Close, danger = true, enabled = !pending, onClick = { menu = false; onRequestClose("pane", pane.id, closeDetail) })
             }
         }
     }
@@ -938,10 +1084,13 @@ fun StartAgentSheet(
     val workspace = host.structure.workspaces.firstOrNull { it.id == selectedPane?.workspaceId }
     val tab = host.structure.tabs.firstOrNull { it.id == selectedPane?.tabId }
     var kind by rememberSaveable(host.host.id) { mutableStateOf("claude") }
-    var name by rememberSaveable(host.host.id) { mutableStateOf("claude") }
+    val usedNames = currentAgents.orEmpty().filter { it.hostId == host.host.id }.map { it.name }.toSet()
+    // Same suggestion rule as NewTaskSheet: a second "claude" starts as claude-2, never as a
+    // greyed-out dead end the user has to rename by hand.
+    var name by rememberSaveable(host.host.id) { mutableStateOf(suggestedAgentName("claude", usedNames)) }
     var resume by rememberSaveable(host.host.id) { mutableStateOf(false) }
     var argsText by rememberSaveable(host.host.id) { mutableStateOf("") }
-    val duplicateName = currentAgents.orEmpty().any { it.hostId == host.host.id && it.name == name.trim() }
+    val duplicateName = name.trim() in usedNames
     val resumeLabel = stringResource(R.string.structure_resume_label)
     val colors = ds()
     val invalidName = duplicateName || name.isBlank()
@@ -956,7 +1105,7 @@ fun StartAgentSheet(
 
     fun applyKind(next: String) {
         kind = next
-        name = next
+        name = suggestedAgentName(next, usedNames)
         if (resume) argsText = AppViewModel.resumeArgs(next).joinToString("\n")
     }
 
@@ -979,8 +1128,13 @@ fun StartAgentSheet(
             Text(stringResource(R.string.structure_target_pane), style = DsTypography.caption, color = colors.textSoft)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(DsSpace.s), modifier = Modifier.padding(vertical = DsSpace.xs)) {
                 items(candidates, key = { it.id }) { pane ->
+                    // Same naming rule as PaneRow: a shell's title is the long "user@host" string
+                    // that truncates to the same prefix on every chip; the directory is the name
+                    // a person recognises.
+                    val chipName = pane.cwd?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+                        ?: pane.title.ifBlank { pane.id }
                     NeoChip(
-                        label = "${pane.title.ifBlank { pane.id }} · ${pane.id}",
+                        label = "$chipName · ${pane.id}",
                         selected = paneId == pane.id,
                         onClick = { paneId = pane.id },
                     )
@@ -1025,7 +1179,7 @@ fun StartAgentSheet(
             )
             // NeoField 没有 isError 态：校验文案放在字段下方，错误时用 danger 色。
             Text(
-                if (duplicateName) stringResource(R.string.structure_duplicate_name)
+                if (duplicateName) stringResource(R.string.structure_duplicate_name, suggestedAgentName(name.trim(), usedNames))
                 else stringResource(R.string.structure_unique_name_hint),
                 style = DsTypography.caption,
                 color = if (invalidName) colors.danger else colors.textFaint,

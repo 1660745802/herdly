@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Inbox: header -->
-    <string name="inbox_subtitle_pocket">Herdr tasks on your phone</string>
+    <string name="inbox_subtitle_pocket">SSH terminal on your phone</string>
     <!-- %1$s: needs-attention phrase; %2$s: agent count phrase. Connection status lives elsewhere. -->
 
     <!-- Inbox: search -->
@@ -25,8 +25,8 @@
     <!-- Inbox: host strip -->
     <string name="inbox_host_all">All</string>
     <plurals name="inbox_host_waiting">
-        <item quantity="one">%1$d waiting</item>
-        <item quantity="other">%1$d waiting</item>
+        <item quantity="one">%1$d needs you</item>
+        <item quantity="other">%1$d need you</item>
     </plurals>
     <string name="inbox_host_online">Online</string>
     <string name="inbox_host_connecting">Connecting</string>
@@ -54,11 +54,11 @@
     <string name="inbox_queue_empty">Nothing needs you right now</string>
 
     <!-- Inbox: first-run setup -->
-    <string name="inbox_setup_title">Herdr in your pocket</string>
-    <string name="inbox_setup_body">Herdly does not run agents for you; it only lets you view and approve.\n\n1. Install Herdr on the host and make sure the phone can log in over SSH\n2. Check that the bridge is reachable\n3. Add a machine — the tasks page lists every agent</string>
+    <string name="inbox_setup_title">Add your first machine</string>
+    <string name="inbox_setup_body">All it needs is SSH. Add a machine, then open its terminal from the Machines tab.\n\nIf the host can run herdr remote-api-bridge, every agent is listed here for you to view and approve.</string>
     <string name="inbox_add_host">Add machine</string>
     <string name="inbox_copy_check_command">Copy check command</string>
-    <string name="inbox_check_command_hint">Run that command on the host; it should print herdr-api-bridge-v1.</string>
+    <string name="inbox_check_command_hint">Optional, and only for hosts with Herdr. The copied command is herdr remote-api-bridge --check; it should print herdr-api-bridge-v1.</string>
 
     <!-- Inbox: agent row -->
     <string name="inbox_stale_snapshot">Snapshot stale · %1$s</string>

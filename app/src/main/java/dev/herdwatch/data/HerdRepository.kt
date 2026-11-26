@@ -2,6 +2,7 @@ package dev.herdwatch.data
 
 import com.jcraft.jsch.JSchException
 import dev.herdwatch.R
+import dev.herdwatch.domain.AskParser
 import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.Agent
 import dev.herdwatch.model.AgentStatus
@@ -641,7 +642,14 @@ class HerdRepository internal constructor(
             val prev = marks[agent.key]
             val seen = if (prev?.status == agent.status) prev else Seen(agent.status, now)
             marks[agent.key] = seen
-            agent.copy(sinceMillis = seen.since)
+            // Keep the triage preview across snapshots while the status holds, so a capped-out
+            // agent does not flicker between question and bare elapsed time every cycle. A
+            // status change drops it: the question belonged to the old state.
+            val previous = _state.value.agents.firstOrNull { it.key == agent.key }
+            agent.copy(
+                sinceMillis = seen.since,
+                previewQuestion = previous?.previewQuestion.takeIf { prev?.status == agent.status },
+            )
         }
         val liveKeys = incoming.map { it.key }.toSet()
         marks.keys.removeAll { it.startsWith("$hostId:") && it !in liveKeys }
@@ -670,13 +678,88 @@ class HerdRepository internal constructor(
             while (isActive && synchronized(gate) { generation == epoch && _state.value.foreground }) {
                 delay(if (visible) pollIntervalMillis else backgroundPollIntervalMillis)
                 refreshAll(silent = true)
+                // Triage previews ride the foreground poll only: never in the background,
+                // never on a lifecycle generation that has moved on.
+                if (visible) refreshPreviews(epoch)
             }
         }
     }
 
     fun newId(): String = "h_" + UUID.randomUUID().toString().take(8)
 
+    /** The parsed question, or null when the read itself failed (keep whatever was there). */
+    private data class Preview(val question: String?)
+
+    /**
+     * Inbox triage previews: for WAITING/UNKNOWN agents only, read a small tail so the list can
+     * show what is being asked instead of only that something waits. On-screen foreground only,
+     * capped per cycle so a fleet of thirty cannot turn one poll into thirty reads. Best effort:
+     * a failed, slow or stale preview changes nothing — no host failure, no dropped agents, no
+     * retry. The text is never approval evidence; the detail page still does its own wide read
+     * and policy checks.
+     */
+    private suspend fun refreshPreviews(epoch: Long) {
+        val targets = synchronized(gate) {
+            if (!visible || !_state.value.foreground || generation != epoch) return
+            _state.value.agents
+                .filter { it.status == AgentStatus.WAITING || it.status == AgentStatus.UNKNOWN }
+                .take(PREVIEW_MAX_PER_CYCLE)
+        }
+        for (agent in targets) {
+            if (synchronized(gate) { !visible || !_state.value.foreground || generation != epoch }) return
+            val preview = readPreview(epoch, agent) ?: continue
+            synchronized(gate) {
+                if (generation != epoch) return@synchronized
+                _state.update { s -> s.copy(agents = s.agents.map {
+                    if (it.key == agent.key && it.status == agent.status) it.copy(previewQuestion = preview.question) else it
+                }) }
+            }
+        }
+    }
+
+    private suspend fun readPreview(epoch: Long, agent: Agent): Preview? {
+        val lock = synchronized(gate) { hostLocks[agent.hostId] } ?: return null
+        val client = synchronized(gate) {
+            if (generation != epoch || !_state.value.foreground || !visible) return null
+            clients[agent.hostId]?.takeIf { it.isConnected }
+        } ?: return null
+        val pane = try {
+            // The same host lock as detail reads and mutations: a preview queues behind them
+            // instead of interleaving on the shared channel. Its own short deadline keeps a
+            // busy or stalled host from stretching the poll cycle.
+            withTimeoutOrNull(PREVIEW_TIMEOUT_MILLIS) {
+                lock.withLock {
+                    val stillCurrent = synchronized(gate) {
+                        generation == epoch && _state.value.foreground && visible &&
+                            clients[agent.hostId] === client && client.isConnected
+                    }
+                    if (!stillCurrent) null
+                    else client.readPane(agent.paneId, PREVIEW_LINES, "recent_unwrapped")
+                }
+            }
+        } catch (e: CancellationException) {
+            // Enclosing cancellation (poll stopped, app left) propagates; a stray request-level
+            // timeout is just a failed preview.
+            currentCoroutineContext().ensureActive()
+            return null
+        } catch (t: Exception) {
+            // A preview is decoration. Nothing here may fail the host or drop the session;
+            // the regular poll owns connection health.
+            return null
+        } ?: return null
+        val question = AskParser.parse(pane.text)?.question
+            ?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotBlank() }
+            ?.take(PREVIEW_QUESTION_MAX_CHARS)
+        return Preview(question)
+    }
+
     companion object {
+        // One poll reads at most six 60-line tails, foreground only.
+        private const val PREVIEW_LINES = 60
+        private const val PREVIEW_MAX_PER_CYCLE = 6
+        private const val PREVIEW_TIMEOUT_MILLIS = 4_000L
+        private const val PREVIEW_QUESTION_MAX_CHARS = 120
+
         val agentOrder: Comparator<Agent> = compareBy<Agent>(
             { when (it.status) {
                 AgentStatus.WAITING -> 0

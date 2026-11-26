@@ -60,16 +60,20 @@ fun NewTaskSheet(
         mutableStateOf(initialHostId?.takeIf { id -> connected.any { it.host.id == id } } ?: connected.firstOrNull()?.host?.id)
     }
     val host = connected.firstOrNull { it.host.id == hostId }
-    var workspaceId by rememberSaveable(hostId) { mutableStateOf<String?>(null) }
+    // Start where the user already is. Defaulting to "new workspace" grew a card per quick task and
+    // quietly broke the focused-workspace model the structure page is built on; a new workspace is
+    // still one explicit chip away.
+    var workspaceId by rememberSaveable(hostId) {
+        mutableStateOf(
+            host?.structure?.workspaces?.let { list ->
+                (list.firstOrNull { it.focused } ?: list.firstOrNull())?.id
+            },
+        )
+    }
     val workspace = host?.structure?.workspaces?.firstOrNull { it.id == workspaceId }
     val validTarget = host != null && (workspaceId == null || workspace != null)
     val usedNames = currentAgents.filter { it.hostId == hostId }.map { it.name }.toSet() + host?.structure?.panes.orEmpty().map { it.title }
-    fun suggestedName(agentKind: String): String {
-        if (agentKind !in usedNames) return agentKind
-        var suffix = 2
-        while ("$agentKind-$suffix" in usedNames) suffix++
-        return "$agentKind-$suffix"
-    }
+    fun suggestedName(agentKind: String): String = suggestedAgentName(agentKind, usedNames)
     var kind by rememberSaveable { mutableStateOf("claude") }
     var name by rememberSaveable(hostId) { mutableStateOf(suggestedName(kind)) }
     val duplicateName = name.trim() in usedNames
@@ -247,6 +251,18 @@ fun NewTaskSheet(
             )
         }
     }
+}
+
+/**
+ * Shared name suggestion for both start flows (NewTaskSheet and StartAgentSheet): the kind itself
+ * when free, otherwise the first free "<kind>-N" starting at 2, filling gaps (claude, claude-3 ->
+ * claude-2). Matching is exact and case-sensitive, the same rule the duplicate checks use.
+ */
+internal fun suggestedAgentName(agentKind: String, usedNames: Set<String>): String {
+    if (agentKind !in usedNames) return agentKind
+    var suffix = 2
+    while ("$agentKind-$suffix" in usedNames) suffix++
+    return "$agentKind-$suffix"
 }
 
 /**

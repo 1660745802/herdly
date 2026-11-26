@@ -104,6 +104,7 @@ object AskParser {
             risk = risk,
             confidence = AskConfidence.HIGH,
             source = "numbered-menu",
+            region = lines.subList(maxOf(0, start - 5), lines.size).joinToString("\n"),
         )
     }
 
@@ -125,6 +126,7 @@ object AskParser {
             risk = null,
             confidence = AskConfidence.MEDIUM,
             source = "yes-no",
+            region = last.subList(maxOf(0, idx - 5), last.size).joinToString("\n"),
         )
     }
 
@@ -142,6 +144,7 @@ object AskParser {
             risk = null,
             confidence = AskConfidence.MEDIUM,
             source = "enter-esc",
+            region = last.subList(maxOf(0, idx - 5), last.size).joinToString("\n"),
         )
     }
 
@@ -171,14 +174,18 @@ object AskParser {
  * Options that grant a standing permission deserve a second look even when the
  * parser labelled them as a normal allow. Kept here (not in the UI) so it is unit-tested.
  */
-fun requiresStandingConfirmation(option: AskOption): Boolean {
-    val t = option.label.lowercase()
-    return listOf(
-        "don't ask", "do not ask", "always allow", "always", "never ask",
-        "without asking", "allow all", "for all", "this session",
-        "不再询问", "无需询问", "总是允许", "永久", "记住", "本次会话", "全部允许",
-    ).any { t.contains(it) }
-}
+fun requiresStandingConfirmation(option: AskOption): Boolean =
+    approvalScopeOf(option) == ApprovalScope.STANDING
+
+private val sessionScopeWords = listOf(
+    "this session", "for this session", "本次会话", "本会话", "这次会话",
+)
+
+private val standingScopeWords = listOf(
+    "don't ask", "do not ask", "always allow", "always", "never ask",
+    "without asking", "allow all", "for all",
+    "不再询问", "无需询问", "总是允许", "永久", "记住", "全部允许",
+)
 
 /**
  * How long an approval lasts, read off the option's own wording.
@@ -193,9 +200,11 @@ enum class ApprovalScope { ONCE, SESSION, STANDING, DENY, OTHER }
 fun approvalScopeOf(option: AskOption): ApprovalScope {
     if (option.kind == AskKind.DENY) return ApprovalScope.DENY
     val t = option.label.lowercase()
-    val sessionWords = listOf("this session", "for this session", "本次会话", "本会话", "这次会话")
-    if (sessionWords.any { t.contains(it) }) return ApprovalScope.SESSION
-    if (requiresStandingConfirmation(option)) return ApprovalScope.STANDING
+    // Session scope is checked first and is NOT standing: "allow for this session" ends when the
+    // session ends. Treating it as a permanent grant put a red 确认长期授权 dialog in front of the
+    // most ordinary choice an agent offers, which teaches the user to click through red dialogs.
+    if (sessionScopeWords.any { t.contains(it) }) return ApprovalScope.SESSION
+    if (standingScopeWords.any { t.contains(it) }) return ApprovalScope.STANDING
     if (option.kind == AskKind.ALLOW) return ApprovalScope.ONCE
     return ApprovalScope.OTHER
 }

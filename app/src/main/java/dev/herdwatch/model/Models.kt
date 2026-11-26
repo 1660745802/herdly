@@ -3,6 +3,7 @@ package dev.herdwatch.model
 import dev.herdwatch.R
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 @Serializable
 enum class AuthType { PASSWORD, KEY }
@@ -110,6 +111,14 @@ data class Agent(
     val stateLabels: Map<String, String> = emptyMap(),
     val tokens: Map<String, String> = emptyMap(),
     val sinceMillis: Long = System.currentTimeMillis(),
+    /**
+     * First line of the question this agent is currently asking, read from a small pane tail
+     * during the foreground poll so the inbox can say WHAT waits, not just THAT it waits.
+     * Triage only: never approval evidence — the detail page still does its own wide read and
+     * policy checks. In-memory only; a remembered question must not outlive the read that saw it.
+     */
+    @Transient
+    val previewQuestion: String? = null,
 ) {
     val key: String get() = "$hostId:$paneId"
     val repo: String
@@ -210,6 +219,13 @@ data class Ask(
     val risk: String?,
     val confidence: AskConfidence,
     val source: String,
+    /**
+     * The lines the question was actually read from: the option block, the few lines above it that
+     * carry the command, and the cancel hint below. A TUI repaints clocks and token counters all
+     * day; comparing whole screens turned every repaint into a refusal. This is the part that has
+     * to be identical for an approval to still mean what the user read.
+     */
+    val region: String = "",
 )
 
 data class AskOption(

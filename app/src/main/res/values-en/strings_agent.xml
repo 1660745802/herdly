@@ -143,4 +143,5 @@
     <string name="agent_options_gone">The options on screen have changed, so this list no longer matches. Close it and look again before choosing.</string>
     <string name="agent_options_close">Got it</string>
     <string name="agent_options_confirm">Send this choice</string>
+    <string name="agent_next_attention">Next needs you · %1$s</string>
 </resources>

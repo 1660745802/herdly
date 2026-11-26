@@ -87,6 +87,7 @@ import dev.herdwatch.ui.design.DsSpace
 import dev.herdwatch.ui.design.DsTypography
 import dev.herdwatch.ui.design.LocalDs
 import dev.herdwatch.ui.design.NeoButton
+import dev.herdwatch.ui.design.NeoChip
 import dev.herdwatch.ui.design.NeoButtonTone
 import dev.herdwatch.ui.design.NeoCard
 import dev.herdwatch.ui.design.NeoDialog
@@ -140,6 +141,8 @@ fun AgentScreen(
     onSendPrompt: (String) -> Unit,
     onSendKeys: (List<String>) -> Unit,
     onSendInput: (String) -> Unit = {},
+    /** Jump to the next agent that needs a person, without going back to the list. */
+    onNextAttention: () -> Unit = {},
     /**
      * Literal bytes for the key strip (escape sequences such as Shift+Tab). Separate from
      * [onSendInput] because that one submits a line: appending Enter to `ESC [ Z` would run the
@@ -793,6 +796,16 @@ fun AgentScreen(
                 else -> R.string.agent_send_blocked_busy
             }
             Column(Modifier.fillMaxWidth()) {
+            // Answering a queue used to mean back -> scroll -> hunt -> open, once per agent. The
+            // page already knows who else is waiting; offer that one and nothing when nobody is.
+            detail.nextAttention?.let { next ->
+                NeoChip(
+                    label = stringResource(R.string.agent_next_attention, next.name),
+                    selected = false,
+                    onClick = onNextAttention,
+                    modifier = Modifier.padding(start = DsSpace.m, bottom = DsSpace.xs),
+                )
+            }
             if (sendHint != null) {
                 Text(
                     stringResource(sendHint),
@@ -857,12 +870,11 @@ fun AgentScreen(
                             )
                         }
                     }
-                    if (!showChat) {
-                        // Commands are typed at the terminal prompt, so the shortcut lives with the
-                        // keys it belongs to; the chat composer is for sentences.
-                        // Slash commands differ per agent, so the list comes from the pane this
-                        // very agent is painting (see AgentCommandCatalog); the button only puts
-                        // text in the composer and never sends on its own.
+                    run {
+                        // A slash command is something you type TO the agent, so it belongs in both
+                        // modes: hiding it in chat meant switching model required leaving the view
+                        // you read in. The list comes from the pane this agent is painting (see
+                        // AgentCommandCatalog); the button only fills the composer, never sends.
                         NeoIconButton(
                             glyph = NeoGlyph.Command,
                             contentDescription = stringResource(R.string.agent_commands),

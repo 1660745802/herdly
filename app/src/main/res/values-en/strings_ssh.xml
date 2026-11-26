@@ -19,4 +19,5 @@
     <string name="ssh_network_down">No network right now; this reconnects by itself</string>
     <string name="ssh_challenge_unsupported">This host asks for a one-time code; Herdly supports passwords and keys only</string>
     <string name="ssh_challenge_not_password">This host asks for something other than a password (a user name, domain or choice)</string>
+    <string name="ssh_shell_refused">This host will not give a shell: the account may be command-only or forced to one command.</string>
 </resources>

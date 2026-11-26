@@ -50,11 +50,11 @@ AppViewModel → AskParser / ApprovalPolicy / OperationState / AgentTranscript
 - 有主机时 `ConnectionService`（`dataSync` 前台服务）持有进程，通知文案由纯函数 `connectionSummary(RepoState)` 生成，只在文案变化时重发；主机清空或用户退出即 `stopSelf()`。Android 14 的 `dataSync` 预算耗尽走 `onTimeout`：先离开前台再停服务，并停掉 watcher，避免留下一条没人清理的常驻通知。
 - Android 13+ 拒绝 `POST_NOTIFICATIONS` 时服务照常运行，只是通知不可见。
 - 失败、断线、返回前台都保留最后快照并标注状态与成功同步时间；加密缓存只保存最新成功快照里真实存在的 agent。
-- 详情每 3 秒尝试读屏，已有读取时不取消重发；操作记录与草稿按 agent 保存，切页不解除操作锁。草稿只在 ViewModel 内，支持切页 / 后台 / 旋转，不承诺进程死亡后恢复。
+- 详情每 3 秒尝试读屏，已有读取时不取消重发；操作记录与草稿按 agent 保存，切页不解除操作锁。草稿与操作记录按 agent 存在 ViewModel 内，支持切页 / 后台 / 旋转；进程死亡后由 `MainActivity.onSaveInstanceState` 存下页面栈编码（`pageTrail()`）与当前草稿，重建时 `restoreTrail(codes, draft)` 逐页回放。草稿必须写回操作存储（`operations.setDraft`），只塞 DetailState 会被第一次同步覆盖。
 - 阅读位置按 pane 记在内存 LRU（上限 80，按访问顺序淘汰）：滚动偏移、是否跟随底部、用户手动暂停。TalkBack 触发的自动暂停与用户暂停分开记录。冻结期间状态序号变化标为待同步，读取期间发生变化的证据保持 stale。
 - 没有 WorkManager 或 Alarm；唯一常驻是上面那个由连接数决定生死的前台服务。
 
-整机终端另有自己的重连策略（`ui/TerminalController.kt`）：可重试失败按 1 / 2 / 4 / 8 / 16 / 30 秒退避，六次后停下等人处理；`retryDelayMs(attempt, error)` 是纯函数，自动重连不重置计数（否则永远停在第一档）。认证失败、指纹不符、需要动态口令不重试。网络恢复回调立刻重试一次并取消已排队的等待；回调注册在应用 Context 上，`AppViewModel.onCleared()` 必须 `terminal.dispose()` 注销。滚动历史 5000 行（`SCROLLBACK_LINES`）。
+整机终端另有自己的重连策略（`ui/TerminalController.kt`）：可重试失败按 1 / 2 / 4 / 8 / 16 / 30 秒退避，六次后停下等人处理；`retryDelayMs(attempt, error)` 是纯函数，自动重连不重置计数（否则永远停在第一档）。认证失败、指纹不符、需要动态口令、主机拒绝开 shell（`ShellRefusedException`：账号只允许执行命令或被强制指定命令）都不重试，错误卡按类别给出唯一下一步（重连 / 编辑连接）。重连分隔线只在上一次会话真的产出过内容后才插入，空缓冲不会堆出一墙分隔线。网络恢复回调立刻重试一次并取消已排队的等待；回调注册在应用 Context 上，`AppViewModel.onCleared()` 必须 `terminal.dispose()` 注销。滚动历史 5000 行（`SCROLLBACK_LINES`）。
 
 尚未量化 4G RTT、耗电与大量 agent 的成本；事件订阅应在测量之后决定。
 
@@ -127,7 +127,7 @@ Repository 通过 `HostConnection` 接口与 internal 构造函数注入传输�
 
 ## 9. 验证
 
-JVM 单元测试 309 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、ApprovalCopy、OperationState、OperationRpc、HostStore、HostEndpoint、HerdRepository、HerdrClientTransport、ConnectionSummary、KeyboardInteractive、ReadingPause、ReadingFold、HistoryLoad、SentMessage、PageStack、PaneInput、DesignTokens、NeoGlyph、ContrastColor、TextLinks、TerminalDump、TerminalInputView、TerminalRetryPolicy、TerminalScreen、DailyWorkflow、AgentTranscript、AgentCommandCatalog、ModelMenu、MenuAnswer、VtScreen、UpdateChecker、AttentionAlerts、SeenMarks。
+JVM 单元测试 347 个，覆盖 AskParser、BridgeCodec、ApprovalPolicy、ApprovalCopy、OperationState、OperationRpc、HostStore、HostEndpoint、HerdRepository、HerdrClientTransport、ConnectionSummary、KeyboardInteractive、ReadingPause、ReadingFold、HistoryLoad、SentMessage、PageStack、PaneInput、DesignTokens、NeoGlyph、ContrastColor、TextLinks、TerminalDump、TerminalInputView、TerminalRetryPolicy、TerminalScreen、DailyWorkflow、AgentTranscript、AgentCommandCatalog、ModelMenu、MenuAnswer、TerminalProblem、InboxPreview、StructureHelpers、VtScreen、UpdateChecker、AttentionAlerts、SeenMarks。
 
 - DailyWorkflow：队列顺序与 pane ID 搜索、收起搜索保留查询、结构返回来源页（含重复打开）、阅读位置离开后重进保留、连接挂起期间重复重连合并。
 - Repository：编辑后迟到连接、后台迟到快照、回前台立即刷新、取消清理、慢 / 故障主机隔离、主机锁等待超时、同代刷新合并、离线缓存、已接受写入后的刷新失败、首次 pin 保存失败、密钥变化与逐台信任；用虚拟时间与 `runTest` 的 `backgroundScope`。

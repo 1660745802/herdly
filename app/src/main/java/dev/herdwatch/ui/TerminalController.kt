@@ -4,6 +4,9 @@ import dev.herdwatch.R
 import dev.herdwatch.i18n.Str
 import dev.herdwatch.model.HostConfig
 import dev.herdwatch.ssh.HostKeyMismatchException
+import dev.herdwatch.ssh.ShellAuthException
+import dev.herdwatch.ssh.ShellChallengeUnsupportedException
+import dev.herdwatch.ssh.ShellConnectException
 import dev.herdwatch.ssh.ShellSession
 import dev.herdwatch.ssh.UnknownHostKeyException
 import dev.herdwatch.term.VtScreen
@@ -22,6 +25,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 
+/**
+ * What kind of failure killed the session. Decides the error card's title and its one primary
+ * action: a wrong password is fixed by editing the connection, not by dialling it again.
+ *
+ * [BRIDGE] exists for the app's shared failure vocabulary but is never produced here: the
+ * terminal is a raw SSH shell and does not talk to the Herdr bridge.
+ */
+enum class TerminalProblem { AUTH, KEY_FIRST, KEY_CHANGE, CHALLENGE, NETWORK, BRIDGE, SHELL_REFUSED, OTHER }
+
+/** What the error card's primary button does for a failure class. */
+internal enum class TerminalErrorAction { RECONNECT, EDIT_HOST }
+
 /** What the terminal page needs to draw one frame. */
 data class TerminalUiState(
     val hostId: String? = null,
@@ -30,6 +45,10 @@ data class TerminalUiState(
     val connecting: Boolean = false,
     val connected: Boolean = false,
     val error: String? = null,
+    /** Class of [error], derived from the exception type / raw transport message, never from copy. */
+    val problem: TerminalProblem? = null,
+    /** Transient, recoverable notice (e.g. dropped input). The session stays alive. */
+    val inputNotice: String? = null,
     val fingerprint: String? = null,
     val snapshot: VtSnapshot? = null,
     val cols: Int = 80,
@@ -87,6 +106,7 @@ class TerminalController(
     private var connectJob: Job? = null
     private var readJob: Job? = null
     private var pumpJob: Job? = null
+    private var noticeJob: Job? = null
 
     // Written on Main, read by the IO write consumer below: without the volatile the consumer can
     // keep a stale epoch and deliver a keystroke into the session it was meant to abandon.
@@ -180,7 +200,17 @@ class TerminalController(
         val current = _state.value
         val cols = if (current.hostId == config.id) current.cols else 80
         val rows = if (current.hostId == config.id) current.rows else 24
-        val buffer = VtScreen(cols, rows, SCROLLBACK_LINES)
+        // Reconnecting the SAME host keeps the output the user was reading: the old grid is
+        // scrolled into scrollback behind a quiet separator instead of being thrown away. Only a
+        // different host starts a clean buffer. The dead session's alternate screen, modes and
+        // cursor are reset first so they cannot leak into the new shell.
+        val previous = screen
+        val buffer = if (current.hostId == config.id && previous != null) {
+            beginReconnectedSession(previous, Str.get(R.string.terminal_session_separator))
+            previous
+        } else {
+            VtScreen(cols, rows, SCROLLBACK_LINES)
+        }
         screen = buffer
         dirty = false
         _state.update {
@@ -191,6 +221,8 @@ class TerminalController(
                 connecting = true,
                 connected = false,
                 error = null,
+                problem = null,
+                inputNotice = null,
                 pendingFingerprint = null,
                 fingerprint = config.fingerprint,
                 snapshot = buffer.snapshot(),
@@ -230,10 +262,14 @@ class TerminalController(
         connectJob = null
         readJob = null
         pumpJob = null
+        noticeJob?.cancel()
+        noticeJob = null
         session?.close()
         session = null
         dirty = false
-        _state.update { it.copy(connecting = false, connected = false, retrying = false, retryAttempt = 0) }
+        _state.update {
+            it.copy(connecting = false, connected = false, retrying = false, retryAttempt = 0, inputNotice = null)
+        }
     }
 
     /** Releases the process-scoped network callback; without this every finished page leaks its VM. */
@@ -258,14 +294,19 @@ class TerminalController(
             )
         )
         if (queued.isFailure) {
-            // Dropping bytes would silently change a command or password. Fail the session instead;
-            // the screen preserves its output and offers an explicit reconnect.
+            // Input backpressure is not a session failure: killing a healthy shell over a large
+            // paste destroyed the output the user was reading. Drop the newest input, say so, and
+            // keep the session and buffer alive. The notice names the dropped keys so a silently
+            // changed command is never a surprise.
             val overloadedGeneration = generation
             val overloadedSession = s
-            scope.launch {
-                if (generation == overloadedGeneration && session === overloadedSession) {
-                    fail(IllegalStateException("terminal input queue is full"))
-                }
+            noticeJob?.cancel()
+            noticeJob = scope.launch {
+                if (generation != overloadedGeneration || session !== overloadedSession) return@launch
+                val notice = Str.get(R.string.term_input_queue_full)
+                _state.update { it.copy(inputNotice = notice) }
+                delay(INPUT_NOTICE_MILLIS)
+                _state.update { if (it.inputNotice == notice) it.copy(inputNotice = null) else it }
             }
         }
     }
@@ -376,6 +417,8 @@ class TerminalController(
                     it.copy(
                         connecting = false,
                         connected = true,
+                        error = null,
+                        problem = null,
                         fingerprint = observed ?: it.fingerprint,
                         retryAttempt = 0,
                         retrying = false,
@@ -425,12 +468,14 @@ class TerminalController(
     }
 
     private fun fail(error: Throwable) {
+        val problem = classifyTerminalFailure(error)
         if (error is UnknownHostKeyException) {
             _state.update {
                 it.copy(
                     connecting = false,
                     connected = false,
                     error = null,
+                    problem = problem,
                     pendingFingerprint = error.fingerprint,
                     pendingKeyType = error.keyType,
                 )
@@ -444,13 +489,15 @@ class TerminalController(
         if (!isRetryableFailure(error)) {
             retryAttempt = 0
             retryJob?.cancel()
-            _state.update { it.copy(connecting = false, connected = false, error = message, retrying = false, retryAttempt = 0) }
+            _state.update {
+                it.copy(connecting = false, connected = false, error = message, problem = problem, retrying = false, retryAttempt = 0)
+            }
             return
         }
         retryAttempt++
         val wait = retryDelayMs(retryAttempt, error)
         if (wait == null) {
-            _state.update { it.copy(connecting = false, connected = false, error = message, retrying = false) }
+            _state.update { it.copy(connecting = false, connected = false, error = message, problem = problem, retrying = false) }
             return
         }
         _state.update {
@@ -458,6 +505,7 @@ class TerminalController(
                 connecting = false,
                 connected = false,
                 error = message,
+                problem = problem,
                 retrying = true,
                 retryAttempt = retryAttempt,
             )
@@ -479,7 +527,131 @@ class TerminalController(
          */
         const val SCROLLBACK_LINES = 5_000
         const val WRITE_QUEUE_CAPACITY = 256
+
+        /** How long the dropped-input notice stays up before it clears itself. */
+        const val INPUT_NOTICE_MILLIS = 3_500L
     }
+}
+
+/**
+ * Classify a failure on the exception type or the RAW transport message, never on the localized
+ * sentence: a copy edit must not turn a wrong password into a network problem.
+ */
+internal fun classifyTerminalFailure(error: Throwable): TerminalProblem {
+    generateSequence(error) { it.cause }.forEach { cause ->
+        when (cause) {
+            is UnknownHostKeyException -> return TerminalProblem.KEY_FIRST
+            is HostKeyMismatchException -> return TerminalProblem.KEY_CHANGE
+            is ShellChallengeUnsupportedException -> return TerminalProblem.CHALLENGE
+            is ShellAuthException -> return TerminalProblem.AUTH
+            is dev.herdwatch.ssh.ShellRefusedException -> return TerminalProblem.SHELL_REFUSED
+        }
+    }
+    generateSequence(error) { it.cause }.forEach { cause ->
+        if (cause is java.net.SocketTimeoutException ||
+            cause is java.net.UnknownHostException ||
+            cause is java.net.NoRouteToHostException ||
+            cause is java.net.SocketException // includes ConnectException
+        ) {
+            return TerminalProblem.NETWORK
+        }
+        // ShellConnectException messages are translated sentences; only causes below them carry
+        // the transport's own words.
+        if (cause !is ShellConnectException) {
+            val raw = cause.message.orEmpty().lowercase()
+            if (NETWORK_MESSAGE_MARKERS.any { raw.contains(it) }) return TerminalProblem.NETWORK
+        }
+    }
+    return TerminalProblem.OTHER
+}
+
+/** Raw (English) transport markers, matched against cause messages only. */
+private val NETWORK_MESSAGE_MARKERS = listOf(
+    "timeout", "timed out", "socket is not established",
+    "connection refused", "connection reset", "broken pipe", "socket closed",
+    "enetunreach", "ehostunreach", "network is unreachable", "no route to host",
+    "unknownhost", "name or service not known", "session is down",
+)
+
+/**
+ * The one primary action for a failure class. Auth, challenge and changed-key failures can never
+ * succeed by dialling again — the user has to change the connection or verify the key first.
+ * KEY_FIRST is handled by the non-dismissible fingerprint dialog, not the error card.
+ */
+internal fun terminalErrorAction(problem: TerminalProblem?): TerminalErrorAction = when (problem) {
+    TerminalProblem.AUTH, TerminalProblem.CHALLENGE, TerminalProblem.KEY_CHANGE,
+    TerminalProblem.SHELL_REFUSED -> TerminalErrorAction.EDIT_HOST
+    else -> TerminalErrorAction.RECONNECT
+}
+
+/** "Connection failed" for failures that need the user; "Connection lost" for a dropped link. */
+internal fun terminalErrorTitleRes(problem: TerminalProblem?): Int = when (problem) {
+    TerminalProblem.AUTH, TerminalProblem.KEY_FIRST, TerminalProblem.KEY_CHANGE, TerminalProblem.CHALLENGE,
+    TerminalProblem.SHELL_REFUSED -> R.string.terminal_connection_failed
+    else -> R.string.terminal_connection_lost
+}
+
+/** A one-line next step under the error text, or null when the message already says it. */
+internal fun terminalErrorHintRes(problem: TerminalProblem?): Int? = when (problem) {
+    TerminalProblem.AUTH -> R.string.terminal_problem_auth_hint
+    TerminalProblem.KEY_CHANGE -> R.string.terminal_problem_key_change_hint
+    TerminalProblem.CHALLENGE -> R.string.terminal_problem_challenge_hint
+    TerminalProblem.SHELL_REFUSED -> R.string.terminal_problem_shell_refused_hint
+    else -> null
+}
+
+/**
+ * Prepare a kept [VtScreen] for a new session of the same host: everything the dead session left
+ * on the active grid is scrolled into scrollback behind a dim separator, and the new shell starts
+ * on a blank grid at home.
+ *
+ * The reset is fed as escape sequences because the buffer's own API is private: ST + CAN abort
+ * any half-parsed sequence, DECSTR (CSI ! p) clears modes/pen/scroll region, exiting
+ * 1049 restores the primary grid (a full-screen program's alternate grid is discarded, exactly as
+ * a real terminal does), and the title/status of the dead program are cleared. Pure JVM, so the
+ * unit tests exercise it against a real buffer.
+ */
+internal fun beginReconnectedSession(buffer: VtScreen, separator: String) {
+    val initial = buffer.snapshot()
+    // First settle the parser and the modes: a session can die mid-escape-sequence, and the
+    // dead program's alternate screen, title or status must not survive into the new shell.
+    val prefix = buildString {
+        append("\u001b\\") // ST: end any dangling OSC/string from the dead session
+        append('\u0018') // CAN: abort any half-parsed CSI
+        if (initial.alternateScreen) append("\u001b[?1049l")
+        append("\u001b[!p") // DECSTR: pen, autowrap, origin, cursor keys, bracketed paste, region
+        append("\u001b]0;\u0007") // forget the dead program's window title
+        append("\u001b]7501;state=clear\u0007") // and its status report
+    }
+    buffer.feed(prefix.toByteArray(Charsets.UTF_8))
+
+    val snap = buffer.snapshot()
+    val rows = snap.rows
+    // Scroll only the rows that hold output into history — pushing the blank padding below
+    // them would bury the old output under a screenful of empty lines.
+    val lastContent = snap.lines.drop(snap.scrollbackCount).indexOfLast { line ->
+        line.runs.any { it.text.isNotBlank() }
+    }
+    // Nothing to keep means nothing to divide. A host that refuses every attempt used to stack a
+    // wall of separators, one per retry, above an empty screen.
+    if (lastContent < 0) {
+        buffer.feed("[H7".toByteArray(Charsets.UTF_8))
+        return
+    }
+    val separatorRows = maxOf(1, (terminalCells(separator) + snap.cols - 1) / snap.cols)
+    val suffix = buildString {
+        append("\u001b[${rows};1H")
+        repeat(lastContent + 1) { append('\n') } // each feed at the bottom scrolls one top row out
+        append("\u001b[H") // separator goes on row 0, directly under the preserved output
+        append("\u001b[2m")
+        append(separator)
+        append("\u001b[0m")
+        append("\u001b[${rows};1H")
+        repeat(separatorRows) { append('\n') } // scroll the separator itself into history
+        append("\u001b[H")
+        append("\u001b7") // overwrite the DECSC slot so DECRC cannot restore the dead cursor
+    }
+    buffer.feed(suffix.toByteArray(Charsets.UTF_8))
 }
 
 /**
@@ -498,6 +670,8 @@ internal fun retryDelayMs(attempt: Int, error: Throwable): Long? {
 }
 
 internal fun isRetryableFailure(error: Throwable): Boolean =
+    // A refused shell channel is the server's answer about this account, not a lost packet.
+    error !is dev.herdwatch.ssh.ShellRefusedException &&
     error !is HostKeyMismatchException &&
         error !is UnknownHostKeyException &&
         error !is dev.herdwatch.ssh.ShellAuthException &&

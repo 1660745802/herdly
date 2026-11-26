@@ -4,6 +4,14 @@
     <string name="terminal_connecting">正在连接…</string>
     <string name="terminal_retrying">正在重连（第 %1$d 次）…</string>
     <string name="terminal_connection_lost">连接中断</string>
+    <string name="terminal_connection_failed">连接失败</string>
+    <string name="terminal_edit_connection">编辑连接</string>
+    <string name="terminal_problem_auth_hint">检查用户名、密码或私钥，再重新连接。</string>
+    <string name="terminal_problem_key_change_hint">主机密钥与保存的不一致。先与主机管理员核对新指纹，再更新这台主机的连接。</string>
+    <string name="terminal_problem_challenge_hint">这台主机需要只有你本人能完成的验证。编辑连接，改用密钥认证。</string>
+    <!-- 同一主机重连时写进回滚缓冲的分隔行 -->
+    <string name="terminal_session_separator">── 重新连接 ──</string>
+    <string name="term_input_queue_full">输入快过了连接，部分按键未发送。稍停后再输入。</string>
     <string name="terminal_back_desc">返回机器列表</string>
     <!-- %1$s：user@host 形式的目标；副标题在进入全屏程序时追加后缀 -->
     <string name="terminal_reconnect_short">重连</string>
@@ -60,10 +68,16 @@
     <string name="terminal_find_next">下一个</string>
     <string name="terminal_find_close">关闭查找</string>
     <string name="terminal_share">分享屏幕内容</string>
+    <string name="terminal_jump_to_newest">回到最新</string>
+    <string name="terminal_page_up">上翻一页</string>
+    <string name="terminal_page_down">下翻一页</string>
+    <string name="terminal_reconnect_confirm_title">重新连接？</string>
+    <string name="terminal_reconnect_confirm_body">重连会结束当前 shell；已有输出会保留。</string>
     <string name="terminal_key_alt">Alt 键，为下一个按键加前缀</string>
     <string name="term_pin_save_failed">保存主机密钥失败，没有继续连接</string>
     <!-- %1$s：程序自报的状态词（不翻译）；%2$s：kind/title/msg 等程序自报的细节 -->
     <string name="terminal_program_status_detail">%1$s · %2$s</string>
     <!-- %1$d：程序自报的进度 0..100 -->
     <string name="terminal_program_status_progress">%1$d%%</string>
+    <string name="terminal_problem_shell_refused_hint">检查这台机器的账号是否允许交互式 shell，或改用允许 shell 的账号。</string>
 </resources>

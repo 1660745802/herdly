@@ -44,6 +44,19 @@ class MainActivity : ComponentActivity() {
      * (manifest configChanges) and re-read resources here, so switching language is a recomposition
      * rather than a window teardown — no black frame, and the ViewModel keeps its sessions.
      */
+    /**
+     * Ask once, and only when there is something to notify about. Safe to call repeatedly: the
+     * preference flag and the granted check make it a no-op after the first answer.
+     */
+    fun maybeAskNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getPreferences(MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_NOTIFICATION_ASKED, false)) return
+        prefs.edit().putBoolean(KEY_NOTIFICATION_ASKED, true).apply()
+        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         dev.herdwatch.i18n.Str.install(this)
@@ -51,16 +64,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !getPreferences(MODE_PRIVATE).getBoolean(KEY_NOTIFICATION_ASKED, false)
-        ) {
-            // Once. A refusal is an answer: the keep-alive connection still works without the
-            // notification, and re-asking on every launch turns a settings choice into nagging.
-            // The channel can still be enabled later from the system settings.
-            getPreferences(MODE_PRIVATE).edit().putBoolean(KEY_NOTIFICATION_ASKED, true).apply()
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        // Put the person back where Android took them from. Only the place is restored — the hosts
+        // reconnect themselves, and nothing is sent to a remote host on our own initiative.
+        savedInstanceState?.getStringArrayList(KEY_TRAIL)?.let { trail ->
+            viewModel.restoreTrail(trail, savedInstanceState.getString(KEY_DRAFT))
         }
+        // The notification prompt used to be the first thing a new user saw, before a single host
+        // existed and before the app had anything to say. Ask only once there is a machine to watch:
+        // ConnectionService calls this when the first host connects, which is the moment the answer
+        // means something. A refusal is an answer — the keep-alive still works without it.
         // The status bar must follow the app's theme choice, not the system one: Settings can force
         // light while the device is dark (and vice versa), and enableEdgeToEdge would then keep the
         // system's icon/scrims over the opposite chassis.
@@ -118,6 +130,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: android.os.Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList(KEY_TRAIL, viewModel.pageTrail())
+        outState.putString(KEY_DRAFT, viewModel.draftSnapshot())
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         // SINGLE_TOP: a second alert tapped while the app is open must reuse this activity.
@@ -165,5 +183,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val KEY_NOTIFICATION_ASKED = "notification_asked"
+        private const val KEY_TRAIL = "herdly.trail"
+        private const val KEY_DRAFT = "herdly.draft"
     }
 }

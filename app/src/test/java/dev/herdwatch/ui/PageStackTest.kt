@@ -109,4 +109,55 @@ class PageStackTest {
             Dispatchers.resetMain()
         }
     }
+
+    /**
+     * Android kills backgrounded processes. Coming back must land on the page the person left, with
+     * the half-written reply still in the composer, and back must still retrace the same trail.
+     */
+    @Test fun `a process death puts the person back on the page they left`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val structure = HerdStructure(
+                workspaces = listOf(HerdWorkspace("w", "main", number = 1, focused = true, tabCount = 1, paneCount = 1)),
+                tabs = listOf(HerdTab("w:t", "w", "shell", number = 1, focused = true, paneCount = 1, status = AgentStatus.IDLE)),
+                panes = listOf(
+                    HerdPane(
+                        id = "w:p", terminalId = "t", workspaceId = "w", tabId = "w:t", title = "shell",
+                        agentKind = null, status = AgentStatus.IDLE, revision = 1, cwd = "/tmp",
+                        restoreError = null, sessionKind = null, sessionValue = null,
+                    ),
+                ),
+            )
+            val repo = HerdRepository(prefs.store, { FakeHostConnection(host, Snapshot("test", 1, emptyList(), structure)) }, backgroundScope, dispatcher)
+            val before = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("before", before)
+            runCurrent()
+            before.navigate(Screen.Hosts)
+            before.openStructure(host.id)
+            before.openPane(host.id, "w:p")
+            runCurrent()
+            before.setDraft("half written")
+            assertEquals("the draft is in the composer before the kill", "half written", before.draftSnapshot())
+            val codes = before.pageTrail()
+
+            val after = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("after", after)
+            runCurrent()
+            after.restoreTrail(codes, before.draftSnapshot())
+            runCurrent()
+            assertTrue("back on the pane", after.ui.value.screen is Screen.Detail)
+            assertEquals("half written", after.ui.value.detail.draft)
+            after.back()
+            assertTrue("the tree is still behind it", after.ui.value.screen is Screen.Structure)
+            after.back()
+            assertEquals(Screen.Hosts, after.ui.value.screen)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
 }

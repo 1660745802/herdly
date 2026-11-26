@@ -60,7 +60,15 @@ class OperationState {
         if (!old.inFlight && ApprovalPolicy.unavailable(evidence) == null &&
             !ApprovalPolicy.sameContext(blocked, evidence)
         ) {
-            operations[key] = old.copy(blockedApproval = null)
+            // The screen moved on: the question we answered is gone. That IS the receipt, so the
+            // page must not keep demanding "我已核对远端状态" for a result the user can already see.
+            // A read we cannot trust (truncated, unrecognised) still needs the human check.
+            operations[key] = old.copy(
+                blockedApproval = null,
+                uncertain = false,
+                verificationRequired = false,
+                notice = if (old.uncertain) "" else old.notice,
+            )
         }
     }
 

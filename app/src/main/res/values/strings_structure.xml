@@ -7,7 +7,9 @@
     <string name="structure_new_workspace">新建 workspace</string>
     <!-- 结构页顶部快捷按钮，与列表里的“新建 workspace”区分 -->
     <string name="structure_add_workspace">新建工作区</string>
-    <string name="structure_footer_hint">结构直接读自 Herdr；在这里建 tab、拆 pane、启动 agent，主机上的 TUI 会同步变化。</string>
+    <!-- 首句已上移到摘要卡（structure_summary_hint），这里保留操作说明 -->
+    <string name="structure_summary_hint">结构直接读自 Herdr。</string>
+    <string name="structure_footer_hint">在这里建 tab、拆 pane、启动 agent，主机上的 TUI 会同步变化。</string>
 
     <!-- %1$s：workspace / tab / pane 的类型名 -->
     <string name="structure_rename_title">重命名 %1$s</string>
@@ -35,6 +37,8 @@
     <string name="structure_open_agent">打开 agent</string>
     <!-- %1$s：agent 名称 -->
     <string name="structure_open_agent_label">打开 %1$s</string>
+    <!-- %1$s：分屏显示名；点击 shell 行打开分屏详情，与收件箱一致 -->
+    <string name="structure_open_pane_label">打开 %1$s</string>
     <string name="structure_open_agent_unavailable">打开 agent（此页暂未接入，请从收件箱进入）</string>
     <string name="structure_start_agent_no_shell">启动 agent（无已核实的空闲分屏）</string>
     <string name="structure_start_agent_unverified">启动 agent（分屏占用未核实）</string>
@@ -57,6 +61,8 @@
     <string name="structure_last_sync_offline">最后成功同步：%1$s · 当前未连接</string>
 
     <string name="structure_restore_failed">恢复失败</string>
+    <!-- 关闭/拆分已受理、等待快照回执期间的行内微标注 -->
+    <string name="structure_pending_sync">同步中</string>
     <string name="structure_start_agent">启动 agent</string>
     <string name="structure_pill_current">当前</string>
 
@@ -96,7 +102,8 @@
     <!-- %1$s：主机；%2$s：工作区；%3$s：标签页；%4$s：分屏标题；%5$s：分屏 id；%6$s：工作目录 -->
     <string name="structure_target_detail">目标：%1$s / %2$s / %3$s / %4$s (%5$s)\n目录：%6$s</string>
     <string name="structure_not_provided">未提供</string>
-    <string name="structure_duplicate_name">此主机上已有同名 agent，请换一个名字</string>
+    <!-- %1$s：建议的可用名称 -->
+    <string name="structure_duplicate_name">此主机上已有同名 agent，可用 %1$s</string>
     <string name="structure_unique_name_hint">使用主机内唯一的 agent 名称</string>
     <string name="structure_name_label">名字（Herdr 里的唯一名）</string>
     <string name="structure_resume_label">接着上次会话</string>

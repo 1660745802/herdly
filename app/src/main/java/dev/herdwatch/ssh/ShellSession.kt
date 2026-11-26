@@ -36,6 +36,26 @@ open class ShellConnectException(message: String, cause: Throwable? = null) : Ex
  * The server rejected the credentials. Retrying cannot help, so it is its own type: the terminal
  * controller uses it to stop the automatic reconnect instead of hammering a wrong password.
  */
+/**
+ * The server refused the shell channel itself. That is an answer about what the account is allowed
+ * to do (command-only keys, a forced command, a bridge-only appliance), not a dropped packet, so
+ * dialling again cannot change it. Named separately so the retry ladder can leave it alone.
+ */
+class ShellRefusedException(message: String, cause: Throwable? = null) : ShellConnectException(message, cause)
+
+internal fun isShellRefusal(error: Throwable): Boolean {
+    val text = generateSequence(error) { it.cause }.joinToString(" ") { it.message.orEmpty() }.lowercase()
+    return "failed to send channel request" in text || "channel is not opened" in text ||
+        "session is down" in text || "administratively prohibited" in text
+}
+
+internal fun shellOpenFailure(e: Exception, detail: String): Exception =
+    if (isShellRefusal(e)) {
+        ShellRefusedException(Str.get(R.string.ssh_shell_refused), e)
+    } else {
+        ShellConnectException(Str.get(R.string.ssh_open_shell_failed, detail), e)
+    }
+
 class ShellAuthException(message: String, cause: Throwable? = null) : ShellConnectException(message, cause)
 
 /**
@@ -310,7 +330,7 @@ class ShellSession(
         } catch (e: Exception) {
             forget(s)
             runCatching { s.disconnect() }
-            throw ShellConnectException(Str.get(R.string.ssh_open_shell_failed, detail(e)), e)
+            throw shellOpenFailure(e, detail(e))
         }
         try {
             ch.connect(CONNECT_TIMEOUT_MS)
@@ -318,7 +338,7 @@ class ShellSession(
             runCatching { ch.disconnect() }
             forget(s)
             runCatching { s.disconnect() }
-            throw ShellConnectException(Str.get(R.string.ssh_open_shell_failed, detail(e)), e)
+            throw shellOpenFailure(e, detail(e))
         }
         synchronized(stateGate) {
             if (closed) {

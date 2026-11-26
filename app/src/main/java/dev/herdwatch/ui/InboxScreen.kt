@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -45,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -162,6 +164,55 @@ fun InboxScreen(
             runtime.structure.tabs.firstOrNull { it.id == pane.tabId }?.label.orEmpty(),
         ).any { it.contains(ui.query, ignoreCase = true) }
     }
+    // J3-9: row ORDER is snapshotted for the duration of a visit. Answering an agent flips its
+    // status (WAITING -> WORKING, REVIEW -> IDLE via seen marks), which changes the sort keys; on
+    // return from the detail page the list used to re-shuffle at the same scroll offset, moving
+    // the row under the reader's thumb. rememberSaveable keeps the snapshot across the round trip
+    // (the inbox leaves composition while a detail page is open). Only the ORDER is frozen —
+    // statuses, lamps and counts keep updating live. The snapshot is replaced on an explicit
+    // refresh, or after the list has been idle (no scrolling, no query/filter edits) for a quiet
+    // window, so "next waiting rises to top" still happens — just never under a moving thumb.
+    // While searching, the fresh queue order applies: a search is a new question, not the visit.
+    var hostOrder by rememberSaveable { mutableStateOf(ArrayList<String>()) }
+    var agentOrder by rememberSaveable { mutableStateOf(ArrayList<String>()) }
+    var resortPending by remember { mutableStateOf(false) }
+    val phoneListState = rememberLazyListState()
+    val wideAgentListState = rememberLazyListState()
+    val widePaneListState = rememberLazyListState()
+    val freshHostOrder = liveHosts.sortedWith(
+        hostBlockComparator(agentGroup.groupBy { it.hostId }, panes.groupBy { it.first.host.id }),
+    ).map { it.host.id }
+    val latestFreshHostOrder by rememberUpdatedState(freshHostOrder)
+    val latestAgentKeys by rememberUpdatedState(agentGroup.map { it.key })
+    LaunchedEffect(selectedHostId, ui.query) {
+        // Seed on first composition so background polls cannot reorder even the first visit.
+        if (hostOrder.isEmpty()) hostOrder = ArrayList(latestFreshHostOrder)
+        if (agentOrder.isEmpty()) agentOrder = ArrayList(latestAgentKeys)
+        while (true) {
+            delay(RESORT_IDLE_MILLIS)
+            val idle = !phoneListState.isScrollInProgress &&
+                !wideAgentListState.isScrollInProgress &&
+                !widePaneListState.isScrollInProgress
+            if (idle) {
+                hostOrder = ArrayList(latestFreshHostOrder)
+                agentOrder = ArrayList(latestAgentKeys)
+            }
+        }
+    }
+    // An explicit refresh is the user asking for the latest truth: re-sort once it completes.
+    LaunchedEffect(ui.repo.refreshing) {
+        if (resortPending && !ui.repo.refreshing) {
+            hostOrder = ArrayList(latestFreshHostOrder)
+            agentOrder = ArrayList(latestAgentKeys)
+            resortPending = false
+        }
+    }
+    val refreshAndResort: () -> Unit = { resortPending = true; onRefresh() }
+    // Unknown keys (new since the snapshot) keep their fresh relative order after the known ones;
+    // they rise to their proper place on the next refresh or idle re-sort.
+    val orderedAgentGroup = if (ui.query.isNotBlank() || agentOrder.isEmpty()) agentGroup else {
+        agentGroup.sortedBy { agentOrder.indexOf(it.key).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+    }
     val keyboard = LocalSoftwareKeyboardController.current
     val colors = ds()
 
@@ -189,6 +240,9 @@ fun InboxScreen(
             compact = compact,
             leading = if (compact) null else ({ BrandMark() }),
             actions = {
+                // Nothing to search and nothing to refresh before the first machine exists: two live
+                // controls over an empty page invite a tap that can only do nothing.
+                if (ui.repo.hosts.isEmpty()) return@NeoPageHeader
                 NeoIconButton(
                     glyph = if (ui.searching) NeoGlyph.Close else NeoGlyph.Search,
                     onClick = { keyboard?.hide(); onToggleSearch(!ui.searching) },
@@ -199,7 +253,7 @@ fun InboxScreen(
                 // The control keeps its shape while it works: replacing the icon with a grey
                 // skeleton pill made the header look broken, and a second spinner appeared under
                 // it from the pull gesture. One affordance, one piece of feedback.
-                RefreshAction(refreshing = ui.repo.refreshing, onRefresh = onRefresh)
+                RefreshAction(refreshing = ui.repo.refreshing, onRefresh = refreshAndResort)
             },
         )
 
@@ -305,17 +359,18 @@ fun InboxScreen(
                                     onNewTask = onNewTask,
                                     onOpenHost = onOpenHost,
                                     onShowAllHosts = { selectedHostId = null },
-                                    onRefresh = onRefresh,
+                                    onRefresh = refreshAndResort,
                                 )
                             }
                             if (noMatchVisible) NoMatchCard(ui.query, hostScope) { onQuery("") }
                             if (panesEmptyVisible) {
-                                PanesEmptyCard(liveHosts, ui.query, onOpenHost, onRefresh)
+                                PanesEmptyCard(liveHosts, ui.query, onOpenHost, refreshAndResort)
                             }
                         }
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             LazyColumn(
                                 Modifier.weight(1f).fillMaxHeight(),
+                                state = wideAgentListState,
                                 contentPadding = listPadding,
                             ) {
                                 if (agentGroup.isEmpty() && offlineHosts.isEmpty()) {
@@ -324,8 +379,9 @@ fun InboxScreen(
                                     offlineBlocks(offlineHosts, onReconnect, onOpenHost)
                                     hostQueueBlocks(
                                         hosts = liveHosts,
-                                        agentGroup = agentGroup,
+                                        agentGroup = orderedAgentGroup,
                                         panes = panes,
+                                        hostOrder = hostOrder,
                                         now = now,
                                         onOpenAgent = onOpenAgent,
                                         onOpenPane = onOpenPane,
@@ -335,13 +391,15 @@ fun InboxScreen(
                             }
                             LazyColumn(
                                 Modifier.weight(1f).fillMaxHeight(),
+                                state = widePaneListState,
                                 contentPadding = listPadding,
                             ) {
                                 if (panes.isNotEmpty()) {
                                     hostQueueBlocks(
                                         hosts = liveHosts,
-                                        agentGroup = agentGroup,
+                                        agentGroup = orderedAgentGroup,
                                         panes = panes,
+                                        hostOrder = hostOrder,
                                         now = now,
                                         onOpenAgent = onOpenAgent,
                                         onOpenPane = onOpenPane,
@@ -353,7 +411,7 @@ fun InboxScreen(
                     }
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = listPadding) {
+                LazyColumn(Modifier.fillMaxSize(), state = phoneListState, contentPadding = listPadding) {
                     if (showConnecting) {
                         item(key = "connecting") { ConnectingNotice(connectingHosts) }
                     }
@@ -365,7 +423,7 @@ fun InboxScreen(
                                 onNewTask = onNewTask,
                                 onOpenHost = onOpenHost,
                                 onShowAllHosts = { selectedHostId = null },
-                                onRefresh = onRefresh,
+                                onRefresh = refreshAndResort,
                             )
                         }
                     }
@@ -379,8 +437,9 @@ fun InboxScreen(
                     // in two unrelated places.
                     hostQueueBlocks(
                         hosts = liveHosts,
-                        agentGroup = agentGroup,
+                        agentGroup = orderedAgentGroup,
                         panes = panes,
+                        hostOrder = hostOrder,
                         now = now,
                         onOpenAgent = onOpenAgent,
                         onOpenPane = onOpenPane,
@@ -393,7 +452,7 @@ fun InboxScreen(
                     }
                     if (panesEmptyVisible) {
                         item(key = "panes-empty") {
-                            PanesEmptyCard(liveHosts, ui.query, onOpenHost, onRefresh)
+                            PanesEmptyCard(liveHosts, ui.query, onOpenHost, refreshAndResort)
                         }
                     }
                 }
@@ -417,6 +476,21 @@ private fun rememberNow(): State<Long> {
     return now
 }
 
+/** How long the list must be idle before the visit's order snapshot adopts the fresh sort. */
+private const val RESORT_IDLE_MILLIS = 30_000L
+
+/** Machines with attention first, then whichever has more happening, then alphabetical. */
+private fun hostBlockComparator(
+    agentsByHost: Map<String, List<Agent>>,
+    panesByHost: Map<String, List<Pair<HostRuntime, HerdPane>>>,
+): Comparator<HostRuntime> =
+    compareByDescending<HostRuntime> { runtime ->
+        agentsByHost[runtime.host.id].orEmpty().count { isAttention(it) }
+    }
+        .thenByDescending { runtime -> agentsByHost[runtime.host.id].orEmpty().size }
+        .thenByDescending { runtime -> panesByHost[runtime.host.id].orEmpty().size }
+        .thenBy { it.host.label }
+
 /**
  * The phone queue: one block per machine.
  *
@@ -429,6 +503,7 @@ private fun LazyListScope.hostQueueBlocks(
     hosts: List<HostRuntime>,
     agentGroup: List<Agent>,
     panes: List<Pair<HostRuntime, HerdPane>>,
+    hostOrder: List<String>,
     now: State<Long>,
     onOpenAgent: (Agent) -> Unit,
     onOpenPane: ((String, String) -> Unit)?,
@@ -441,16 +516,13 @@ private fun LazyListScope.hostQueueBlocks(
 ) {
     val agentsByHost = agentGroup.groupBy { it.hostId }
     val panesByHost = panes.groupBy { it.first.host.id }
-    // Machines with attention come first, then whichever has more happening, then alphabetical so
-    // the order is stable across refreshes instead of shuffling under the reader's thumb.
-    val ordered = hosts.sortedWith(
-        compareByDescending<HostRuntime> { runtime ->
-            agentsByHost[runtime.host.id].orEmpty().count { isAttention(it) }
-        }
-            .thenByDescending { runtime -> agentsByHost[runtime.host.id].orEmpty().size }
-            .thenByDescending { runtime -> panesByHost[runtime.host.id].orEmpty().size }
-            .thenBy { it.host.label },
-    )
+    // Machines with attention come first, then whichever has more happening, then alphabetical.
+    // The visit snapshot (J3-9) then fixes the order; hosts new since the snapshot keep their
+    // fresh relative order after the known ones.
+    val ordered = hosts.sortedWith(hostBlockComparator(agentsByHost, panesByHost)).let { fresh ->
+        if (hostOrder.isEmpty()) fresh
+        else fresh.sortedBy { hostOrder.indexOf(it.host.id).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+    }
     var first = true
     ordered.forEach { runtime ->
         val hostAgents = agentsByHost[runtime.host.id].orEmpty()
@@ -1213,7 +1285,9 @@ private fun HostStrip(
             // Cached agents describe the last successful snapshot. They are useful once the host
             // reconnects, but must not override an offline/connecting connection state.
             val count = if (connected) hostAgents.size else 0
-            val waiting = if (connected) hostAgents.count { it.status == AgentStatus.WAITING } else 0
+            // Same attention set the queue sorts by (WAITING + UNKNOWN + REVIEW): a badge that
+            // counted WAITING only looked calm while the list below sorted unseen work to the top.
+            val waiting = if (connected) hostAgents.count { isAttention(it) } else 0
             val status = when {
                 waiting > 0 -> pluralStringResource(R.plurals.inbox_host_waiting, waiting, waiting)
                 host.conn is ConnState.Connected -> stringResource(R.string.inbox_host_online)
@@ -1357,6 +1431,11 @@ private fun AgentRow(
     val colors = ds()
     val statusDescription = stringResource(agent.status.labelRes)
     val lamp = agentStatusColor(agent.status)
+    // Triage preview: only a waiting/unknown agent's question is shown, and only when the poll
+    // actually parsed one. Rows without a preview render exactly as before.
+    val preview = agent.previewQuestion?.takeIf {
+        it.isNotBlank() && (agent.status == AgentStatus.WAITING || agent.status == AgentStatus.UNKNOWN)
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1395,6 +1474,19 @@ private fun AgentRow(
                 style = DsTypography.caption,
                 color = colors.textSoft,
                 maxLines = 1,
+            )
+        }
+        // The question gets its own line. Squeezed onto the name's line it ellipsised to "Do you …"
+        // while the name lost its tail too, so the row answered neither who nor what. Only waiting
+        // agents pay the extra line, which is exactly where reading the question saves an open.
+        if (preview != null) {
+            Text(
+                preview,
+                style = DsTypography.caption,
+                color = colors.textSoft,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = DsSpace.l + DsSpace.s, top = DsSpace.xxs),
             )
         }
         // Compact rows (the agent section) put the location on the name's own line: five agents

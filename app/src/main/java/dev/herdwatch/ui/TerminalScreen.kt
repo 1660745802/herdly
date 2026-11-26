@@ -10,6 +10,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -90,10 +93,10 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.sp
@@ -147,12 +150,16 @@ fun TerminalScreen(
     onFontSize: (Float) -> Unit,
     onFollow: () -> Unit,
     onTrustFingerprint: () -> Unit,
+    /** Opens the host editor. Default no-op so existing call sites compile; App.kt must wire it. */
+    onEditHost: () -> Unit = {},
 ) {
     val term = LocalTerminalTokens.current
     val clipboard = LocalClipboardManager.current
     // The system keyboard is the terminal keyboard. The extra Esc/Ctrl/arrows strip starts out of
     // the way and can be opened when needed; it is not a replacement command composer.
-    var keyboardExpanded by rememberSaveable { mutableStateOf(false) }
+    // The key row IS the product on a phone: Esc, Tab and Ctrl are why you opened a terminal here
+    // instead of a chat box. Hiding it behind an icon meant a first-time user never found Ctrl-C.
+    var keyboardExpanded by rememberSaveable { mutableStateOf(true) }
     var gridScrolledUp by remember { mutableStateOf(false) }
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
     val requestTerminalInput = { if (state.connected) terminalInputView?.requestInput() }
@@ -179,7 +186,9 @@ fun TerminalScreen(
     var selecting by remember { mutableStateOf(false) }
     // Search state. The buffer is the whole snapshot the app already holds, so a lookup is a scan
     // of rows we are drawing anyway — no request, no cursor, and it works offline.
-    var findOpen by remember { mutableStateOf(false) }
+    // Visibility and query persist together: restoring the text without the bar (or vice versa)
+    // left an orphaned state after process death.
+    var findOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var matchAt by remember { mutableIntStateOf(0) }
     val searchLines = state.snapshot?.let { snap ->
@@ -236,6 +245,8 @@ fun TerminalScreen(
             keysExpanded = keyboardExpanded,
             onToggleKeys = { keyboardExpanded = !keyboardExpanded },
             onFind = { findOpen = true },
+            onKey = { seq -> onKey(seq); onFollow() },
+            onFollow = onFollow,
         )
         // A tap opens the keyboard; a double tap sends Tab, the key a shell needs most and the one
         // no phone keyboard offers by default. Termius and Blink both teach this pair.
@@ -324,6 +335,17 @@ fun TerminalScreen(
                     Text(stringResource(R.string.terminal_connecting), color = term.text, style = DsTypography.caption)
                 }
             }
+            // Transient input-backpressure notice: the session is alive, some keys were dropped.
+            // No animation — it appears and clears with state, so reduced motion is respected.
+            state.inputNotice?.let { notice ->
+                Box(
+                    Modifier.align(Alignment.TopCenter).padding(top = 12.dp, start = 20.dp, end = 20.dp)
+                        .background(term.risk.copy(alpha = 0.14f), RoundedCornerShape(DsRadius.key))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text(notice, color = term.text, style = DsTypography.caption)
+                }
+            }
             // This transparent field is only an IME bridge. The remote PTY draws the actual cursor
             // and input, so there must be no local command field, Send button, or duplicated text.
             TerminalImeCapture(
@@ -346,8 +368,14 @@ fun TerminalScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(stringResource(R.string.terminal_connection_lost), color = term.risk, style = DsTypography.headline)
+                    // The title and the one primary button follow the failure class: a wrong
+                    // password or an OTP prompt is fixed by editing the connection, never by
+                    // dialling the same credentials again.
+                    Text(stringResource(terminalErrorTitleRes(state.problem)), color = term.risk, style = DsTypography.headline)
                     Text(message, color = term.text, style = DsTypography.body)
+                    terminalErrorHintRes(state.problem)?.let { hint ->
+                        Text(stringResource(hint), color = term.muted, style = DsTypography.caption)
+                    }
                     if (state.retrying) {
                         // Say that the app is already working on it: a bare error plus a button makes
                         // the user think nothing happens until they tap.
@@ -361,13 +389,20 @@ fun TerminalScreen(
                             )
                         }
                     }
-                    NeoButton(
-                        label = stringResource(
-                            if (state.retrying) R.string.common_reconnect_now else R.string.common_reconnect,
-                        ),
-                        onClick = onReconnect,
-                        tone = NeoButtonTone.Primary,
-                    )
+                    when (terminalErrorAction(state.problem)) {
+                        TerminalErrorAction.EDIT_HOST -> NeoButton(
+                            label = stringResource(R.string.terminal_edit_connection),
+                            onClick = onEditHost,
+                            tone = NeoButtonTone.Primary,
+                        )
+                        TerminalErrorAction.RECONNECT -> NeoButton(
+                            label = stringResource(
+                                if (state.retrying) R.string.common_reconnect_now else R.string.common_reconnect,
+                            ),
+                            onClick = onReconnect,
+                            tone = NeoButtonTone.Primary,
+                        )
+                    }
                 }
             }
         }
@@ -476,10 +511,16 @@ private fun TerminalBar(
     keysExpanded: Boolean,
     onToggleKeys: () -> Unit,
     onFind: () -> Unit,
+    onKey: (String) -> Unit,
+    onFollow: () -> Unit,
 ) {
     val term = LocalTerminalTokens.current
     val shareContext = LocalContext.current
     var menu by remember { mutableStateOf(false) }
+    // Reconnect tears down the shell and wipes the buffer. While a session is live a stray tap on
+    // the header icon must not kill a running build, so it routes through a confirmation; when
+    // already disconnected it reconnects immediately.
+    var confirmReconnect by remember { mutableStateOf(false) }
     val fontSizeLabel = stringResource(R.string.terminal_font_size, state.fontSize.roundToInt())
     Row(
         Modifier.fillMaxWidth()
@@ -548,7 +589,7 @@ private fun TerminalBar(
         // 360dp and wrapped into two overlapping lines.
         NeoIconButton(
             glyph = NeoGlyph.Refresh,
-            onClick = onReconnect,
+            onClick = { if (state.connected) confirmReconnect = true else onReconnect() },
             contentDescription = stringResource(R.string.terminal_reconnect_short),
             tint = term.text,
             enabled = !state.connecting,
@@ -590,6 +631,20 @@ private fun TerminalBar(
                     onClick = { menu = false; onFind() },
                 )
                 NeoMenuItem(
+                    label = stringResource(R.string.terminal_jump_to_newest),
+                    onClick = { menu = false; onFollow() },
+                )
+                // PgUp/PgDn live here as worded items so the on-screen key row can keep every cap
+                // >=48dp wide; the sequences are the same ones the keys used to send.
+                NeoMenuItem(
+                    label = stringResource(R.string.terminal_page_up),
+                    onClick = { menu = false; onKey("\u001B[5~") },
+                )
+                NeoMenuItem(
+                    label = stringResource(R.string.terminal_page_down),
+                    onClick = { menu = false; onKey("\u001B[6~") },
+                )
+                NeoMenuItem(
                     label = stringResource(R.string.terminal_share),
                     onClick = {
                         menu = false
@@ -609,6 +664,17 @@ private fun TerminalBar(
                 )
             }
         }
+    }
+    if (confirmReconnect) {
+        NeoDialog(
+            onDismissRequest = { confirmReconnect = false },
+            title = stringResource(R.string.terminal_reconnect_confirm_title),
+            subtitle = stringResource(R.string.terminal_reconnect_confirm_body),
+            confirmLabel = stringResource(R.string.terminal_reconnect_short),
+            onConfirm = { confirmReconnect = false; onReconnect() },
+            dismissLabel = stringResource(R.string.common_cancel),
+            destructive = true,
+        )
     }
 }
 
@@ -966,10 +1032,11 @@ private fun TerminalScrollPill(visible: Boolean, onFollow: () -> Unit) {
 }
 
 /**
- * One 40dp control in the strip under the grid: icon only, translucent terminal ink.
+ * One control in the strip under the grid: icon only, translucent terminal ink. The visible pill
+ * stays 40dp so it does not read heavier, but the touch target is 48dp to meet the touch floor.
  *
- * Icon-only is safe because both actions also exist in the overflow menu with words, and the pill
- * carries a full contentDescription for TalkBack.
+ * Icon-only is safe because both actions also exist in the overflow menu with words (key bar
+ * show/hide, jump to newest), and the pill carries a full contentDescription for TalkBack.
  */
 @Composable
 private fun TerminalOverlayPill(
@@ -981,14 +1048,20 @@ private fun TerminalOverlayPill(
     val tokens = LocalTerminalTokens.current
     Box(
         Modifier
-            .size(40.dp)
-            .clip(RoundedCornerShape(DsRadius.key))
-            .background(tokens.text.copy(alpha = if (active) 0.14f else 0.07f))
+            .size(48.dp)
             .clickable(role = Role.Button, onClickLabel = description, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        NeoIcon(glyph = glyph, modifier = Modifier.size(18.dp), tint = if (active) tokens.accent else tokens.muted)
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(DsRadius.key))
+                .background(tokens.text.copy(alpha = if (active) 0.14f else 0.07f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            NeoIcon(glyph = glyph, modifier = Modifier.size(18.dp), tint = if (active) tokens.accent else tokens.muted)
+        }
     }
 }
 
@@ -1019,14 +1092,14 @@ private fun TerminalKeys(
         TerminalKey("←", arrowKeySequence('D', applicationCursorKeys), R.string.terminal_key_left),
         TerminalKey("→", arrowKeySequence('C', applicationCursorKeys), R.string.terminal_key_right),
     )
+    // Six caps including Alt: on a 360dp screen each stays >=48dp wide. PgUp/PgDn moved to the
+    // overflow menu as worded items — eight caps squeezed every target below the touch floor.
     val secondary = listOf(
         TerminalKey("^C", "\u0003", R.string.terminal_key_ctrl_c, repeatable = false),
         TerminalKey("^D", "\u0004", R.string.terminal_key_ctrl_d, repeatable = false),
         TerminalKey("^Z", "\u001A", R.string.terminal_key_ctrl_z, repeatable = false),
         TerminalKey("↑", arrowKeySequence('A', applicationCursorKeys), R.string.terminal_key_up),
         TerminalKey("↓", arrowKeySequence('B', applicationCursorKeys), R.string.terminal_key_down),
-        TerminalKey("PgUp", "\u001B[5~", R.string.terminal_key_page_up, repeatable = false),
-        TerminalKey("PgDn", "\u001B[6~", R.string.terminal_key_page_down, repeatable = false),
     )
 
     // Ctrl is applied once, on the page, so the bar and the system keyboard cannot disagree.
@@ -1115,6 +1188,18 @@ private fun TerminalKeyButton(
     // a missed press from a slow remote, which on a 48dp row is the difference between typing and
     // guessing.
     val haptics = LocalHapticFeedback.current
+    // Auto-repeat must stop the instant the finger lifts. The burst runs in a Job that is cancelled
+    // when the press interaction ends, so releasing ← no longer keeps the cursor travelling. The
+    // 60-count cap stays only as a backstop for a pointer that never reports a release.
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    var repeatJob by remember { mutableStateOf<Job?>(null) }
+    LaunchedEffect(pressed) {
+        if (!pressed) {
+            repeatJob?.cancel()
+            repeatJob = null
+        }
+    }
     val fill = if (latched) term.accent.copy(alpha = 0.24f) else term.text.copy(alpha = if (enabled) 0.07f else 0.03f)
     Box(
         modifier = modifier
@@ -1127,6 +1212,8 @@ private fun TerminalKeyButton(
                 role = Role.Button
             }
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
                 enabled = enabled,
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1134,10 +1221,9 @@ private fun TerminalKeyButton(
                 },
                 onLongClick = {
                     if (repeatable) {
-                        scope.launch {
-                            // A long press is a repeat, not a burst: people hold ← to cross a long
-                            // line, and six cells left them tapping. Capped so a stuck finger
-                            // cannot flood the PTY.
+                        // A long press is a repeat, not a burst: people hold ← to cross a long
+                        // line. The Job is cancelled on release (above); the cap is a backstop.
+                        repeatJob = scope.launch {
                             repeat(60) {
                                 onPress()
                                 delay(55)
@@ -1436,7 +1522,9 @@ private fun TerminalSelectionSheet(
                     Text(
                         text,
                         style = TextStyle(
-                            fontFamily = FontFamily.Monospace,
+                            // Same mono as the grid: the platform monospace does not guarantee CJK
+                            // double-width cells, so a selected Chinese buffer mis-aligned columns.
+                            fontFamily = DsMono,
                             fontSize = fontSize.sp,
                             lineHeight = lineHeightDp.sp,
                         ),

@@ -7,7 +7,9 @@
     <string name="structure_new_workspace">New workspace</string>
     <!-- Quick action in the summary card; distinct from the "New workspace" button in the empty state -->
     <string name="structure_add_workspace">New workspace</string>
-    <string name="structure_footer_hint">This structure is read straight from Herdr. Creating tabs, splitting panes and starting agents here updates the TUI on the host.</string>
+    <!-- First sentence moved up to the summary card (structure_summary_hint); the how-to stays here -->
+    <string name="structure_summary_hint">This structure is read straight from Herdr.</string>
+    <string name="structure_footer_hint">Creating tabs, splitting panes and starting agents here updates the TUI on the host.</string>
 
     <!-- %1$s: type name of a workspace / tab / pane -->
     <string name="structure_rename_title">Rename %1$s</string>
@@ -35,6 +37,8 @@
     <string name="structure_open_agent">Open agent</string>
     <!-- %1$s: agent name -->
     <string name="structure_open_agent_label">Open %1$s</string>
+    <!-- %1$s: pane display name; tapping a shell row opens the pane detail, same as the inbox -->
+    <string name="structure_open_pane_label">Open %1$s</string>
     <string name="structure_open_agent_unavailable">Open agent (not wired on this page yet; open it from the inbox)</string>
     <string name="structure_start_agent_no_shell">Start agent (no verified idle pane)</string>
     <string name="structure_start_agent_unverified">Start agent (pane occupancy unverified)</string>
@@ -57,6 +61,8 @@
     <string name="structure_last_sync_offline">Last successful sync: %1$s · currently disconnected</string>
 
     <string name="structure_restore_failed">restore failed</string>
+    <!-- Inline micro caption while a close/split is accepted and awaiting its snapshot receipt -->
+    <string name="structure_pending_sync">Syncing</string>
     <string name="structure_start_agent">Start agent</string>
     <string name="structure_pill_current">current</string>
 
@@ -96,7 +102,8 @@
     <!-- %1$s: host; %2$s: workspace; %3$s: tab; %4$s: pane title; %5$s: pane id; %6$s: working directory -->
     <string name="structure_target_detail">Target: %1$s / %2$s / %3$s / %4$s (%5$s)\nDirectory: %6$s</string>
     <string name="structure_not_provided">not provided</string>
-    <string name="structure_duplicate_name">An agent with this name already exists on this host, pick another name</string>
+    <!-- %1$s: suggested free name -->
+    <string name="structure_duplicate_name">An agent with this name already exists on this host; try %1$s</string>
     <string name="structure_unique_name_hint">Use a name that is unique on this host</string>
     <string name="structure_name_label">Name (unique in Herdr)</string>
     <string name="structure_resume_label">Resume last session</string>

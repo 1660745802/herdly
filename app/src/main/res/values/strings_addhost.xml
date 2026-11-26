@@ -2,12 +2,17 @@
 <resources>
     <string name="addhost_title_add">添加机器</string>
     <string name="addhost_title_edit">编辑机器</string>
-    <string name="addhost_subtitle">SSH 直连，凭据在本机加密保存。保存配置后尝试连接，连接结果请在机器列表中查看。</string>
+    <string name="addhost_subtitle">SSH 直连，凭据在本机加密保存。保存后直接打开这台机器的终端，先核对指纹再发送凭据。</string>
     <string name="addhost_label_optional">名字（可选）</string>
     <string name="addhost_host">主机</string>
     <string name="addhost_host_placeholder">192.168.1.10 或 build.example.com</string>
     <string name="addhost_port">端口</string>
     <string name="addhost_user">用户名</string>
+    <string name="addhost_user_placeholder">登录主机用的用户名</string>
+    <string name="addhost_cd_show_password">显示密码</string>
+    <string name="addhost_cd_hide_password">隐藏密码</string>
+    <string name="addhost_cd_show_passphrase">显示私钥口令</string>
+    <string name="addhost_cd_hide_passphrase">隐藏私钥口令</string>
     <string name="addhost_password">密码</string>
     <string name="addhost_key">私钥</string>
     <string name="addhost_key_full">私钥（OpenSSH / PEM 全文）</string>

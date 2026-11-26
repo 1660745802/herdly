@@ -461,6 +461,17 @@ private fun HostCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Fixing the credentials is what most failures need, and it used to sit three taps deep
+            // in an overflow menu behind a chevron. Put the door on the card that reports the problem.
+            if (conn is ConnState.Failed && runtime.keyMismatch == null && runtime.pendingKey == null) {
+                NeoButton(
+                    label = stringResource(R.string.hosts_menu_edit),
+                    onClick = onEdit,
+                    tone = NeoButtonTone.Ghost,
+                    icon = NeoGlyph.Edit,
+                    compact = true,
+                )
+            }
             if (runtime.keyMismatch != null) {
                 Text(
                     stringResource(R.string.hosts_key_changed_hint),

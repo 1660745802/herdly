@@ -4,6 +4,14 @@
     <string name="terminal_connecting">Connecting…</string>
     <string name="terminal_retrying">Reconnecting (%1$d)…</string>
     <string name="terminal_connection_lost">Connection lost</string>
+    <string name="terminal_connection_failed">Connection failed</string>
+    <string name="terminal_edit_connection">Edit connection</string>
+    <string name="terminal_problem_auth_hint">Check the username, password or private key, then reconnect.</string>
+    <string name="terminal_problem_key_change_hint">The host key no longer matches the saved one. Verify the new fingerprint with the host administrator, then update this connection.</string>
+    <string name="terminal_problem_challenge_hint">This host needs a verification step only you can complete. Edit the connection to use key authentication.</string>
+    <!-- Separator line written into scrollback when the same host reconnects -->
+    <string name="terminal_session_separator">── reconnected ──</string>
+    <string name="term_input_queue_full">Input outran the link; some keys were not sent. Pause, then type again.</string>
     <string name="terminal_back_desc">Back to host list</string>
     <!-- %1$s: user@host target; the subtitle gains a suffix inside full-screen programs -->
     <string name="terminal_reconnect_short">Reconnect</string>
@@ -60,10 +68,16 @@
     <string name="terminal_find_next">Next</string>
     <string name="terminal_find_close">Close find</string>
     <string name="terminal_share">Share the screen</string>
+    <string name="terminal_jump_to_newest">Jump to newest</string>
+    <string name="terminal_page_up">Page up</string>
+    <string name="terminal_page_down">Page down</string>
+    <string name="terminal_reconnect_confirm_title">Reconnect?</string>
+    <string name="terminal_reconnect_confirm_body">Reconnecting ends the current shell. Existing output is kept.</string>
     <string name="terminal_key_alt">Alt, prefixes the next key</string>
     <string name="term_pin_save_failed">Could not save the host key; not connecting</string>
     <!-- %1$s: the program's own state word (never translated); %2$s: its kind/title/msg detail -->
     <string name="terminal_program_status_detail">%1$s · %2$s</string>
     <!-- %1$d: progress 0..100 as reported by the program -->
     <string name="terminal_program_status_progress">%1$d%%</string>
+    <string name="terminal_problem_shell_refused_hint">Check whether this account is allowed an interactive shell, or use one that is.</string>
 </resources>

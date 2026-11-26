@@ -2,12 +2,17 @@
 <resources>
     <string name="addhost_title_add">Add host</string>
     <string name="addhost_title_edit">Edit host</string>
-    <string name="addhost_subtitle">Connects directly over SSH; credentials are encrypted on this device. After saving we try to connect — check the host list for the result.</string>
+    <string name="addhost_subtitle">Direct SSH; credentials stay encrypted on this phone. Saving opens the machine terminal, and the host key is confirmed before any credential is sent.</string>
     <string name="addhost_label_optional">Name (optional)</string>
     <string name="addhost_host">Host</string>
     <string name="addhost_host_placeholder">192.168.1.10 or build.example.com</string>
     <string name="addhost_port">Port</string>
     <string name="addhost_user">Username</string>
+    <string name="addhost_user_placeholder">The user you log in as</string>
+    <string name="addhost_cd_show_password">Show password</string>
+    <string name="addhost_cd_hide_password">Hide password</string>
+    <string name="addhost_cd_show_passphrase">Show passphrase</string>
+    <string name="addhost_cd_hide_passphrase">Hide passphrase</string>
     <string name="addhost_password">Password</string>
     <string name="addhost_key">Private key</string>
     <string name="addhost_key_full">Private key (full OpenSSH / PEM)</string>

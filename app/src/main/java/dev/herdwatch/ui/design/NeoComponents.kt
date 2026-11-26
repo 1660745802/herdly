@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -74,6 +75,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -154,6 +156,7 @@ fun NeoButton(
     enabled: Boolean = true,
     icon: NeoGlyph? = null,
     compact: Boolean = false,
+    maxLines: Int = 1,
 ) {
     val colors = ds()
     val interaction = remember { MutableInteractionSource() }
@@ -222,7 +225,7 @@ fun NeoButton(
             text = label,
             style = DsTypography.bodyStrong,
             color = contentColor,
-            maxLines = 1,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -242,7 +245,10 @@ fun NeoIconButton(
         modifier = modifier
             .size(48.dp)
             .clip(RoundedCornerShape(DsRadius.control))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            // Same rule as NeoButton: grey tint alone is easy to miss, and without this a
+            // disabled icon button is indistinguishable from a broken one to TalkBack.
+            .semantics { if (!enabled) disabled() },
         contentAlignment = Alignment.Center,
     ) {
         NeoIcon(
@@ -285,13 +291,17 @@ fun NeoSegmented(
             .fillMaxWidth()
             .height(48.dp)
             .neoInset(DsRadius.control, DsElev.inset, colors.well, colors)
-            .clip(RoundedCornerShape(DsRadius.control))
-            .padding(4.dp),
+            .clip(RoundedCornerShape(DsRadius.control)),
     ) {
+        // The thumb keeps its 4dp visual inset: it is measured inside a padded box so its width
+        // and sliding offset are exactly what they were. It is decoration only — the touch row
+        // below spans the full 48dp track, so the effective target never shrinks to the 40dp
+        // thumb height.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
+                .padding(4.dp)
                 .onSizeChanged { trackWidth = it.width },
         ) {
             if (segmentPx > 0f) {
@@ -303,33 +313,33 @@ fun NeoSegmented(
                         .neoRaised(DsRadius.control - 4.dp, DsElev.soft, colors.baseRaised, colors),
                 )
             }
-            Row(Modifier.fillMaxWidth().height(40.dp)) {
-                options.forEachIndexed { index, label ->
-                    val selected = index == selectedIndex
-                    val textColor by animateColorAsState(
-                        targetValue = if (selected) colors.text else colors.textSoft,
-                        animationSpec = tween(motionMillis(DsMotion.quick)),
-                        label = "segmentText",
+        }
+        Row(Modifier.fillMaxWidth().height(48.dp)) {
+            options.forEachIndexed { index, label ->
+                val selected = index == selectedIndex
+                val textColor by animateColorAsState(
+                    targetValue = if (selected) colors.text else colors.textSoft,
+                    animationSpec = tween(motionMillis(DsMotion.quick)),
+                    label = "segmentText",
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(DsRadius.control - 3.dp))
+                        .clickable(role = Role.Tab) { onSelect(index) }
+                        .semantics { this.selected = selected },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = if (selected) DsTypography.bodyStrong else DsTypography.body,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp),
                     )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(DsRadius.control - 3.dp))
-                            .clickable(role = Role.Tab) { onSelect(index) }
-                            .semantics { this.selected = selected },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            style = if (selected) DsTypography.bodyStrong else DsTypography.body,
-                            color = textColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                        )
-                    }
                 }
             }
         }
@@ -360,7 +370,11 @@ fun NeoToggle(
         modifier = modifier
             .defaultMinSize(minHeight = 48.dp)
             .clip(RoundedCornerShape(DsRadius.control))
-            .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) }
+            // toggleable carries the on/off state and the disabled flag for TalkBack ("resume,
+            // on, switch"); mergeDescendants makes label + track read as one control instead of
+            // a stray caption next to an unlabelled switch.
+            .semantics(mergeDescendants = true) {}
+            .toggleable(value = checked, role = Role.Switch, enabled = enabled, onValueChange = onCheckedChange)
             .padding(vertical = DsSpace.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DsSpace.m),
@@ -844,6 +858,21 @@ fun NeoDialog(
                 // Short landscape windows get a proportionally smaller dialog instead of a fixed
                 // 560dp slab that would run under the keyboard or off the bottom of the screen.
                 val maxDialogHeight = maxHeight * 0.85f
+                // Long labels (or fontScale 1.3) must stack, never ellipsis a decision. Measure
+                // the compact buttons' intrinsic widths and fall back to full-width stacked
+                // actions when the pair cannot fit, mirroring AddHostSheet's stackedActions.
+                val textMeasurer = rememberTextMeasurer()
+                val density = LocalDensity.current
+                val availablePx = with(density) { (maxWidth - DsSpace.xl * 2).toPx() }
+                val compactPadPx = with(density) { (DsSpace.l * 2).toPx() }
+                fun actionWidth(label: String?): Float =
+                    if (label == null) 0f
+                    else textMeasurer.measure(label, DsTypography.bodyStrong).size.width + compactPadPx
+                val dismissWidth = actionWidth(dismissLabel)
+                val confirmWidth = if (onConfirm != null) actionWidth(confirmLabel) else 0f
+                val bothActions = dismissWidth > 0f && confirmWidth > 0f
+                val rowWidth = dismissWidth + confirmWidth + if (bothActions) with(density) { DsSpace.s.toPx() } else 0f
+                val stackedActions = rowWidth > availablePx
                 Column(
                     modifier = modifier
                         .fillMaxWidth()
@@ -857,36 +886,68 @@ fun NeoDialog(
                     if (subtitle != null) {
                         Text(subtitle, style = DsTypography.body, color = colors.textSoft)
                     }
-                    // Only the body scrolls; the action row stays pinned to the footer.
+                    // Only the body scrolls; the action row stays pinned to the footer. Stacked
+                    // actions need one extra button height reserved so the footer is never squeezed.
                     Column(
                         Modifier.fillMaxWidth()
-                            .heightIn(max = (maxDialogHeight - 160.dp).coerceAtLeast(64.dp))
+                            .heightIn(max = (maxDialogHeight - if (stackedActions) 216.dp else 160.dp).coerceAtLeast(64.dp))
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(DsSpace.m),
                     ) {
                         content?.invoke(this)
                     }
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = DsSpace.xs),
-                        horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.End),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (dismissLabel != null) {
-                            NeoButton(
-                                label = dismissLabel,
-                                onClick = onDismissRequest,
-                                tone = NeoButtonTone.Ghost,
-                                compact = true,
-                            )
+                    if (stackedActions) {
+                        // Stacked, decision first (same as the fingerprint dialog): a decision
+                        // label must never be cut to an ellipsis, so it wraps instead.
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = DsSpace.xs),
+                            verticalArrangement = Arrangement.spacedBy(NeoShadowBleed + DsSpace.xs),
+                        ) {
+                            if (confirmLabel != null && onConfirm != null) {
+                                NeoButton(
+                                    label = confirmLabel,
+                                    onClick = onConfirm,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    tone = if (destructive) NeoButtonTone.Danger else NeoButtonTone.Primary,
+                                    enabled = confirmEnabled,
+                                    compact = true,
+                                    maxLines = Int.MAX_VALUE,
+                                )
+                            }
+                            if (dismissLabel != null) {
+                                NeoButton(
+                                    label = dismissLabel,
+                                    onClick = onDismissRequest,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    tone = NeoButtonTone.Ghost,
+                                    compact = true,
+                                    maxLines = Int.MAX_VALUE,
+                                )
+                            }
                         }
-                        if (confirmLabel != null && onConfirm != null) {
-                            NeoButton(
-                                label = confirmLabel,
-                                onClick = onConfirm,
-                                tone = if (destructive) NeoButtonTone.Danger else NeoButtonTone.Primary,
-                                enabled = confirmEnabled,
-                                compact = true,
-                            )
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = DsSpace.xs),
+                            horizontalArrangement = Arrangement.spacedBy(DsSpace.s, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (dismissLabel != null) {
+                                NeoButton(
+                                    label = dismissLabel,
+                                    onClick = onDismissRequest,
+                                    tone = NeoButtonTone.Ghost,
+                                    compact = true,
+                                )
+                            }
+                            if (confirmLabel != null && onConfirm != null) {
+                                NeoButton(
+                                    label = confirmLabel,
+                                    onClick = onConfirm,
+                                    tone = if (destructive) NeoButtonTone.Danger else NeoButtonTone.Primary,
+                                    enabled = confirmEnabled,
+                                    compact = true,
+                                )
+                            }
                         }
                     }
                 }
@@ -941,6 +1002,8 @@ fun NeoMenuItem(
             .fillMaxWidth()
             .defaultMinSize(minHeight = 48.dp)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            // Same rule as NeoButton: a disabled menu item must announce itself, not just grey out.
+            .semantics { if (!enabled) disabled() }
             .padding(horizontal = DsSpace.l, vertical = DsSpace.s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DsSpace.m),
@@ -1046,10 +1109,13 @@ fun NeoSnackbarBody(
 @Composable
 fun NeoModeTag(text: String, modifier: Modifier = Modifier) {
     val colors = ds()
+    // Same pairing as NeoChip: accent-on-accentWash measured 4.38:1 in light, below the 4.5
+    // floor for 11sp text. The accent stays in the wash; the label uses the body ink
+    // (7.58:1 light, 10.81:1 dark against the wash over the chassis).
     Text(
         text,
         style = DsTypography.micro,
-        color = colors.accent,
+        color = colors.text,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier

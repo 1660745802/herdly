@@ -26,6 +26,9 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     var onSnapshot: suspend () -> Snapshot = { initialSnapshot }
     var onStartAgent: suspend () -> Unit = {}
     var onReadPane: suspend () -> PaneText = { PaneText("", null, false) }
+    /** Every readPane call, so tests can prove who was read, how much, and how often. */
+    data class PaneRead(val paneId: String, val lines: Int, val source: String)
+    val paneReads = mutableListOf<PaneRead>()
     /** Workspaces/tabs handed back by the fake create calls, and what cleanup closed. */
     var created = HostConnection.PaneCreated("root", tabId = "tab-1", workspaceId = "ws-1")
     var onCreate: suspend () -> Unit = {}
@@ -55,7 +58,10 @@ internal class FakeHostConnection(initialConfig: HostConfig, initialSnapshot: Sn
     }
 
     // Unexpected RPCs fail loudly so tests cannot pass by silently accepting the wrong operation.
-    override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText = onReadPane()
+    override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText {
+        paneReads += PaneRead(paneId, lines, source)
+        return onReadPane()
+    }
     override suspend fun sendKeys(paneId: String, keys: List<String>): Unit = unexpected()
     override suspend fun sendInput(paneId: String, text: String?, keys: List<String>): Unit = unexpected()
     override suspend fun createWorkspace(label: String?, cwd: String?): HostConnection.PaneCreated {

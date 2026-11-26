@@ -105,6 +105,8 @@ data class DetailState(
     val operationNotice: String? = null,
     val operationUncertain: Boolean = false,
     val canChoose: Boolean = false,
+    /** The next agent that needs a person, so answering a queue does not mean going back to hunt. */
+    val nextAttention: Agent? = null,
     val canSend: Boolean = false,
     val hostConnected: Boolean = false,
     val hostConnecting: Boolean = false,
@@ -274,7 +276,23 @@ class AppViewModel(
                 (agent.status == AgentStatus.WAITING || agent.status == AgentStatus.UNKNOWN) &&
                 ApprovalPolicy.unavailable(evidence(detail)) == null &&
                 !operations.blocksApproval(agent.key, evidence(detail)),
+            nextAttention = nextAttention(agent, repo),
         )
+    }
+
+    /**
+     * Answering three approvals should not mean three trips back to the list to hunt for the next
+     * one. The detail page already knows the fleet; offer the next agent that needs a person, in
+     * the same order the inbox uses, and nothing when nobody is waiting.
+     */
+    private fun nextAttention(current: Agent, repo: RepoState): Agent? =
+        inboxQueue(repo.agents.markSeen(SeenMarks.marks.value), "")
+            .firstOrNull { it.key != current.key && it.status in attentionStatuses }
+
+    fun openNextAttention() {
+        val current = _ui.value.detail.agent ?: return
+        val next = nextAttention(current, _ui.value.repo) ?: return
+        showAgent(next)
     }
 
     private fun syncOperation(key: String) {
@@ -401,6 +419,18 @@ class AppViewModel(
         it.copy(showAddHost = true, editingHost = host)
     }
 
+    /**
+     * A wrong password is not fixed by dialling again. The terminal's auth failure offers the editor
+     * instead, which needs the saved config for the session it is showing.
+     */
+    fun editTerminalHost() {
+        val id = terminalState.value.hostId ?: return
+        val host = _ui.value.repo.hosts.firstOrNull { it.host.id == id }?.host
+            ?: repository.state.value.hosts.firstOrNull { it.host.id == id }?.host
+            ?: return
+        editHost(host)
+    }
+
     fun navigate(screen: Screen) {
         if (screen is Screen.Detail) {
             val key = screen.agentKey
@@ -481,7 +511,10 @@ class AppViewModel(
      * any SSH host, and Herdr keeps its own bridge connection.
      */
     fun openTerminal(hostId: String, pushPage: Boolean = true) {
+        // The repository publishes before the UI collector runs, so a host added a moment ago is
+        // already real even if this frame has not seen it yet.
         val runtime = _ui.value.repo.hosts.firstOrNull { it.host.id == hostId }
+            ?: repository.state.value.hosts.firstOrNull { it.host.id == hostId }
         if (runtime == null) {
             _ui.update { it.copy(message = Str.get(R.string.vm_host_not_found)) }
             return
@@ -850,8 +883,14 @@ class AppViewModel(
 
     private fun showAgent(agent: Agent) {
         leavePage()
+        val restored = restoredDraft
+        restoredDraft = null
+        // The composer is fed from the operation store, so seeding only DetailState would be
+        // overwritten by the first sync. Put the recovered text where the field actually reads it.
+        if (!restored.isNullOrBlank()) operations.setDraft(agent.key, restored)
         _ui.update {
             it.copy(screen = Screen.Detail(agent.key), detail = decorate(DetailState(agent = agent, loading = true,
+                draft = restored.orEmpty(),
                 readingPosition = readingPositions[agent.key] ?: ReadingPosition(),
                 readingPaused = readingPositions[agent.key]?.paused == true)))
         }
@@ -1222,17 +1261,26 @@ class AppViewModel(
                 // unresolved outcome earns a line, because a disclaimer makes people doubt the app.
                 notice = ""
                 uncertain = true
-                delay(700)
-                if (!matches(page) || !foreground) return@launch
-                val postRequest = ++readGeneration
-                loadJob?.cancel()
-                val after = repository.readPane(agent, PANE_READ_LINES)
-                currentCoroutineContext().ensureActive()
-                if (!matches(page) || postRequest != readGeneration) return@launch
-                applyPane(page, after, agent.stateChangeSeq)
-                if (after.truncated) {
+                // One round trip plus a redraw is often slower than 700ms. Declaring uncertainty
+                // that fast turned ordinary successes into an amber warning and a confirmation
+                // ritual, so look once more before saying anything at all.
+                var after: PaneText? = null
+                for (wait in listOf(700L, 1600L)) {
+                    delay(wait)
+                    if (!matches(page) || !foreground) return@launch
+                    val postRequest = ++readGeneration
+                    loadJob?.cancel()
+                    val read = repository.readPane(agent, PANE_READ_LINES)
+                    currentCoroutineContext().ensureActive()
+                    if (!matches(page) || postRequest != readGeneration) return@launch
+                    applyPane(page, read, agent.stateChangeSeq)
+                    after = read
+                    if (read.truncated || !ApprovalPolicy.sameContext(fresh, ApprovalPolicy.evidence(read))) break
+                }
+                val settled = after
+                if (settled == null || settled.truncated) {
                     notice = ""
-                } else if (ApprovalPolicy.sameContext(fresh, ApprovalPolicy.evidence(after))) {
+                } else if (ApprovalPolicy.sameContext(fresh, ApprovalPolicy.evidence(settled))) {
                     notice = Str.get(R.string.vm_key_accepted_unchanged)
                 } else {
                     notice = ""
@@ -1404,7 +1452,14 @@ class AppViewModel(
                         message = if (id == null) Str.get(R.string.vm_host_added, config.label) else Str.get(R.string.vm_host_updated, config.label),
                     )
                 }
-                if (id != null) repository.connectHost(config.id)
+                if (id != null) {
+                    repository.connectHost(config.id)
+                } else {
+                    // Adding a machine is a means, not a destination. Landing back on an empty inbox
+                    // with a toast made the user hunt for the button that does the thing they came
+                    // for; the shell is the thing. First contact still stops at the fingerprint dialog.
+                    openTerminal(config.id, pushPage = false)
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (t: Throwable) {
@@ -1436,6 +1491,68 @@ class AppViewModel(
                 reconnecting.remove(hostId)
                 _ui.update { it.copy(detail = decorate(it.detail)) }
             }
+        }
+    }
+
+    /**
+     * Android kills backgrounded processes; the person comes back to the app they left, not to an
+     * empty inbox with a half-written reply gone. The Activity hands these codes to onSaveInstanceState
+     * and back on the next launch. Nothing remote is restored: hosts reconnect on their own.
+     */
+    fun pageTrail(): ArrayList<String> = ArrayList(
+        listOf(screenCode(tabRoot())) + pageStack.map(::screenCode) + screenCode(_ui.value.screen),
+    )
+
+    fun draftSnapshot(): String = _ui.value.detail.draft
+
+    /** Only ever applied to a fresh launch, never over a session the person is already using. */
+    fun restoreTrail(codes: List<String>, draft: String?) {
+        if (codes.size < 2 || pageStack.isNotEmpty() || _ui.value.screen != Screen.Inbox) return
+        val pages = codes.map(::screenFromCode)
+        if (pages.any { it == null }) return
+        val trail = pages.filterNotNull()
+        trailRoot = trail.first()
+        pageStack.addAll(trail.subList(1, trail.size - 1))
+        restoredDraft = draft?.takeIf { it.isNotBlank() }
+        when (val current = trail.last()) {
+            is Screen.Detail -> {
+                val split = current.agentKey.indexOf(':')
+                if (split > 0) {
+                    openPane(current.agentKey.substring(0, split), current.agentKey.substring(split + 1), pushPage = false)
+                } else {
+                    trailRoot = Screen.Inbox
+                    pageStack.clear()
+                }
+            }
+            is Screen.Terminal -> openTerminal(current.hostId, pushPage = false)
+            else -> _ui.update { it.copy(screen = current) }
+        }
+    }
+
+    private var restoredDraft: String? = null
+
+    private fun screenCode(screen: Screen): String = when (screen) {
+        Screen.Inbox -> "inbox"
+        Screen.Hosts -> "hosts"
+        Screen.Settings -> "settings"
+        is Screen.Detail -> "detail:" + screen.agentKey
+        is Screen.Structure -> "structure:" + screen.hostId
+        is Screen.Terminal -> "terminal:" + screen.hostId
+    }
+
+    private fun screenFromCode(code: String): Screen? {
+        val split = code.indexOf(':')
+        val head = if (split < 0) code else code.substring(0, split)
+        val tail = if (split < 0) "" else code.substring(split + 1)
+        if (split >= 0 && tail.isEmpty()) return null
+        return when (head) {
+            "inbox" -> Screen.Inbox
+            "hosts" -> Screen.Hosts
+            "settings" -> Screen.Settings
+            "detail" -> Screen.Detail(tail)
+            "structure" -> Screen.Structure(tail)
+            "terminal" -> Screen.Terminal(tail)
+            else -> null
         }
     }
 

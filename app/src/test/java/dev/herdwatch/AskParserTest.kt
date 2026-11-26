@@ -121,6 +121,18 @@ class AskParserTest {
     }
 
     @Test
+    fun `a session grant is not a standing grant`() {
+        // "For this session" ends with the session. Putting a red 确认长期授权 dialog in front of it
+        // trains the user to click through the one dialog that is supposed to mean something.
+        listOf("Yes, and allow it for this session", "是，本次会话内允许", "本会话内允许").forEach { label ->
+            val option = AskOption(label, emptyList(), AskKind.ALLOW)
+            assertEquals(ApprovalScope.SESSION, approvalScopeOf(option))
+            assertFalse(requiresStandingConfirmation(option))
+        }
+        assertTrue(requiresStandingConfirmation(AskOption("Yes, and don't ask again for this command", emptyList(), AskKind.ALLOW)))
+    }
+
+    @Test
     fun approvalScopeComesFromTheOptionsOwnWording() {
         fun option(label: String, kind: AskKind) = AskOption(label = label, keys = listOf("y"), kind = kind)
 

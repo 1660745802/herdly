@@ -8,8 +8,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OperationStateTest {
-    private fun evidence(text: String = "cat /safe") = ApprovalPolicy.evidence(
-        PaneText("$text\nProceed?\n1. Yes\n2. No", null, false),
+    private fun evidence(text: String = "cat /safe", truncated: Boolean = false) = ApprovalPolicy.evidence(
+        PaneText("$text\nProceed?\n1. Yes\n2. No", null, truncated),
     )
 
     @Test fun `per agent lock survives switching away and back`() {
@@ -43,14 +43,28 @@ class OperationStateTest {
         assertFalse(state.blocksApproval("a", evidence()))
     }
 
-    @Test fun `uncertain write needs explicit verification even with new evidence`() {
+    @Test fun `the screen moving on is the receipt, an unreadable screen is not`() {
         val state = OperationState()
         val record = state.begin("a")!!
         state.finish("a", record.id, "unknown", true, evidence())
         assertNull(state.begin("a"))
+        // Nothing changed yet: still unresolved.
         state.observe("a", evidence())
         assertNull(state.begin("a"))
+        // A screen we cannot read is not an answer either.
+        state.observe("a", evidence(truncated = true))
+        assertNull(state.begin("a"))
+        // The question we answered is gone. Making the user certify a result they can already see
+        // taught them that success looks like a problem.
         state.observe("a", evidence("cat /new"))
+        assertNotNull(state.begin("a"))
+    }
+
+    @Test fun `an unresolved write with no readable screen still needs a human check`() {
+        val state = OperationState()
+        val record = state.begin("a")!!
+        state.finish("a", record.id, "unknown", true, evidence())
+        state.observe("a", evidence(truncated = true))
         assertNull(state.begin("a"))
         state.verified("a")
         assertNotNull(state.begin("a"))

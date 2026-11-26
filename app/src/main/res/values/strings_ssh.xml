@@ -19,4 +19,5 @@
     <string name="ssh_network_down">网络不可用，等网络恢复会自动重连</string>
     <string name="ssh_challenge_unsupported">这台机器要求动态口令或二次验证，Herdly 目前只支持密码和密钥</string>
     <string name="ssh_challenge_not_password">这台机器要输入的不是密码（用户名、域或选项），Herdly 无法代答</string>
+    <string name="ssh_shell_refused">这台机器不给 shell：账号可能只允许执行命令，或被强制指定了命令。</string>
 </resources>

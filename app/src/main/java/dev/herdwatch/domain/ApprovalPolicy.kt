@@ -15,9 +15,32 @@ object ApprovalPolicy {
         pane, AskParser.parse(pane.text.lineSequence().toList().takeLast(90).joinToString("\n")),
     )
 
+    /**
+     * The question, its options and the command lines above them, byte for byte. Spinners, clocks
+     * and token counters live elsewhere on the screen and must not invalidate an approval.
+     */
+    private fun sameRegion(a: ApprovalEvidence, b: ApprovalEvidence): Boolean {
+        val left = a.ask?.region.orEmpty()
+        return left.isNotBlank() && left == b.ask?.region.orEmpty()
+    }
+
+    private fun revisionLostOrUnexplained(a: ApprovalEvidence, b: ApprovalEvidence): Boolean {
+        val had = (a.pane.revision ?: 0) > 0
+        val now = (b.pane.revision ?: 0) > 0
+        if (had && !now) return true
+        if (!had && now) return true
+        if (!had) return false
+        return a.pane.revision != b.pane.revision && !sameRegion(a, b)
+    }
+
+    private fun sameWholeScreen(a: ApprovalEvidence, b: ApprovalEvidence): Boolean =
+        a.pane.text.replace("\r\n", "\n").trimEnd() == b.pane.text.replace("\r\n", "\n").trimEnd()
+
     fun sameContext(a: ApprovalEvidence, b: ApprovalEvidence): Boolean =
         a.ask == b.ask && a.pane.truncated == b.pane.truncated &&
-            a.pane.text.replace("\r\n", "\n").trimEnd() == b.pane.text.replace("\r\n", "\n").trimEnd()
+            // With a located ask region, that region is the evidence. Without one (older parser
+            // output, hand-built evidence) fall back to the whole screen rather than guess.
+            (sameRegion(a, b) || sameWholeScreen(a, b))
 
     fun unavailable(evidence: ApprovalEvidence): String? = when {
         evidence.pane.truncated -> Str.get(R.string.policy_unavailable_truncated)
@@ -34,8 +57,9 @@ object ApprovalPolicy {
         unavailable(frozen) != null -> unavailable(frozen)
         unavailable(fresh) != null -> unavailable(fresh)
         // A valid revision becoming absent is also a loss of evidence, not equality.
-        ((frozen.pane.revision ?: 0) > 0 || (fresh.pane.revision ?: 0) > 0) &&
-            frozen.pane.revision != fresh.pane.revision -> Str.get(R.string.policy_revision_changed)
+        // Losing a revision is a loss of evidence, not equality. A revision that merely moved on
+        // while the question, its options and its command stayed byte-identical is a redraw.
+        revisionLostOrUnexplained(frozen, fresh) -> Str.get(R.string.policy_revision_changed)
         !sameContext(frozen, fresh) -> Str.get(R.string.policy_context_changed)
         else -> null
     }

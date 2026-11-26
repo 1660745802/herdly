@@ -59,6 +59,11 @@ fun HerdwatchRoot(vm: AppViewModel) {
     // service while the user is away, and returning must restart it. A background start is refused
     // by the platform, so only the visible transition starts the service; ON_STOP just leaves the
     // running one alone.
+    // Notifications are worth asking about only once there is a machine that could need you. Asking
+    // at first launch put a system dialog in front of an empty app that had nothing to notify about.
+    LaunchedEffect(hasHosts) {
+        if (hasHosts) (context as? dev.herdwatch.MainActivity)?.maybeAskNotificationPermission()
+    }
     LaunchedEffect(hasHosts, ui.repo.foreground) {
         if (!hasHosts) {
             runCatching { ConnectionService.stop(context) }
@@ -234,6 +239,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                                     onRenameTab = { id, name -> vm.renameTab(runtime.host.id, id, name) },
                                     onRenamePane = { id, name -> vm.renamePane(runtime.host.id, id, name) },
                                     onOpenAgent = { agent -> vm.openAgent(agent) },
+                                    onOpenPane = vm::openPane,
                                 )
                             }
                         }
@@ -273,6 +279,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onSendPrompt = { vm.sendPrompt(it) },
                             onSendKeys = vm::sendRawKeys,
                             onSendInput = vm::sendInput,
+                            onNextAttention = vm::openNextAttention,
                             onSendRawBytes = vm::sendRawBytes,
                             onStop = { vm.sendRawKeys(listOf("ctrl-c")) },
                             onChooseScreenRow = vm::chooseScreenRow,
@@ -291,6 +298,7 @@ fun HerdwatchRoot(vm: AppViewModel) {
                             onFontSize = vm::terminalFontSize,
                             onFollow = vm::terminalFollow,
                             onTrustFingerprint = vm::terminalTrustFingerprint,
+                            onEditHost = vm::editTerminalHost,
                         )
                     }
                 }

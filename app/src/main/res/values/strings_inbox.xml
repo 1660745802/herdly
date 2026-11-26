@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 收件箱：顶部标题栏 -->
-    <string name="inbox_subtitle_pocket">手机上的 Herdr 任务台</string>
+    <string name="inbox_subtitle_pocket">手机上的 SSH 终端</string>
     <!-- %1$s：待处理数短语；%2$s：agent 数短语。连接状态不在这里重复。 -->
 
     <!-- 收件箱：搜索 -->
@@ -25,7 +25,7 @@
     <!-- 收件箱：机器条 -->
     <string name="inbox_host_all">全部</string>
     <plurals name="inbox_host_waiting">
-        <item quantity="other">%1$d 等待</item>
+        <item quantity="other">%1$d 待处理</item>
     </plurals>
     <string name="inbox_host_online">在线</string>
     <string name="inbox_host_connecting">连接中</string>
@@ -53,11 +53,11 @@
     <string name="inbox_queue_empty">没有需要处理的任务</string>
 
     <!-- 收件箱：首次使用引导 -->
-    <string name="inbox_setup_title">把 Herdr 装进口袋</string>
-    <string name="inbox_setup_body">Herdly 不替你运行 Agent，只负责查看和批准。\n\n1. 主机装好 Herdr，手机能 SSH 登录\n2. 检查桥接是否可用\n3. 添加机器，任务页会列出每个 Agent</string>
+    <string name="inbox_setup_title">添加第一台机器</string>
+    <string name="inbox_setup_body">只需要 SSH 可达。添加机器后，在「机器」页打开终端。\n\n主机上能运行 herdr remote-api-bridge 的话，这里还会列出每个 Agent，供你查看和批准。</string>
     <string name="inbox_add_host">添加机器</string>
     <string name="inbox_copy_check_command">复制检查命令</string>
-    <string name="inbox_check_command_hint">在主机上运行上面那条命令，应输出 herdr-api-bridge-v1。</string>
+    <string name="inbox_check_command_hint">可选：只有装了 Herdr 的主机才需要。复制的命令是 herdr remote-api-bridge --check，应输出 herdr-api-bridge-v1。</string>
 
     <!-- 收件箱：Agent 行 -->
     <string name="inbox_stale_snapshot">快照待更新 · %1$s</string>
