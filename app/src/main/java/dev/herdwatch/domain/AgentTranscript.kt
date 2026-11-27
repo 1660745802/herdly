@@ -279,11 +279,34 @@ object AgentTranscript {
             if (yesNo.containsMatchIn(t)) { begin(APPROVAL, true, ln); i++; continue }
 
             val marker = markerRole(t)
-            if (marker != null) { begin(marker, true, ln); i++; continue }
+            if (marker != null) {
+                // A prompt echoed over several `>` lines is still one message; beginning a block per
+                // line turned one brief into a stack of identical-looking bubbles. Explicit markers
+                // (`You:`, `❯`, `user:`) are per-turn and still start their own block.
+                val quoteContinuation = marker == USER && t.startsWith(">") && curRole == USER &&
+                    curMarked && cur.firstOrNull()?.let { unpipe(it.norm).trimStart().startsWith(">") } == true
+                if (quoteContinuation) {
+                    cur.add(ln)
+                    ln.consumed = true
+                } else {
+                    begin(marker, true, ln)
+                }
+                i++
+                continue
+            }
 
             val indented = ln.norm.startsWith("  ")
             if (cur.isEmpty()) {
                 curRole = if (informational(t)) SYSTEM else ASSISTANT
+                curMarked = false
+                cur.add(ln)
+                ln.consumed = true
+            } else if (curRole == USER && structured(t)) {
+                // The quoted prompt is the user talking; the report underneath it is the answer.
+                // Gluing them together rendered a whole turn as one user bubble: no emphasis, no
+                // paragraph rhythm, and the reply owned by the wrong speaker.
+                flush()
+                curRole = ASSISTANT
                 curMarked = false
                 cur.add(ln)
                 ln.consumed = true
@@ -479,6 +502,15 @@ object AgentTranscript {
 
     private fun questionLike(t: String): Boolean =
         t.endsWith("?") || yesNo.containsMatchIn(t) || t.lowercase().contains("do you want")
+
+    /** A line that can only belong to a report: heading, bullet, bold lead-in or a fence. */
+    private fun structured(t: String): Boolean {
+        if (t.isEmpty()) return false
+        return t.startsWith("#") || t.startsWith("- ") || t.startsWith("* ") ||
+            t.startsWith("**") || t.startsWith("```") || numberedItem.matches(t.trim())
+    }
+
+    private val numberedItem = Regex("^\\d+[.)]\\s+\\S.*$")
 
     private fun markerRole(t: String): TranscriptRole? {
         if (t.isEmpty()) return null

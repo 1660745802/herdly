@@ -1494,17 +1494,13 @@ private fun TranscriptView(
     val colors = ds()
     val haptics = LocalHapticFeedback.current
     // A turn keeps its identity while its text grows, and keeps it when older turns are prepended.
-    // Position alone handed an open card's state to whatever slid into its slot; the text alone
-    // reset it on every poll. Role plus first line plus occurrence survives both.
-    val blockKeys = remember(blocks) {
-        val seen = HashMap<String, Int>()
-        blocks.map { block ->
-            val head = block.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(80).orEmpty()
-            val seed = "${block.role}:$head"
-            val nth = seen.getOrDefault(seed, 0)
-            seen[seed] = nth + 1
-            "$seed#$nth"
-        }
+    // Position alone handed an open card's state to whatever slid into its slot, and the text alone
+    // reset it on every poll — worse, this page reads a viewport: the block's FIRST line scrolls out
+    // of the pane buffer as the turn grows, so a key built from it changed every few seconds and
+    // every card the reader had opened snapped shut again. Order from the end plus role survives
+    // appends, prepends and rewrites.
+    val blockKeys = remember(blocks.size) {
+        blocks.indices.map { index -> "${blocks[index].role}:${blocks.lastIndex - index}" }
     }
     Column(
         modifier.fillMaxWidth().fillMaxHeight().verticalScroll(scroll)
@@ -1718,7 +1714,9 @@ private fun TranscriptBlockView(
                     .background(colors.accentWash)
                     .padding(horizontal = DsSpace.m, vertical = DsSpace.s),
             ) {
-                Text(block.text, style = prose, color = colors.text)
+                // The prompt echo arrives with its `>` marker; inside a bubble that marker is
+                // punctuation the reader did not type, so it goes.
+                Text(quoteWithoutMarker(block.text), style = prose, color = colors.text)
             }
         }
 
@@ -1873,7 +1871,7 @@ private val OPTION_LINE = Regex("^[^\\p{L}\\p{N}]*\\d+[.)]\\s+\\S.*$")
  * and a phone line holds about 30 of them.
  */
 private const val COLUMNS_PER_LINE = 30
-private const val COLLAPSED_COLUMNS = COLUMNS_PER_LINE * 12
+private const val COLLAPSED_COLUMNS = COLUMNS_PER_LINE * 18
 
 /**
  * Keeps whole paragraphs while they fit, and only cuts inside a paragraph when a single one is
@@ -1912,6 +1910,13 @@ internal fun foldToBudget(paragraphs: List<String>, budget: Int): Pair<List<Stri
     }
     return kept to false
 }
+
+/** Drops the `>` quote markers a TUI puts in front of an echoed prompt. */
+internal fun quoteWithoutMarker(text: String): String =
+    text.lines().joinToString("\n") { line ->
+        val t = line.trimStart()
+        if (t.startsWith("> ") || t == ">") line.trimStart().removePrefix(">").trimStart() else line
+    }.trim()
 
 internal fun visualWidth(text: String): Int {
     var width = 0
@@ -2063,34 +2068,26 @@ private fun ToolBlock(block: TranscriptBlock, roleLabel: String, stateKey: Strin
                 .padding(horizontal = DsSpace.m, vertical = DsSpace.s),
         ) {
             val preview = remember(block.text) { toolPreview(block.text) }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DsSpace.xs)) {
+            val count = block.text.lineSequence().count()
+            val label = pluralStringResource(R.plurals.agent_tool_lines, count, roleLabel, count)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(DsSpace.xs),
+            ) {
                 NeoIcon(NeoGlyph.Command, modifier = Modifier.size(14.dp), tint = colors.textSoft)
-                // A run of identical "tools · 3 lines" pills says nothing; the first line of what it
-                // ran does. The count stays, because it is the only clue about how much is hidden.
+                // Count and first line in ONE text: as two weighted children the preview used to run
+                // under the chevron and out of the card, and a wrapped title made the row two lines
+                // tall for a tool call nobody asked to read.
                 Text(
-                    pluralStringResource(
-                        R.plurals.agent_tool_lines,
-                        block.text.lineSequence().count(),
-                        roleLabel,
-                        block.text.lineSequence().count(),
-                    ),
-                    style = DsTypography.caption,
-                    color = colors.textSoft,
+                    if (preview != null && !expanded) "$label  $preview" else label,
+                    style = DsTypography.micro.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                    color = if (preview != null && !expanded) colors.textFaint else colors.textSoft,
                     maxLines = 1,
-                    modifier = Modifier.weight(1f, fill = false),
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                if (preview != null && !expanded) {
-                    Text(
-                        preview,
-                        style = DsTypography.micro.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                        color = colors.textFaint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(2f),
-                    )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
                 NeoIcon(
                     if (expanded) NeoGlyph.ChevronUp else NeoGlyph.ChevronDown,
                     modifier = Modifier.size(16.dp),
@@ -2406,7 +2403,7 @@ internal fun toolPreview(text: String): String? =
         .map { it.trim() }
         .filterNot { it.startsWith("```") }
         .firstOrNull { it.isNotEmpty() && it.any { ch -> ch.isLetterOrDigit() } }
-        ?.take(120)
+        ?.take(48)
 
 /**
  * Emphasis for a paragraph of agent prose: `code` becomes mono, **strong** becomes semibold.

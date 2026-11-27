@@ -5,6 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private val NEWLINE = "\n"
+
 class AgentTranscriptTest {
 
     private val realisticSnapshot = """
@@ -563,4 +565,28 @@ class AgentTranscriptTest {
         assertFalse("footer leaked: $all", all.contains("herdr-mobile"))
         assertFalse("footer leaked: $all", all.contains("↑1k"))
     }
+
+@Test
+fun `a quoted prompt that grows into a report is the answer, not the user`() {
+    val text = listOf(
+        "> 目标：单人+AI 开发、上架 Steam、争取爆款",
+        "> 约束：无团队；有 LLM + 图像模型",
+        "",
+        "## 方案 B：《找错》",
+        "- **一句话**：8 番出口 × AI 生成",
+        "- **核心循环**：观察场景 → 标记异常 → 判断对错",
+        "- **传播钩子**：AI 的瑕疵就是鬼",
+    ).joinToString(NEWLINE)
+    val t = AgentTranscript.parse(text)
+    // The brief stays the user's; the report under it is the answer, with its own structure.
+    assertEquals(TranscriptRole.USER, t.blocks.first().role)
+    assertTrue(t.blocks.any { it.role == TranscriptRole.ASSISTANT && it.text.contains("核心循环") })
+}
+
+@Test
+fun `a short quote stays the user's message`() {
+    val text = listOf("> run the tests", "", "All 348 tests passed.").joinToString(NEWLINE)
+    val t = AgentTranscript.parse(text)
+    assertEquals(TranscriptRole.USER, t.blocks.first().role)
+}
 }

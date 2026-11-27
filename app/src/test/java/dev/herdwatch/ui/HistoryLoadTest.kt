@@ -85,6 +85,37 @@ class HistoryLoadTest {
     }
 
     @Test
+    fun `a short first read never claims the buffer is exhausted`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val models = ViewModelStore()
+        try {
+            val host = HostConfig("h", "local", "localhost", user = "test", fingerprint = "SHA256:test")
+            val agent = agent()
+            val prefs = RepositoryPreferences().apply { store.save(listOf(host)) }
+            val base = FakeHostConnection(host, Snapshot("test", 1, listOf(agent), HerdStructure()))
+            val client = object : HostConnection by base {
+                override suspend fun readPane(paneId: String, lines: Int, source: String): PaneText =
+                    // A capped first read: far fewer lines than asked, and no truncation flag.
+                    PaneText("tail only", 1, false)
+            }
+            val repo = HerdRepository(prefs.store, { client }, backgroundScope, dispatcher)
+            val vm = AppViewModel(repo, PreferencesStore.inMemory())
+            models.put("vm", vm)
+            runCurrent()
+            vm.openAgent(agent)
+            runCurrent()
+            // Opening the page must not pre-empt the answer: the reader has not scrolled yet, and
+            // an "everything is here" line before the first scroll is the page calling the host's
+            // buffer exhausted on the strength of a read the reader never asked for.
+            assertFalse(vm.ui.value.detail.historyEnded)
+        } finally {
+            models.clear()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `a complete buffer ends history instead of asking again`() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)

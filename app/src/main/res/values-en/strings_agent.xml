@@ -120,7 +120,7 @@
     </plurals>
     <string name="agent_history_more">Load older content</string>
     <string name="agent_history_retry">Could not load more — tap to retry</string>
-    <string name="agent_history_end">The host no longer keeps older screen content</string>
+    <string name="agent_history_end">This pane keeps only its recent screen content; older lines have scrolled out of its buffer</string>
     <string name="agent_working_fresh">Working · updated %1$s s ago</string>
     <string name="agent_working_quiet">Still running · no output for %1$s s</string>
     <string name="agent_working_stalled">Nothing has changed for %1$s min</string>

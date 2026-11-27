@@ -70,7 +70,7 @@ BridgeCodec 映射 `blocked → WAITING`、`unknown → UNKNOWN`、`done → REV
 
 读取是静默的：`pane.read(recent_unwrapped, lines, format=ansi, strip_ansi=false)`。`lines` 从 `PANE_READ_LINES = 1200` 起步，上滑到顶按 `historyLines` 翻倍，直到 `truncated=false`。`ReadSource` 没有历史游标，"更早"只能请求更长的尾部，每次响应都是上一次的超集；所以唯一的天然终点是主机自己说"没有了"。`MAX_HISTORY_LINES = 1_000_000` 只是防溢出的护栏，不是产品上限 —— 早先把它压到 12k/20k 的理由是"更大的请求会超时"，那是传输问题，不该变成"历史只有这么多"的规则；超时就报超时，让读者决定要不要再试。读取失败保留旧原文并标注错误与过期状态。
 
-历史读取有三种结局，界面必须能区分：`truncated=false` 是主机真的没有更早的内容（顶部写「更早的屏幕内容服务端已经不留了」）；主机返回了 `truncated=true` 就继续翻倍；超时或读失败置 `historyFailed`，顶部出现可点的「读取更早内容 / 读取失败，点一下重试」。`historyFrontier` 记住最后一次**真正拿到**的宽度：失败后重试请求的是这个宽度，而不是更大的宽度——失败后继续加宽，放大的正是刚刚超时的那次请求。`TimeoutCancellationException` 也是 `CancellationException`，`loadPane` 必须先捕获它，否则重试提示永远不会出现。
+历史读取有三种结局，界面必须能区分：`truncated=false` 是主机真的没有更早的内容（顶部写「这块分屏只保留最近的屏幕内容，更早的已经滚出缓冲区」——那是分屏缓冲区的边界，不是主机丢数据）；主机返回了 `truncated=true` 就继续翻倍；超时或读失败置 `historyFailed`，顶部出现可点的「读取更早内容 / 读取失败，点一下重试」。`historyFrontier` 记住最后一次**真正拿到**的宽度：失败后重试请求的是这个宽度，而不是更大的宽度——失败后继续加宽，放大的正是刚刚超时的那次请求。`TimeoutCancellationException` 也是 `CancellationException`，`loadPane` 必须先捕获它，否则重试提示永远不会出现。
 
 两条渲染路径：整机终端走 `term/VtScreen.kt`（真 VT 解析：备用屏幕、SGR、括号粘贴、OSC 标题、BEL），分屏走 `ui/TerminalDump.kt`（按列对齐的等宽网格，默认自动换行——快照没有横向滚动，不换行等于丢掉右半边）。`ui/ContrastColor.kt` 把远端假设为浅底终端的墨色提到深底可读。审批证据、复制与核对始终用原始文本；复制整屏只做去 ANSI，不做压缩。
 

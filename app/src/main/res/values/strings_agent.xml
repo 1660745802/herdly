@@ -121,7 +121,7 @@
     </plurals>
     <string name="agent_history_more">读取更早内容</string>
     <string name="agent_history_retry">读取失败，点一下重试</string>
-    <string name="agent_history_end">更早的屏幕内容服务端已经不留了</string>
+    <string name="agent_history_end">这块分屏只保留最近的屏幕内容，更早的已经滚出缓冲区</string>
     <string name="agent_working_fresh">正在输出 · %1$s 秒前有更新</string>
     <string name="agent_working_quiet">仍在执行 · 已 %1$s 秒没有新输出</string>
     <string name="agent_working_stalled">已 %1$s 分钟没有任何变化</string>

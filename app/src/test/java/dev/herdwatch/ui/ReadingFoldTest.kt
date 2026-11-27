@@ -10,6 +10,8 @@ import org.junit.Test
  * The reading budget must be honest: what is folded has to be counted the way the screen wraps it,
  * and a paragraph cut by the budget must end at a boundary a person would stop at.
  */
+private val NEWLINE = "\n"
+
 class ReadingFoldTest {
 
     @Test
@@ -105,4 +107,11 @@ class ReadingFoldTest {
         assertTrue(out.endsWith("Then the build passed."))
         assertEquals(1, Regex("The literal newline").findAll(out).count())
     }
+
+@Test
+fun `the quote marker a tui adds is not part of the message`() {
+    assertEquals(listOf("run the tests", "done").joinToString(NEWLINE), quoteWithoutMarker(listOf("> run the tests", "> done").joinToString(NEWLINE)))
+    // A prompt that legitimately starts with an arrow keeps it.
+    assertEquals("-> not a quote", quoteWithoutMarker("-> not a quote"))
+}
 }
